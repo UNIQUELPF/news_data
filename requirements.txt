@@ -1,0 +1,10 @@
+scrapy
+scrapy-playwright
+scrapy-redis
+psycopg2-binary
+beautifulsoup4
+feedparser
+curl_cffi
+dateparser==1.2.0
+playwright-stealth==1.0.6
+jdatetime

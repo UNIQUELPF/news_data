@@ -1,0 +1,48 @@
+services:
+  crawler:
+    build: .
+    container_name: data_collection_crawler
+    depends_on:
+      - postgres
+      - redis
+    shm_size: '2gb'
+    # 挂载卷方便开发时同步代码
+    volumes:
+      - .:/app
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+
+  postgres:
+    image: postgres:15
+    container_name: scrapy_postgres
+    environment:
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: scrapy_redis
+    ports:
+      - "6379:6379"
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: scrapy_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      TZ: Asia/Shanghai
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
