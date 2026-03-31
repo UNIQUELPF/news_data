@@ -1,9 +1,11 @@
+import io
 from datetime import datetime
 
 import dateparser
 import psycopg2
 import scrapy
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
 
 from news_scraper.items import NewsItem
 
@@ -98,19 +100,24 @@ class AlgeriaCosobSpider(scrapy.Spider):
             yield scrapy.Request(url, callback=self.parse_listing)
 
     def parse_listing(self, response):
-        article_links = response.css("article a::attr(href), .rtin-item a::attr(href), .entry-title a::attr(href)").getall()
+        article_links = response.css("article a[href], .rtin-item a[href], .entry-title a[href]")
 
-        for href in article_links:
+        for link in article_links:
+            href = link.attrib.get("href")
+            if not href:
+                continue
             full_url = response.urljoin(href)
+            title = self._clean_text(link.xpath("normalize-space()").get()) or full_url.rsplit("/", 1)[-1]
             if (
                 full_url in self.seen_urls
                 or "/category/" in full_url
                 or "/author/" in full_url
-                or "/wp-content/uploads/" in full_url
-                or full_url.lower().endswith(".pdf")
             ):
                 continue
             self.seen_urls.add(full_url)
+            if full_url.lower().endswith(".pdf"):
+                yield scrapy.Request(full_url, callback=self.parse_pdf, cb_kwargs={"title": title})
+                continue
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         if self.reached_cutoff:
@@ -135,6 +142,27 @@ class AlgeriaCosobSpider(scrapy.Spider):
 
         content = self._extract_content(response, title)
         if not content:
+            return
+
+        item = NewsItem()
+        item["url"] = response.url
+        item["title"] = title
+        item["content"] = content
+        item["publish_time"] = publish_time or datetime.now()
+        item["author"] = "COSOB"
+        item["language"] = "fr"
+        item["section"] = "actualites"
+        item["scrape_time"] = datetime.now()
+        yield item
+
+    def parse_pdf(self, response, title):
+        content = self._extract_pdf_text(response.body)
+        if not content:
+            content = title
+
+        publish_time = self._parse_datetime(title) or self._parse_datetime(response.url)
+        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            self.reached_cutoff = True
             return
 
         item = NewsItem()
@@ -185,4 +213,26 @@ class AlgeriaCosobSpider(scrapy.Spider):
     def _clean_text(self, value):
         if not value:
             return ""
-        return " ".join(str(value).split()).strip()
+        return " ".join(str(value).replace("\x00", " ").split()).strip()
+
+    def _extract_pdf_text(self, pdf_bytes, max_pages=4):
+        if not pdf_bytes:
+            return ""
+
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+        except Exception as exc:
+            self.logger.warning(f"PDF parse failed for {self.name}: {exc}")
+            return ""
+
+        parts = []
+        total_pages = min(len(reader.pages), max_pages)
+        for page in reader.pages[:total_pages]:
+            try:
+                text = self._clean_text(page.extract_text() or "")
+            except Exception:
+                text = ""
+            if text:
+                parts.append(text)
+
+        return "\n\n".join(parts)

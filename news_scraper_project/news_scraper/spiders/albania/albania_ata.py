@@ -20,9 +20,8 @@ class AlbaniaAtaSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(AlbaniaAtaSpider, cls).from_crawler(crawler, *args, **kwargs)
-        # For incremental crawl, get the latest date from DB if needed
-        # dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table)
-        # spider.cutoff_date = dynamic_cutoff
+        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.cutoff_date = max(dynamic_cutoff, datetime(2026, 1, 1)) if dynamic_cutoff else datetime(2026, 1, 1)
         return spider
 
     def start_requests(self):

@@ -1,5 +1,7 @@
+import re
+from datetime import datetime, timedelta
+
 import scrapy
-from datetime import datetime
 from news_scraper.items import NewsItem
 from news_scraper.utils import get_dynamic_cutoff
 
@@ -18,37 +20,55 @@ class AlbaniaMonitorSpider(scrapy.Spider):
 
     def parse(self, response):
         """Parses the news list page."""
-        # Find all article links on the listing page
-        # They are usually within h3 or h2 with class d-block
-        article_links = response.css('h3 a.d-block::attr(href), h2 a.d-block::attr(href)').getall()
-        # Remove duplicates
-        article_links = list(set(article_links))
-        
-        self.logger.info(f"Found {len(article_links)} article links on {response.url}")
+        article_nodes = response.css('h3 a.d-block, h2 a.d-block')
+        self.logger.info(f"Found {len(article_nodes)} article links on {response.url}")
 
-        for href in article_links:
+        page_urls = set()
+        recent_found = False
+        unknown_date_found = False
+        old_date_found = False
+
+        for link in article_nodes:
+            href = link.attrib.get('href')
+            if not href:
+                continue
+            full_url = response.urljoin(href)
+            if full_url in page_urls:
+                continue
+            page_urls.add(full_url)
+
+            card_root = link.xpath("./ancestor::*[self::article or self::div[contains(@class,'jeg_post') or contains(@class,'post')]][1]")
+            listing_text = " ".join(card_root.xpath(".//text()").getall()) if card_root else ""
+            listing_publish_time = self._parse_listing_datetime(listing_text)
+
+            if listing_publish_time:
+                if listing_publish_time < self.CUTOFF_DATE:
+                    old_date_found = True
+                    continue
+                recent_found = True
+            else:
+                unknown_date_found = True
+
             yield scrapy.Request(
-                url=response.urljoin(href),
+                url=full_url,
                 callback=self.parse_detail,
-                # Pass a flag to check cutoff inside the detail page
-                meta={'check_cutoff': True}
+                meta={'listing_publish_time': listing_publish_time}
             )
 
-        # Pagination
         next_page = response.css('.pagination li.next a::attr(href)').get()
-        if next_page:
+        if next_page and (recent_found or unknown_date_found):
             yield response.follow(next_page, callback=self.parse)
+        elif old_date_found and not recent_found and not unknown_date_found:
+            self.logger.info(f"All visible Monitor items are older than cutoff on {response.url}. Stopping pagination.")
 
     def parse_detail(self, response):
         """Parses the news detail page and checks cutoff."""
-        # Extract precise publication date
         date_str = response.css('meta[property="article:published_time"]::attr(content)').get()
-        publish_time = None
+        publish_time = response.meta.get('listing_publish_time')
         
-        if date_str:
+        if not publish_time and date_str:
             try:
-                # Example: 2026-03-07T21:08:00+00:00
-                date_str = date_str.split('+')[0] # Remove timezone for simplicity
+                date_str = date_str.split('+')[0]
                 publish_time = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
             except Exception as e:
                 self.logger.error(f"Failed to parse date {date_str} on {response.url}: {e}")
@@ -82,3 +102,30 @@ class AlbaniaMonitorSpider(scrapy.Spider):
         
         if item['content'] and item['title']:
             yield item
+
+    def _parse_listing_datetime(self, text):
+        if not text:
+            return None
+
+        normalized = " ".join(text.split()).lower()
+        now = datetime.now().replace(second=0, microsecond=0)
+        patterns = [
+            (r'(\d+)\s+minutes?\s+m[ëe]\s+par[ëe]', 'minutes'),
+            (r'(\d+)\s+hours?\s+m[ëe]\s+par[ëe]', 'hours'),
+            (r'(\d+)\s+days?\s+m[ëe]\s+par[ëe]', 'days'),
+            (r'(\d+)\s+weeks?\s+m[ëe]\s+par[ëe]', 'weeks'),
+        ]
+        for pattern, unit in patterns:
+            match = re.search(pattern, normalized)
+            if not match:
+                continue
+            value = int(match.group(1))
+            if unit == 'minutes':
+                return now - timedelta(minutes=value)
+            if unit == 'hours':
+                return now - timedelta(hours=value)
+            if unit == 'days':
+                return now - timedelta(days=value)
+            if unit == 'weeks':
+                return now - timedelta(weeks=value)
+        return None
