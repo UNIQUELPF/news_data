@@ -1,0 +1,91 @@
+import re
+
+from bs4 import BeautifulSoup
+
+import scrapy
+
+from news_scraper.spiders.germany.base import GermanyBaseSpider
+
+
+class GermanyBafinSpider(GermanyBaseSpider):
+    name = "germany_bafin"
+    allowed_domains = ["bafin.de", "www.bafin.de"]
+    target_table = "deu_bafin"
+    start_urls = ["https://www.bafin.de/EN/DieBaFin/Presse/03_Pressemitteilungen/liste_pressemitteilungen_node_en.html"]
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield scrapy.Request(url, callback=self.parse_listing)
+
+    def parse_listing(self, response):
+        html = self._fetch_html(self.start_urls[0])
+        soup = BeautifulSoup(html, "html.parser")
+        for link in soup.select("a[href]"):
+            href = link.get("href") or ""
+            if "SharedDocs/Veroeffentlichungen/EN/Pressemitteilung/" not in href:
+                continue
+            full_url = response.urljoin(href.split(";")[0].split("?")[0])
+            if full_url in self.seen_urls:
+                continue
+            year_match = re.search(r"/(20\d{2})/", full_url)
+            if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
+                continue
+            self.seen_urls.add(full_url)
+            try:
+                detail_html = self._fetch_html(full_url)
+            except Exception:
+                continue
+            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+            if item:
+                yield item
+
+    def parse_detail(self, response):
+        title = self._clean_text(
+            response.xpath("//meta[@property='og:title']/@content").get()
+            or response.css("h1::text").get()
+            or response.css("title::text").get()
+        )
+        if not title:
+            return
+
+        publish_time = self._parse_datetime(
+            self._clean_text(
+                response.xpath("//time/@datetime").get()
+                or " ".join(response.xpath("//div[@id='content']//text()").getall()[:80])
+            ),
+            languages=["de", "en"],
+        )
+        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            return
+
+        content = self._extract_content(response)
+        if not content:
+            return
+
+        yield self._build_item(
+            response=response,
+            title=title,
+            content=content,
+            publish_time=publish_time,
+            author="BaFin",
+            language="en",
+            section="financial_regulation",
+        )
+
+    def _extract_content(self, response):
+        soup = BeautifulSoup(response.text, "html.parser")
+        root = soup.select_one("#content .wrapperText") or soup.select_one("#content") or soup.select_one("main")
+        if not root:
+            return ""
+        for unwanted in root.select("script, style, nav, footer, header, aside, form, .wrapperRating, .sectionRelated"):
+            unwanted.decompose()
+        parts = []
+        for node in root.find_all(["p", "li"], recursive=True):
+            text = self._clean_text(node.get_text(" ", strip=True))
+            if not text or len(text) < 35:
+                continue
+            if text.startswith("Did you find this article helpful") or text.startswith("Mandatory field"):
+                continue
+            if text not in parts:
+                parts.append(text)
+        return "\n\n".join(parts)
