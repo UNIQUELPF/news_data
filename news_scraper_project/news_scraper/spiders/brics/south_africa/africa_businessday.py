@@ -1,3 +1,5 @@
+# 南非africa businessday爬虫，负责抓取对应站点、机构或栏目内容。
+
 import scrapy
 from datetime import datetime, timedelta
 import psycopg2

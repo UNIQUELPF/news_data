@@ -1,3 +1,5 @@
+# 哈萨克斯坦informburo spider爬虫，负责抓取对应站点、机构或栏目内容。
+
 import scrapy
 from news_scraper.items import InformburoItem
 from datetime import datetime

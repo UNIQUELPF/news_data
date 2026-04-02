@@ -1,3 +1,5 @@
+# 印度economic times爬虫，负责抓取对应站点、机构或栏目内容。
+
 import scrapy
 from datetime import datetime
 from news_scraper.items import NewsItem

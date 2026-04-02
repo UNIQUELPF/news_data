@@ -1,3 +1,5 @@
+# 中国caixin spider爬虫，负责抓取对应站点、机构或栏目内容。
+
 import scrapy
 from scrapy_playwright.page import PageMethod
 from news_scraper.items import CaixinHeadlineItem, CaixinMarketIndexItem

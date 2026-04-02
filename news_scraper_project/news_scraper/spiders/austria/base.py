@@ -1,3 +1,5 @@
+# 奥地利国家通用基类，负责建表、增量时间和公共抓取方法。
+
 from datetime import datetime
 
 import dateparser

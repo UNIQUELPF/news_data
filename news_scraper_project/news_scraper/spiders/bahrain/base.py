@@ -1,3 +1,5 @@
+# 巴林国家通用基类，负责建表、增量时间和公共抓取方法。
+
 import io
 from datetime import datetime
 
