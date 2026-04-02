@@ -38,6 +38,7 @@ class CurlCffiMiddleware:
                 spider.logger.debug(f"Intercepting {request.url} via curl_cffi")
                 headers = {k.decode('utf-8'): v[0].decode('utf-8') for k, v in request.headers.items()}
                 response = curl_requests.get(request.url, impersonate='chrome120', timeout=30, headers=headers)
+                spider.logger.debug(f"CurlCffi: Successfully fetched {request.url} (Status: {response.status_code})")
                 return HtmlResponse(
                     url=request.url,
                     status=response.status_code,

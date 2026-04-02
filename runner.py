@@ -10,11 +10,35 @@ def run_project_spiders(project_dir):
     spider_loader = SpiderLoader(settings)
     spiders = spider_loader.list()
     
-    print(f"[{datetime.now()}] Found {len(spiders)} spiders in {project_dir}: {spiders}")
+    # 优先级排序逻辑：定义绿色国家的优先级
+    # 数值越小，优先级越高。美国(usa)设为最高。
+    priority_map = {
+        'usa_': 0,
+        'jp_': 0.5,
+        'ng_': 1,
+        'pt_': 2,
+        'mexico_': 3,
+        'mm_': 4,
+        'malaysia_': 5,
+        'lebanon_': 6,
+        'luxembourg_': 7,
+        'jp_': 8
+    }
+    
+    def get_priority(spider_name):
+        for prefix, priority in priority_map.items():
+            if spider_name.startswith(prefix):
+                return priority
+        return 99 # 非重点国家排在最后
+    
+    # 根据优先级和名称进行排序
+    spiders.sort(key=lambda x: (get_priority(x), x))
+    
+    print(f"[{datetime.now()}] Found {len(spiders)} spiders in {project_dir}. Sorted by priority.")
     for spider in spiders:
         print(f"[{datetime.now()}] Starting spider: {spider}")
         try:
-            # 增量爬取全放行，如需强制全量需要修改此处的参数
+            # 增量爬取全放行
             subprocess.run(["scrapy", "crawl", spider], check=True)
             print(f"[{datetime.now()}] Finished spider: {spider}")
         except subprocess.CalledProcessError as e:

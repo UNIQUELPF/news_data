@@ -2,22 +2,10 @@ BOT_NAME = 'news_scraper'
 
 SPIDER_MODULES = [
     'news_scraper.spiders',
-    'news_scraper.spiders.serbia',
-    'news_scraper.spiders.azerbaijan',
-    'news_scraper.spiders.albania',
-    'news_scraper.spiders.kazakhstan',
-    'news_scraper.spiders.brics.china',
-    'news_scraper.spiders.brics.russia',
-    'news_scraper.spiders.brics.india',
-    'news_scraper.spiders.brics.brazil',
-    'news_scraper.spiders.brics.south_africa',
-    'news_scraper.spiders.brics.egypt',
-    'news_scraper.spiders.brics.ethiopia',
-    'news_scraper.spiders.brics.iran',
-    'news_scraper.spiders.brics.uae',
-    'news_scraper.spiders.brics.saudi_arabia',
-    'news_scraper.spiders.brics.indonesia',
 ]
+
+
+
 NEWSPIDER_MODULE = 'news_scraper.spiders'
 
 ROBOTSTXT_OBEY = False
@@ -60,3 +48,9 @@ PLAYWRIGHT_LAUNCH_ARGS = [
     "--disable-dev-shm-usage",
     "--no-sandbox",
 ]
+
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
+

@@ -12,6 +12,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app/news_scraper_project
 
   postgres:
     image: postgres:15
