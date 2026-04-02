@@ -1,3 +1,5 @@
+import os
+
 BOT_NAME = 'news_scraper'
 
 SPIDER_MODULES = [
@@ -22,11 +24,11 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 8.0
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 
 POSTGRES_SETTINGS = {
-    'dbname': 'scrapy_db',
-    'user': 'your_user',
-    'password': 'your_password',
-    'host': 'postgres',
-    'port': 5432
+    'dbname': os.getenv('POSTGRES_DB', 'scrapy_db'),
+    'user': os.getenv('POSTGRES_USER', 'your_user'),
+    'password': os.getenv('POSTGRES_PASSWORD', 'your_password'),
+    'host': os.getenv('POSTGRES_HOST', 'localhost'),
+    'port': int(os.getenv('POSTGRES_PORT', '5433'))
 }
 
 ITEM_PIPELINES = {

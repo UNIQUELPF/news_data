@@ -4,11 +4,18 @@ from scrapy.utils.project import get_project_settings
 from scrapy.spiderloader import SpiderLoader
 from datetime import datetime
 
+def build_scrapy_env(project_dir):
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = project_dir if not pythonpath else os.pathsep.join([project_dir, pythonpath])
+    return env
+
 def run_project_spiders(project_dir):
     os.chdir(project_dir)
     settings = get_project_settings()
     spider_loader = SpiderLoader(settings)
     spiders = spider_loader.list()
+    env = build_scrapy_env(project_dir)
     
     # 优先级排序逻辑：定义绿色国家的优先级
     # 数值越小，优先级越高。美国(usa)设为最高。
@@ -38,8 +45,8 @@ def run_project_spiders(project_dir):
     for spider in spiders:
         print(f"[{datetime.now()}] Starting spider: {spider}")
         try:
-            # 增量爬取全放行
-            subprocess.run(["scrapy", "crawl", spider], check=True)
+            # 增量爬取全放行，如需强制全量开启则在 list 或循环中注入 start_date 参数
+            subprocess.run(["scrapy", "crawl", spider], check=True, cwd=project_dir, env=env)
             print(f"[{datetime.now()}] Finished spider: {spider}")
         except subprocess.CalledProcessError as e:
             print(f"[{datetime.now()}] Error running spider {spider}: {e}")

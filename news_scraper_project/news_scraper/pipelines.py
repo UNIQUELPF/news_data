@@ -5,6 +5,7 @@ class PostgresPipeline:
     def __init__(self):
         self.connection = None
         self.cursor = None
+        self._ensured_tables = set()
 
     def open_spider(self, spider):
         settings = spider.settings.get('POSTGRES_SETTINGS')
@@ -38,36 +39,90 @@ class PostgresPipeline:
                 return item
 
         try:
+            self._ensure_table(table_name)
+            url = self._sanitize_value(item.get('url'))
+            title = self._sanitize_value(item.get('title'))
+            content = self._sanitize_value(item.get('content'))
+            author = self._sanitize_value(item.get('author'))
+            language = self._sanitize_value(item.get('language'))
+            section = self._sanitize_value(item.get('section'))
+
             # Check if item has a 'section' field (e.g. Economic Times spider)
-            if 'section' in item and item.get('section'):
+            if section:
                 self.cursor.execute(
-                    f"INSERT INTO {table_name} (url, title, content, publish_time, author, language, section) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (url) DO NOTHING",
+                    f"""
+                    INSERT INTO {table_name} (url, title, content, publish_time, author, language, section)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (url) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        content = EXCLUDED.content,
+                        publish_time = COALESCE(EXCLUDED.publish_time, {table_name}.publish_time),
+                        author = EXCLUDED.author,
+                        language = EXCLUDED.language,
+                        section = EXCLUDED.section
+                    """,
                     (
-                        item['url'],
-                        item['title'],
-                        item['content'],
+                        url,
+                        title,
+                        content,
                         item['publish_time'],
-                        item['author'],
-                        item['language'],
-                        item['section']
+                        author,
+                        language,
+                        section
                     )
                 )
             else:
                 self.cursor.execute(
-                    f"INSERT INTO {table_name} (url, title, content, publish_time, author, language) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (url) DO NOTHING",
+                    f"""
+                    INSERT INTO {table_name} (url, title, content, publish_time, author, language)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (url) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        content = EXCLUDED.content,
+                        publish_time = COALESCE(EXCLUDED.publish_time, {table_name}.publish_time),
+                        author = EXCLUDED.author,
+                        language = EXCLUDED.language
+                    """,
                     (
-                        item['url'],
-                        item['title'],
-                        item['content'],
+                        url,
+                        title,
+                        content,
                         item['publish_time'],
-                        item['author'],
-                        item['language']
+                        author,
+                        language
                     )
                 )
             self.connection.commit()
             if self.cursor.rowcount == 1:
-                spider.logger.info(f"Saved to DB: {item['url']}")
+                spider.logger.info(f"Saved to DB: {url}")
         except Exception as e:
             spider.logger.error(f"Error saving to DB: {e}")
             self.connection.rollback()
         return item
+
+    def _ensure_table(self, table_name):
+        if table_name in self._ensured_tables:
+            return
+
+        self.cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id SERIAL PRIMARY KEY,
+                url TEXT UNIQUE NOT NULL,
+                title TEXT,
+                content TEXT,
+                publish_time TIMESTAMP,
+                author TEXT,
+                language TEXT,
+                section TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        self.connection.commit()
+        self._ensured_tables.add(table_name)
+
+    def _sanitize_value(self, value):
+        if value is None:
+            return None
+        return str(value).replace("\x00", " ").strip()
