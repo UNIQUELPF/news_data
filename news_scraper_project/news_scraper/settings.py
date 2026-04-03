@@ -4,10 +4,45 @@ BOT_NAME = 'news_scraper'
 
 SPIDER_MODULES = [
     'news_scraper.spiders',
+    'news_scraper.spiders.serbia',
+    'news_scraper.spiders.azerbaijan',
+    'news_scraper.spiders.albania',
+    'news_scraper.spiders.algeria',
+    'news_scraper.spiders.argentina',
+    'news_scraper.spiders.austria',
+    'news_scraper.spiders.australia',
+    'news_scraper.spiders.belgium',
+    'news_scraper.spiders.denmark',
+    'news_scraper.spiders.france',
+    'news_scraper.spiders.germany',
+    'news_scraper.spiders.finland',
+    'news_scraper.spiders.canada',
+    'news_scraper.spiders.cambodia',
+    'news_scraper.spiders.kyrgyzstan',
+    'news_scraper.spiders.netherlands',
+    'news_scraper.spiders.korea',
+    'news_scraper.spiders.timor_leste',
+    'news_scraper.spiders.qatar',
+    'news_scraper.spiders.kuwait',
+    'news_scraper.spiders.laos',
+    'news_scraper.spiders.bahrain',
+    'news_scraper.spiders.pakistan',
+    'news_scraper.spiders.ireland',
+    'news_scraper.spiders.oman',
+    'news_scraper.spiders.philippines',
+    'news_scraper.spiders.kazakhstan',
+    'news_scraper.spiders.brics.china',
+    'news_scraper.spiders.brics.russia',
+    'news_scraper.spiders.brics.india',
+    'news_scraper.spiders.brics.brazil',
+    'news_scraper.spiders.brics.south_africa',
+    'news_scraper.spiders.brics.egypt',
+    'news_scraper.spiders.brics.ethiopia',
+    'news_scraper.spiders.brics.iran',
+    'news_scraper.spiders.brics.uae',
+    'news_scraper.spiders.brics.saudi_arabia',
+    'news_scraper.spiders.brics.indonesia',
 ]
-
-
-
 NEWSPIDER_MODULE = 'news_scraper.spiders'
 
 ROBOTSTXT_OBEY = False
@@ -55,4 +90,3 @@ DOWNLOAD_HANDLERS = {
     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
-
