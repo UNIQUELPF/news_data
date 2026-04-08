@@ -2,9 +2,18 @@ import os
 
 BOT_NAME = 'news_scraper'
 
+# Dynamically discover all spider sub-packages to build SPIDER_MODULES
+spider_base_dir = os.path.join(os.path.dirname(__file__), 'spiders')
+sub_modules = [
+    f'news_scraper.spiders.{d}' 
+    for d in os.listdir(spider_base_dir) 
+    if os.path.isdir(os.path.join(spider_base_dir, d)) and d != '__pycache__'
+]
+
 SPIDER_MODULES = [
     'news_scraper.spiders',
-]
+] + sub_modules
+
 
 
 
@@ -27,8 +36,8 @@ POSTGRES_SETTINGS = {
     'dbname': os.getenv('POSTGRES_DB', 'scrapy_db'),
     'user': os.getenv('POSTGRES_USER', 'your_user'),
     'password': os.getenv('POSTGRES_PASSWORD', 'your_password'),
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'port': int(os.getenv('POSTGRES_PORT', '5433'))
+    'host': os.getenv('POSTGRES_HOST', 'postgres'),
+    'port': int(os.getenv('POSTGRES_PORT', '5432'))
 }
 
 ITEM_PIPELINES = {
