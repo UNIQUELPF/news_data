@@ -331,3 +331,18 @@
   - `name`: `kyrgyzstan_gov`
   - `target_table`: `kgz_gov`
   - 说明：抓取吉尔吉斯斯坦政府英文新闻和新闻发布。
+
+## 老挝（laos）
+
+| 文件 | name | target_table | 说明 |
+| --- | --- | --- | --- |
+| base.py |  |  | 老挝国家通用基类，负责建表、增量时间和公共抓取方法。 |
+| laos_bol.py | laos_bol | lao_bol | 老挝中央银行爬虫，抓取英文公告和 PDF 材料。 |
+| laos_kpl.py | laos_kpl | lao_kpl | 老挝通讯社爬虫，抓取英文经济与政府新闻。 |
+| laos_mof.py | laos_mof | lao_mof | 老挝财政部爬虫，抓取财政部新闻和公告。 |
+| laos_laotiantimes.py | laos_laotiantimes | lao_laotiantimes | 老挝时报爬虫，抓取英文商业和经济新闻。 |
+## 老挝补充
+
+| 文件 | name | target_table | 说明 |
+| --- | --- | --- | --- |
+| laos_lsb.py | laos_lsb | lao_lsb | 老挝统计局爬虫，抓取统计局文章与统计新闻。|

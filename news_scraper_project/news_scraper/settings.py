@@ -2,20 +2,22 @@ import os
 
 BOT_NAME = 'news_scraper'
 
-# Dynamically discover all spider sub-packages to build SPIDER_MODULES
+# Dynamically discover all spider sub-packages (including nested ones like brics/)
 spider_base_dir = os.path.join(os.path.dirname(__file__), 'spiders')
-sub_modules = [
-    f'news_scraper.spiders.{d}' 
-    for d in os.listdir(spider_base_dir) 
-    if os.path.isdir(os.path.join(spider_base_dir, d)) and d != '__pycache__'
-]
 
-SPIDER_MODULES = [
-    'news_scraper.spiders',
-] + sub_modules
+def _find_spider_modules(base_dir, base_pkg):
+    """Recursively find all spider sub-packages."""
+    modules = []
+    for item in os.listdir(base_dir):
+        item_path = os.path.join(base_dir, item)
+        if os.path.isdir(item_path) and item != '__pycache__':
+            pkg = f'{base_pkg}.{item}'
+            modules.append(pkg)
+            # Also check one level deeper (e.g. brics/china)
+            modules.extend(_find_spider_modules(item_path, pkg))
+    return modules
 
-
-
+SPIDER_MODULES = ['news_scraper.spiders'] + _find_spider_modules(spider_base_dir, 'news_scraper.spiders')
 
 NEWSPIDER_MODULE = 'news_scraper.spiders'
 
@@ -64,4 +66,3 @@ DOWNLOAD_HANDLERS = {
     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
-
