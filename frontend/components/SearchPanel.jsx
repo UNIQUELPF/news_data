@@ -41,21 +41,23 @@ export default function SearchPanel({
         ) : (
           <div /> /* invisible spacer for space-between flex */
         )}
-        <div className="search-input-shell compact-search">
-          <span className="search-leading">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </span>
-          <input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') onSearch() }}
-            placeholder="搜索标题、企业、国别..."
-          />
-          <button className="search-submit compact-submit" onClick={onSearch}>→</button>
-        </div>
+        {!isDetailMode && (
+          <div className="search-input-shell compact-search">
+            <span className="search-leading">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </span>
+            <input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') onSearch() }}
+              placeholder="搜索标题、企业、关键词..."
+            />
+            <button className="search-submit compact-submit" onClick={onSearch}>→</button>
+          </div>
+        )}
       </div>
       {!isDetailMode && (
         <div className="filters-bar no-border">

@@ -628,20 +628,7 @@ tbody tr:hover {
   background: #fcfdff;
 }
 
-tbody tr:nth-child(6n + 2) .category-badge {
-  background: #e8efff;
-  color: #3d63cf;
-}
-
-tbody tr:nth-child(6n + 3) .category-badge {
-  background: #fff5d9;
-  color: #9a6b00;
-}
-
-tbody tr:nth-child(6n + 4) .category-badge {
-  background: #fde8e8;
-  color: #c24141;
-}
+/* 固定状态颜色映射（如需要可在此扩展） */
 
 .source-link {
   color: var(--title-blue);

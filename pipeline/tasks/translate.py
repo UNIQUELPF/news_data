@@ -261,8 +261,18 @@ def translate_article(article_id: int, target_language: str = "zh-CN", parent_ta
                 translated.get("content_translated"),
                 f"openai-compatible:{get_translation_model()}",
             )
-            # Write back extracted category and involved companies to articles table
+            # 1. 优先尝试从 LLM 提取的分类中归一化
             extracted_category = normalized_category or None
+            
+            # 2. 兜底逻辑：如果 LLM 没提取出标准分类，利用翻译后的中文内容进行关键词推理
+            if not extracted_category:
+                extracted_category = infer_domestic_category(
+                    title=translated.get("title_translated"),
+                    content=translated.get("content_translated"),
+                    section=article[5],
+                    raw_category=article[6]
+                )
+
             extracted_companies = translated.get("involved_companies") or None
             if extracted_category or extracted_companies:
                 cursor.execute(

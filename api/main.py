@@ -426,6 +426,18 @@ def _build_keyword_score_expr(alias: str = "a") -> str:
     """
 
 
+def _get_dynamic_organizations(country_code: str | None) -> str:
+    if not country_code:
+        return ""
+    
+    matched = []
+    for org_name, members in MEGA_ORGANIZATIONS.items():
+        if country_code in members:
+            matched.append(org_name)
+    
+    return ",".join(matched)
+
+
 def _base_article_select(extra_columns: str = "") -> str:
     extra = f", {extra_columns}" if extra_columns else ""
     return f"""
@@ -435,10 +447,11 @@ def _base_article_select(extra_columns: str = "") -> str:
             a.title_original,
             a.category,
             a.country,
-            a.organization,
+            '' AS organization, -- We calculate this dynamically now
             a.company,
             a.province,
             a.city,
+            a.country_code,
             COALESCE(t.summary_translated, LEFT(a.content_original, 280)) AS summary,
             a.publish_time,
             a.source_url,
@@ -787,6 +800,10 @@ def list_articles(
             time_range=time_range,
         )
         result = _paginate_items(items, page, page_size)
+        # 动态计算组织
+        for item in result["items"]:
+            item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+            
         result["search"] = {
             "mode": "keyword",
             "query": search_term,
@@ -807,6 +824,10 @@ def list_articles(
             semantic_limit=semantic_limit,
         )
         result = _paginate_items(items, page, page_size)
+        # 动态计算组织
+        for item in result["items"]:
+            item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+
         result["search"] = {
             "mode": "semantic",
             "query": search_term,
@@ -839,6 +860,10 @@ def list_articles(
 
     ranked = _hybrid_rank_items(keyword_items, semantic_items)
     result = _paginate_items(ranked, page, page_size)
+    # 动态计算组织
+    for item in result["items"]:
+        item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+
     result["search"] = {
         "mode": "hybrid",
         "query": search_term,
@@ -869,6 +894,7 @@ def get_article(article_id: int):
                 a.province,
                 a.city,
                 a.category,
+                a.country_code,
                 a.translation_status,
                 a.embedding_status,
                 s.display_name AS source_name,
@@ -889,6 +915,9 @@ def get_article(article_id: int):
         article = cursor.fetchone()
         if not article:
             raise HTTPException(status_code=404, detail="Article not found")
+
+        # 动态计算组织
+        article["organization"] = _get_dynamic_organizations(article.get("country_code"))
 
         cursor.execute(
             """

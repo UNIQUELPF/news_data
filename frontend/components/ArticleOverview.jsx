@@ -12,8 +12,12 @@ export default function ArticleOverview({ article }) {
       <div className="article-meta-tags">
          <span className="meta-tag blue-tag">🏷️ 类别：{article.category || "—"}</span>
          <span className="meta-tag blue-tag">🏢 企业：{article.company || "—"}</span>
-         <span className="meta-tag blue-tag">🌐 国家：{article.country || "—"}</span>
-         <span className="meta-tag blue-tag">👥 组织：{article.organization || "—"}</span>
+         {article.country_code !== 'CHN' && (
+            <>
+              <span className="meta-tag blue-tag">🌐 国家：{article.country || "—"}</span>
+              <span className="meta-tag blue-tag">👥 组织：{article.organization || "—"}</span>
+            </>
+         )}
          {article.province ? <span className="meta-tag blue-tag">📍 省份：{article.province}</span> : null}
          {article.city ? <span className="meta-tag blue-tag">🏙️ 城市：{article.city}</span> : null}
       </div>
