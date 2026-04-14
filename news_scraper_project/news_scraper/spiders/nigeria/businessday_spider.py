@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NigeriaBusinessDaySpider(BaseNewsSpider):
     name = 'ng_businessday'
+
+    country_code = 'NGA'
+
+    country = '尼日利亚'
     allowed_domains = ['businessday.ng']
     start_urls = ['https://businessday.ng/category/business-economy/']
     

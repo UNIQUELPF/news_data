@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class CzPatriaSpider(BaseNewsSpider):
     name = "cz_patria"
+
+    country_code = 'CZE'
+
+    country = '捷克'
     allowed_domains = ["www.patria.cz"]
     start_urls = ["https://www.patria.cz/zpravodajstvi/zpravy.html"]
     target_table = "cz_patria_news"

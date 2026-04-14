@@ -7,6 +7,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ReutersJPSpider(BaseNewsSpider):
     name = 'jp_reuters'
+
+    country_code = 'JPN'
+
+    country = '日本'
     allowed_domains = ['jp.reuters.com']
     start_urls = ['https://jp.reuters.com/economy/']
     

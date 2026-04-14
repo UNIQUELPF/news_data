@@ -8,6 +8,10 @@ import re
 
 class B92Spider(scrapy.Spider):
     name = 'b92'
+
+    country_code = 'SRB'
+
+    country = '塞尔维亚'
     allowed_domains = ['b92.net']
     start_urls = ['https://www.b92.net/najnovije-vesti']
     
@@ -20,7 +24,7 @@ class B92Spider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(B92Spider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         return spider
 
     def parse(self, response):

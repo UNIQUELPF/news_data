@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NigeriaGovSpider(BaseNewsSpider):
     name = 'ng_gov'
+
+    country_code = 'NGA'
+
+    country = '尼日利亚'
     allowed_domains = ['statehouse.gov.ng']
     start_urls = ['https://statehouse.gov.ng/category/press-releases/']
     

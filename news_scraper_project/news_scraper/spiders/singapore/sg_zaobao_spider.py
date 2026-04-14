@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class SgZaobaoSpider(BaseNewsSpider):
     name = 'sg_zaobao'
+
+    country_code = 'SGP'
+
+    country = '新加坡'
     allowed_domains = ['zaobao.com.sg']
     
     # 联合早报 API 接口

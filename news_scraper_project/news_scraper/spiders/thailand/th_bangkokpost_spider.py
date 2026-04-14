@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ThBangkokPostSpider(BaseNewsSpider):
     name = 'th_bangkokpost'
+
+    country_code = 'THA'
+
+    country = '泰国'
     allowed_domains = ['bangkokpost.com']
     
     # 列表页配置

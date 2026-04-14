@@ -9,6 +9,10 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumEconomieGovSpider(BelgiumBaseSpider):
     name = "belgium_economie_gov"
+
+    country_code = 'BEL'
+
+    country = '比利时'
     allowed_domains = ["economie.fgov.be"]
     target_table = "bel_economie_gov"
     start_urls = ["https://economie.fgov.be/en/news"]

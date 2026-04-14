@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PlGovSpider(BaseNewsSpider):
     name = "pl_gov"
+
+    country_code = 'POL'
+
+    country = '波兰'
     allowed_domains = ["www.gov.pl"]
     start_urls = ["https://www.gov.pl/web/premier/wydarzenia?page=1"]
     target_table = "pl_gov_news"

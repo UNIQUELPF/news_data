@@ -11,6 +11,10 @@ from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
 class PakistanBusinessRecorderSpider(PakistanBaseSpider):
     name = "pakistan_business_recorder"
+
+    country_code = 'PAK'
+
+    country = '巴基斯坦'
     allowed_domains = ["brecorder.com", "www.brecorder.com"]
     target_table = "pak_business_recorder"
     start_urls = [

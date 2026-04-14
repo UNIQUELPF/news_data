@@ -6,9 +6,8 @@ from datetime import datetime
 import dateparser
 import psycopg2
 import scrapy
-
 from news_scraper.items import NewsItem
-
+from news_scraper.utils import get_incremental_state
 
 # 阿根廷经济类来源
 # 站点：Ambito
@@ -26,6 +25,12 @@ class ArgentinaAmbitoSpider(scrapy.Spider):
     """
 
     name = "argentina_ambito"
+
+
+    country_code = 'ARG'
+
+
+    country = '阿根廷'
     allowed_domains = ["ambito.com"]
     # 当前 spider 对应的数据库表名。
     target_table = "arg_ambito"
@@ -87,21 +92,33 @@ class ArgentinaAmbitoSpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            return max_time
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as exc:
             self.logger.error(f"DB init failed for {self.target_table}: {exc}")
             return self.default_cutoff
 
-    def start_requests(self):
+    def iter_start_requests(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing)
+
+    def start_requests(self):
+        yield from self.iter_start_requests()
+
+    async def start(self):
+        for request in self.iter_start_requests():
+            yield request
 
     def parse_listing(self, response):
         # Ambito 列表页里只保留经济和金融相关详情页链接。

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GrTovimaSpider(BaseNewsSpider):
     name = 'gr_tovima'
+
+    country_code = 'GRC'
+
+    country = '希腊'
     allowed_domains = ['tovima.gr']
     
     # 论坛报财经板块

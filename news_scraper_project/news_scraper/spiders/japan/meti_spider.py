@@ -7,6 +7,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MetiSpider(BaseNewsSpider):
     name = 'jp_meti'
+
+    country_code = 'JPN'
+
+    country = '日本'
     allowed_domains = ['meti.go.jp']
     start_urls = ['https://www.meti.go.jp/press/index.html']
     

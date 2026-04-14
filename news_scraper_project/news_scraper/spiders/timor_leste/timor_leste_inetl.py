@@ -11,6 +11,10 @@ from news_scraper.spiders.timor_leste.base import TimorLesteBaseSpider
 
 class TimorLesteInetlSpider(TimorLesteBaseSpider):
     name = "timor_leste_inetl"
+
+    country_code = 'TLS'
+
+    country = '东帝汶'
     allowed_domains = ["inetl-ip.gov.tl"]
     target_table = "tls_inetl"
     start_urls = ["https://inetl-ip.gov.tl/"]

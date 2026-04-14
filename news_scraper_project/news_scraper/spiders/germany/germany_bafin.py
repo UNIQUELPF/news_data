@@ -11,6 +11,10 @@ from news_scraper.spiders.germany.base import GermanyBaseSpider
 
 class GermanyBafinSpider(GermanyBaseSpider):
     name = "germany_bafin"
+
+    country_code = 'DEU'
+
+    country = '德国'
     allowed_domains = ["bafin.de", "www.bafin.de"]
     target_table = "deu_bafin"
     start_urls = ["https://www.bafin.de/EN/DieBaFin/Presse/03_Pressemitteilungen/liste_pressemitteilungen_node_en.html"]

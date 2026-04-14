@@ -1,15 +1,20 @@
 # 埃及youm7爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-import psycopg2
-import logging
-from datetime import datetime
 import re
-from scrapy.exceptions import CloseSpider
+from datetime import datetime
+
 import dateparser
+import psycopg2
+import scrapy
+from news_scraper.utils import get_incremental_state
+
 
 class EgyptYoum7Spider(scrapy.Spider):
     name = 'egypt_youm7'
+
+    country_code = 'EGY'
+
+    country = '埃及'
     allowed_domains = ['youm7.com']
     target_table = 'egy_youm7'
 
@@ -44,14 +49,14 @@ class EgyptYoum7Spider(scrapy.Spider):
             return
             
         try:
-            self.conn = psycopg2.connect(
+            conn = psycopg2.connect(
                 dbname=settings['dbname'], user=settings['user'],
                 password=settings['password'], host=settings['host'], port=settings['port']
             )
-            self.cur = self.conn.cursor()
+            cur = conn.cursor()
             
             # create table if not exists (since pipeline requires it or creates it but it's safe to ensure reading doesn't throw)
-            self.cur.execute(f'''
+            cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS {self.target_table} (
                     id SERIAL PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -64,28 +69,25 @@ class EgyptYoum7Spider(scrapy.Spider):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             ''')
-            self.conn.commit()
+            conn.commit()
+            cur.close()
+            conn.close()
 
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = self.cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
-            else:
-                self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-                
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            for row in self.cur.fetchall():
-                self.seen_urls.add(row[0])
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
                 
         except Exception as e:
             self.logger.error(f"Failed to connect to DB for initialization: {e}")
 
     def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        return
 
     def start_requests(self):
         url = "https://www.youm7.com/Section/%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF-%D9%88%D8%A8%D9%88%D8%B1%D8%B5%D8%A9/297/1"

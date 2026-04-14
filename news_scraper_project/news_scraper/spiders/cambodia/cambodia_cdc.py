@@ -6,6 +6,10 @@ from news_scraper.spiders.cambodia.base import CambodiaBaseSpider
 
 class CambodiaCdcSpider(CambodiaBaseSpider):
     name = "cambodia_cdc"
+
+    country_code = 'KHM'
+
+    country = '柬埔寨'
     allowed_domains = []
     target_table = "khm_cdc"
     start_urls = ["https://cdc.gov.kh/cdc-news/"]

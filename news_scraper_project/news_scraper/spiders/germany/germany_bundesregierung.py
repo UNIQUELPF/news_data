@@ -11,6 +11,10 @@ from news_scraper.spiders.germany.base import GermanyBaseSpider
 
 class GermanyBundesregierungSpider(GermanyBaseSpider):
     name = "germany_bundesregierung"
+
+    country_code = 'DEU'
+
+    country = '德国'
     allowed_domains = ["bundesregierung.de", "www.bundesregierung.de"]
     target_table = "deu_bundesregierung"
     start_urls = ["https://www.bundesregierung.de/breg-en/news"]

@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UkBusinessInsiderSpider(BaseNewsSpider):
     name = "uk_businessinsider"
+
+    country_code = 'GBR'
+
+    country = '英国'
     allowed_domains = ["businessinsider.com"]
     start_urls = ["https://www.businessinsider.com/economy"]
     

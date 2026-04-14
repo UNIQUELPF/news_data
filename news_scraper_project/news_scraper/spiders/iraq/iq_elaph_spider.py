@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class IqElaphSpider(BaseNewsSpider):
     name = "iq_elaph"
+
+    country_code = 'IRQ'
+
+    country = '伊拉克'
     allowed_domains = ["elaph.com", "api.elaph.com"]
     
     api_url_tmpl = "https://api.elaph.com/v2/web/com/marticles/index/economics/{}"

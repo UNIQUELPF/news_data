@@ -9,6 +9,10 @@ from news_scraper.spiders.kuwait.base import KuwaitBaseSpider
 
 class KuwaitMociSpider(KuwaitBaseSpider):
     name = "kuwait_moci"
+
+    country_code = 'KWT'
+
+    country = '科威特'
     allowed_domains = []
     target_table = "kwt_moci"
     start_urls = ["https://www.moci.gov.kw/en/media/economic-newsletter/"]

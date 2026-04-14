@@ -11,6 +11,10 @@ from news_scraper.spiders.denmark.base import DenmarkBaseSpider
 
 class DenmarkFinanceGovSpider(DenmarkBaseSpider):
     name = "denmark_finance_gov"
+
+    country_code = 'DNK'
+
+    country = '丹麦'
     allowed_domains = ["en.fm.dk", "fm.dk"]
     target_table = "dnk_finance_gov"
     start_urls = ["https://en.fm.dk/news/news/"]

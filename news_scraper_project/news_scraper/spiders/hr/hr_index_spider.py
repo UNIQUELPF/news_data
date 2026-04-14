@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class HrIndexSpider(BaseNewsSpider):
     name = "hr_index"
+
+    country_code = 'HRV'
+
+    country = '克罗地亚'
     allowed_domains = ["www.index.hr"]
     start_urls = ["https://www.index.hr/vijesti/rubrika/hrvatska/22.aspx"]
     target_table = "hr_index_news"

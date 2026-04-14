@@ -1,10 +1,11 @@
-import scrapy
-import psycopg2
-from datetime import datetime, timezone
-import logging
+from datetime import datetime
 
+import psycopg2
+import scrapy
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class ElnashraSpider(scrapy.Spider):
     """
@@ -12,6 +13,10 @@ class ElnashraSpider(scrapy.Spider):
     Pagination relies on URL query params `ajax=1&timestamp=LAST_TIMESTAMP&page=NEXT_PAGE`.
     """
     name = "lebanon_elnashra"
+
+    country_code = 'LBN'
+
+    country = '黎巴嫩'
     allowed_domains = ["elnashra.com"]
     use_curl_cffi = True
     target_table = "lebanon_elnashra_news"
@@ -59,16 +64,19 @@ class ElnashraSpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            if max_time.tzinfo is not None:
-                max_time = max_time.replace(tzinfo=None)
-            return max(max_time, self.default_cutoff)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return max(state["cutoff_date"], self.default_cutoff)
         except Exception as exc:
             self.logger.error(f"DB init failed: {exc}")
             return self.default_cutoff

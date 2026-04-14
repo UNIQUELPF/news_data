@@ -13,6 +13,10 @@ from news_scraper.spiders.denmark.base import DenmarkBaseSpider
 
 class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
     name = "denmark_finanstilsynet"
+
+    country_code = 'DNK'
+
+    country = '丹麦'
     allowed_domains = ["finanstilsynet.dk", "www.finanstilsynet.dk"]
     target_table = "dnk_finanstilsynet"
     start_urls = ["https://www.finanstilsynet.dk/nyheder-og-presse/nyheder-og-pressemeddelelser"]

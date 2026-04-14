@@ -8,6 +8,10 @@ from news_scraper.spiders.kuwait.base import KuwaitBaseSpider
 
 class KuwaitCitraSpider(KuwaitBaseSpider):
     name = "kuwait_citra"
+
+    country_code = 'KWT'
+
+    country = '科威特'
     allowed_domains = []
     target_table = "kwt_citra"
     start_urls = ["https://www.citra.gov.kw/sites/en/Pages/NewsEvents.aspx"]

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TrSabahSpider(BaseNewsSpider):
     name = 'tr_sabah'
+
+    country_code = 'TUR'
+
+    country = '土耳其'
     allowed_domains = ['sabah.com.tr']
     
     # 初始 URL：经济新闻列表

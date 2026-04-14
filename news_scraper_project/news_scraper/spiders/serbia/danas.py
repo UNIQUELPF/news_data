@@ -9,6 +9,10 @@ from bs4 import BeautifulSoup
 
 class DanasSpider(scrapy.Spider):
     name = 'danas'
+
+    country_code = 'SRB'
+
+    country = '塞尔维亚'
     allowed_domains = ['danas.rs']
     start_urls = [
         'https://www.danas.rs/vesti/ekonomija/',
@@ -30,7 +34,7 @@ class DanasSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(DanasSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         return spider
 
     def parse(self, response):

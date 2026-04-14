@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UzAnhorSpider(BaseNewsSpider):
     name = 'uz_anhor'
+
+    country_code = 'UZB'
+
+    country = '乌兹别克斯坦'
     allowed_domains = ['anhor.uz']
     
     # 经济新闻类别列表

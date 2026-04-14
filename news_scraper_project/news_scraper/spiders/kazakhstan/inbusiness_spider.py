@@ -9,6 +9,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class InBusinessSpider(scrapy.Spider):
     name = 'inbusiness'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['inbusiness.kz']
     
     # Global cutoff date will be set dynamically in from_crawler
@@ -18,7 +22,7 @@ class InBusinessSpider(scrapy.Spider):
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(InBusinessSpider, cls).from_crawler(crawler, *args, **kwargs)
         # Use dynamic cutoff logic
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_inbusiness')
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_inbusiness', spider_name=spider.name)
         return spider
 
     # Base URL for categories

@@ -8,6 +8,10 @@ from news_scraper.spiders.cambodia.base import CambodiaBaseSpider
 
 class CambodiaAkpSpider(CambodiaBaseSpider):
     name = "cambodia_akp"
+
+    country_code = 'KHM'
+
+    country = '柬埔寨'
     allowed_domains = []
     target_table = "khm_akp"
     start_urls = ["https://www.akp.gov.kh/"]

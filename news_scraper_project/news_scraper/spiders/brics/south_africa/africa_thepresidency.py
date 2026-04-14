@@ -1,15 +1,20 @@
 # 南非africa thepresidency爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-import psycopg2
-import logging
-from datetime import datetime
 import re
-from scrapy.exceptions import CloseSpider
+from datetime import datetime
+
 import dateparser
+import psycopg2
+import scrapy
+from news_scraper.utils import get_incremental_state
+
 
 class AfricaThePresidencySpider(scrapy.Spider):
     name = 'africa_thepresidency'
+
+    country_code = 'ZAF'
+
+    country = '南非'
     allowed_domains = ['thepresidency.gov.za']
     target_table = 'afr_thepresidency'
 
@@ -47,32 +52,44 @@ class AfricaThePresidencySpider(scrapy.Spider):
             return
             
         try:
-            self.conn = psycopg2.connect(
+            conn = psycopg2.connect(
                 dbname=settings['dbname'], user=settings['user'],
                 password=settings['password'], host=settings['host'], port=settings['port']
             )
-            self.cur = self.conn.cursor()
-            
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = self.cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
-            else:
-                self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-                
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            for row in self.cur.fetchall():
-                self.seen_urls.add(row[0])
-                
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.target_table} (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT,
+                    publish_time TIMESTAMP,
+                    author TEXT,
+                    content TEXT,
+                    url TEXT UNIQUE,
+                    language TEXT,
+                    section TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
         except Exception as e:
             self.logger.error(f"Failed to connect to DB for initialization: {e}")
 
     def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        return
 
     def start_requests(self):
         url = "https://www.thepresidency.gov.za/speeches-statements-advisories?page=0"
@@ -85,8 +102,6 @@ class AfricaThePresidencySpider(scrapy.Spider):
             return
 
         all_old = True
-        found_new = False
-        
         for article in articles:
             a_elem = article.css('a')
             if not a_elem and article.root.tag == 'a':
@@ -140,7 +155,6 @@ class AfricaThePresidencySpider(scrapy.Spider):
                 continue
 
             if link not in self.seen_urls:
-                found_new = True
                 self.seen_urls.add(link)
                 
                 yield scrapy.Request(

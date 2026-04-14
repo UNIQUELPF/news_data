@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TrTbmmSpider(BaseNewsSpider):
     name = 'tr_tbmm'
+
+    country_code = 'TUR'
+
+    country = '土耳其'
     allowed_domains = ['tbmm.gov.tr']
     
     # 无限加载接口

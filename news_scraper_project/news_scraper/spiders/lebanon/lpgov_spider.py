@@ -1,13 +1,14 @@
-import scrapy
-import logging
 import json
-import psycopg2
+import logging
 import re
 from datetime import datetime
-from bs4 import BeautifulSoup
 
-from news_scraper.settings import POSTGRES_SETTINGS
+import psycopg2
+import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
+from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ class LPGovSpider(scrapy.Spider):
     Scrapes the Lebanese Parliament news section via its backend JSON API.
     """
     name = "lebanon_lpgov"
+
+    country_code = 'LBN'
+
+    country = '黎巴嫩'
     allowed_domains = ["lp.gov.lb"]
     target_table = "lebanon_lpgov_news"
     
@@ -62,12 +67,16 @@ class LPGovSpider(scrapy.Spider):
             if not cur.fetchone()[0]:
                 return datetime(2026, 1, 1)
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            res = cur.fetchone()[0]
             cur.close()
             conn.close()
-            if res:
-                return res.replace(tzinfo=None)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as e:
             logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
             

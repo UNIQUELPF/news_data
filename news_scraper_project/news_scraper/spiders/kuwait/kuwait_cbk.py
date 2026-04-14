@@ -9,6 +9,10 @@ from news_scraper.spiders.kuwait.base import KuwaitBaseSpider
 
 class KuwaitCbkSpider(KuwaitBaseSpider):
     name = "kuwait_cbk"
+
+    country_code = 'KWT'
+
+    country = '科威特'
     allowed_domains = []
     target_table = "kwt_cbk"
     start_urls = ["https://www.cbk.gov.kw/en/"]

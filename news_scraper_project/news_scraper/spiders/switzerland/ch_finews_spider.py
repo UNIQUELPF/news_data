@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class FinewsCHSpider(BaseNewsSpider):
     name = 'ch_finews'
+
+    country_code = 'CHE'
+
+    country = '瑞士'
     allowed_domains = ['finews.com']
     start_urls = ['https://www.finews.com/news/english-news']
     target_table = 'ch_finews_news'

@@ -11,6 +11,10 @@ from news_scraper.spiders.france.base import FranceBaseSpider
 
 class FranceLaTribuneSpider(FranceBaseSpider):
     name = "france_latribune"
+
+    country_code = 'FRA'
+
+    country = '法国'
     allowed_domains = ["latribune.fr", "www.latribune.fr"]
     target_table = "fra_latribune"
     start_urls = ["https://www.latribune.fr/economie-2/"]

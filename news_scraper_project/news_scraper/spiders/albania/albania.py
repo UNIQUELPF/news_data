@@ -12,6 +12,10 @@ import re
 
 class AlbaniaSpider(scrapy.Spider):
     name = 'albania'
+
+    country_code = 'ALB'
+
+    country = '阿尔巴尼亚'
     allowed_domains = ['kryeministria.al']
     start_urls = ['https://www.kryeministria.al/newsrooms/lajme/']
     
@@ -29,7 +33,7 @@ class AlbaniaSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(AlbaniaSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         return spider
 
     def parse(self, response):

@@ -1,13 +1,18 @@
-import scrapy
-import json
-import psycopg2
-import re
 from datetime import datetime
+
+import psycopg2
+import scrapy
 from bs4 import BeautifulSoup
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class USAYFinanceSpider(scrapy.Spider):
     name = 'usa_yfinance'
+
+    country_code = 'USA'
+
+    country = '美国'
     allowed_domains = ['finance.yahoo.com']
     start_urls = ['https://finance.yahoo.com/topic/latest-news/']
     
@@ -47,26 +52,35 @@ class USAYFinanceSpider(scrapy.Spider):
             """)
             conn.commit()
             
-            # 增量检查
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-            
             cur.close()
             conn.close()
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.scraped_urls = state["scraped_urls"]
         except Exception as e:
             self.logger.error(f"DB init failed: {e}")
 
-    def start_requests(self):
+    def iter_start_requests(self):
         # 逐页请求直到触达 1 月 1 日
         # 雅虎翻页格式: /topic/latest-news/2/, /topic/latest-news/3/ ...
         for page in range(1, 150): # 150 页大约能涵盖 3 个月
             url = self.start_urls[0] if page == 1 else f"{self.start_urls[0]}{page}/"
             yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
 
+    def start_requests(self):
+        yield from self.iter_start_requests()
+
+    async def start(self):
+        for request in self.iter_start_requests():
+            yield request
+
     def parse_list(self, response):
-        found_new = False
         # 通过 CSS 选择器选取列表中的文章链接 (雅虎目前的列表 yf-119g04z 类)
         articles = response.css('a.subtle-link.fin-size-small::attr(href)').getall()
         # 备选选择器：雅虎的 href 通常包含 /news/ 或 /topic/
@@ -84,7 +98,6 @@ class USAYFinanceSpider(scrapy.Spider):
             if full_url in self.scraped_urls:
                 continue
             
-            found_new = True
             self.scraped_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_article)
 

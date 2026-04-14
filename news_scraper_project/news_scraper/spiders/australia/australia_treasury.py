@@ -11,6 +11,10 @@ from news_scraper.spiders.australia.base import AustraliaBaseSpider
 
 class AustraliaTreasurySpider(AustraliaBaseSpider):
     name = "australia_treasury"
+
+    country_code = 'AUS'
+
+    country = '澳大利亚'
     allowed_domains = ["treasury.gov.au", "www.treasury.gov.au"]
     target_table = "aus_treasury"
     start_urls = [

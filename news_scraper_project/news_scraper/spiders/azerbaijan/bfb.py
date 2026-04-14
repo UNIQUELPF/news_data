@@ -13,6 +13,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class BfbSpider(scrapy.Spider):
     name = 'bfb'
+
+    country_code = 'AZE'
+
+    country = '阿塞拜疆'
     allowed_domains = ['bfb.az']
     start_urls = ['https://www.bfb.az/press-relizler']
     
@@ -34,7 +38,7 @@ class BfbSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(BfbSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         # Ensure we use 2026-01-01 if it's the first run
         if spider.CUTOFF_DATE > datetime(2026, 1, 1):
              spider.CUTOFF_DATE = datetime(2026, 1, 1)

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UkComputerweeklySpider(BaseNewsSpider):
     name = "uk_computerweekly"
+
+    country_code = 'GBR'
+
+    country = '英国'
     allowed_domains = ["computerweekly.com", "r.jina.ai"]
     target_table = "uk_computerweekly_news"
 

@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class Bg24chasaSpider(BaseNewsSpider):
     name = "bg_24chasa"
+
+    country_code = 'BGR'
+
+    country = '保加利亚'
     allowed_domains = ["www.24chasa.bg"]
     # Category 11764989 belongs to Business/Economy
     start_urls = ["https://www.24chasa.bg/biznes/11764989?page=1"]

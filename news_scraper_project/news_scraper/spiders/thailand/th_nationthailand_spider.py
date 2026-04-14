@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ThNationThailandSpider(BaseNewsSpider):
     name = 'th_nationthailand'
+
+    country_code = 'THA'
+
+    country = '泰国'
     allowed_domains = ['nationthailand.com', 'api.nationthailand.com']
     
     # 使用 API 作为起始点

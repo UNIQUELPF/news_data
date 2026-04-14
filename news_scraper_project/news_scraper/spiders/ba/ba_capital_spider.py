@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class BaCapitalSpider(BaseNewsSpider):
     name = "ba_capital"
+
+    country_code = 'BIH'
+
+    country = '波黑'
     allowed_domains = ["capital.ba"]
     # Financial/Economy section link provided by user
     start_urls = ["https://capital.ba/category/privreda/"]

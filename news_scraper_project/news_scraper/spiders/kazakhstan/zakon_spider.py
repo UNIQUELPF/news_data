@@ -16,6 +16,10 @@ RU_MONTHS = {
 
 class ZakonSpider(scrapy.Spider):
     name = 'zakon'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['zakon.kz']
     start_urls = ['https://www.zakon.kz/finansy/']
 
@@ -24,7 +28,7 @@ class ZakonSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(ZakonSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_zakon')
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_zakon', spider_name=spider.name)
         return spider
 
     def parse_russian_date(self, date_str):

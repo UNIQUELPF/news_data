@@ -8,6 +8,10 @@ from news_scraper.spiders.qatar.base import QatarBaseSpider
 
 class QatarQnaSpider(QatarBaseSpider):
     name = "qatar_qna"
+
+    country_code = 'QAT'
+
+    country = '卡塔尔'
     allowed_domains = []
     target_table = "qat_qna"
     start_urls = ["https://qna.org.qa/en/economy"]

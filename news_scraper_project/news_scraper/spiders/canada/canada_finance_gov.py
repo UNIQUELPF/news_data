@@ -6,6 +6,10 @@ from news_scraper.spiders.canada.base import CanadaBaseSpider
 
 class CanadaFinanceGovSpider(CanadaBaseSpider):
     name = "canada_finance_gov"
+
+    country_code = 'CAN'
+
+    country = '加拿大'
     allowed_domains = []
     target_table = "can_finance_gov"
     start_urls = ["data:,canada_finance_gov_start"]

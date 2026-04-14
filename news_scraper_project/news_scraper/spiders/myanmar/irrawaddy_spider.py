@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MyanmarIrrawaddySpider(BaseNewsSpider):
     name = 'mm_irrawaddy'
+
+    country_code = 'MMR'
+
+    country = '缅甸'
     allowed_domains = ['irrawaddy.com']
     start_urls = ['https://www.irrawaddy.com/category/news']
     

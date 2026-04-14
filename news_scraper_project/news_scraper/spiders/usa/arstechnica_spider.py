@@ -1,12 +1,16 @@
-import scrapy
-import json
-import psycopg2
 from datetime import datetime
+
+import scrapy
 from bs4 import BeautifulSoup
-from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class USAArsTechnicaSpider(scrapy.Spider):
     name = 'usa_arstechnica'
+
+    country_code = 'USA'
+
+    country = '美国'
     allowed_domains = ['arstechnica.com']
     start_urls = ['https://arstechnica.com/']
     
@@ -29,39 +33,31 @@ class USAArsTechnicaSpider(scrapy.Spider):
 
     def init_db(self):
         try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    url TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP NOT NULL,
-                    author VARCHAR(255),
-                    language VARCHAR(50) DEFAULT 'en',
-                    section VARCHAR(100),
-                    scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            
-            # 增量检查
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-            
-            cur.close()
-            conn.close()
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.scraped_urls = state["scraped_urls"]
         except Exception as e:
             self.logger.error(f"DB init failed: {e}")
 
-    def start_requests(self):
+    def iter_start_requests(self):
         # Ars Technica 分页示例：https://arstechnica.com/page/2/
         # 回溯至 2026-01-01 约需要翻 40-60 页
         for page in range(1, 80):
             url = self.start_urls[0] if page == 1 else f"{self.start_urls[0]}page/{page}/"
             yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
+
+    def start_requests(self):
+        yield from self.iter_start_requests()
+
+    async def start(self):
+        for request in self.iter_start_requests():
+            yield request
 
     def parse_list(self, response):
         # 获取所有文章链接 (li.article h2 a)

@@ -11,6 +11,10 @@ from news_scraper.spiders.timor_leste.base import TimorLesteBaseSpider
 
 class TimorLesteTatoliSpider(TimorLesteBaseSpider):
     name = "timor_leste_tatoli"
+
+    country_code = 'TLS'
+
+    country = '东帝汶'
     allowed_domains = ["en.tatoli.tl", "tatoli.tl"]
     target_table = "tls_tatoli"
     start_urls = ["https://en.tatoli.tl/"]

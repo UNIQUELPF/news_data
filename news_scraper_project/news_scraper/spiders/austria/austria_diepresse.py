@@ -17,6 +17,10 @@ from news_scraper.spiders.austria.base import AustriaBaseSpider
 
 class AustriaDiePresseSpider(AustriaBaseSpider):
     name = "austria_diepresse"
+
+    country_code = 'AUT'
+
+    country = '奥地利'
     allowed_domains = ["diepresse.com", "www.diepresse.com"]
     target_table = "aut_diepresse"
     start_urls = [

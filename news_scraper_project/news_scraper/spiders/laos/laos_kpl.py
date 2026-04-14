@@ -8,6 +8,10 @@ from news_scraper.spiders.laos.base import LaosBaseSpider
 
 class LaosKplSpider(LaosBaseSpider):
     name = "laos_kpl"
+
+    country_code = 'LAO'
+
+    country = '老挝'
     allowed_domains = ["kpl.gov.la", "www.kpl.gov.la"]
     target_table = "lao_kpl"
     start_urls = ["https://kpl.gov.la/En/"]

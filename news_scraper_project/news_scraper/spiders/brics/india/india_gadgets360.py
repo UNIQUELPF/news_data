@@ -2,15 +2,18 @@
 
 import scrapy
 from datetime import datetime
-import psycopg2
-from scrapy.utils.project import get_project_settings
 import re
 import json
 
 from scrapy.spiders import SitemapSpider
+from news_scraper.utils import get_incremental_state
 
 class IndiaGadgets360Spider(SitemapSpider):
     name = 'india_gadgets360'
+
+    country_code = 'IND'
+
+    country = '印度'
     allowed_domains = ['gadgets360.com']
     sitemap_urls = ['https://www.gadgets360.com/sitemapnews.xml', 'https://www.gadgets360.com/sitemaps/news-sitemap.xml']
 
@@ -36,48 +39,17 @@ class IndiaGadgets360Spider(SitemapSpider):
     def __init__(self, *args, **kwargs):
         super(IndiaGadgets360Spider, self).__init__(*args, **kwargs)
         
-        settings = get_project_settings()
-        db_settings = settings.get('POSTGRES_SETTINGS', {})
-        
         try:
-            self.conn = psycopg2.connect(
-                host=db_settings.get('host', 'postgres'),
-                database=db_settings.get('database', 'scrapy_db'),
-                user=db_settings.get('user', 'your_user'),
-                password=db_settings.get('password', 'your_password'),
-                port=db_settings.get('port', 5432)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
             )
-            self.cur = self.conn.cursor()
-            
-            # Create table if it doesn't exist
-            self.cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR UNIQUE NOT NULL,
-                    title VARCHAR NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author VARCHAR,
-                    language VARCHAR(10) DEFAULT 'en',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            self.conn.commit()
-            
-            # Get the latest publish time to only fetch new articles
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            result = self.cur.fetchone()
-            if result and result[0]:
-                self.cutoff_date = result[0]
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
-            else:
-                self.cutoff_date = datetime(2026, 1, 1)
-                self.logger.info(f"Initial run, starting from default cutoff date: {self.cutoff_date}")
-                
-            # Pre-load seen URLs
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            self.seen_urls = set(row[0] for row in self.cur.fetchall())
-                
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
+            self.logger.info(f"Loaded {len(self.seen_urls)} seen URLs via {state['source']}.")
         except Exception as e:
             self.logger.error(f"Database connection error: {e}")
             self.cutoff_date = datetime(2026, 1, 1)
@@ -170,9 +142,3 @@ class IndiaGadgets360Spider(SitemapSpider):
         item['content'] = "\n".join(cleaned_parts)
         
         yield item
-
-    def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()

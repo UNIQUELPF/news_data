@@ -2,15 +2,19 @@
 
 import scrapy
 from datetime import datetime
-import psycopg2
 import logging
 import re
 from scrapy.spidermiddlewares.httperror import HttpError
 from scrapy.exceptions import CloseSpider
 from twisted.internet.error import TimeoutError, TCPTimedOutError
+from news_scraper.utils import get_incremental_state
 
 class IndiaEntrackrSpider(scrapy.Spider):
     name = 'india_entrackr'
+
+    country_code = 'IND'
+
+    country = '印度'
     allowed_domains = ['entrackr.com']
     target_table = 'ind_entrackr'
     
@@ -44,39 +48,21 @@ class IndiaEntrackrSpider(scrapy.Spider):
         return spider
         
     def _init_db(self):
-        settings = self.settings.get('POSTGRES_SETTINGS', {})
-        if not settings:
-            return
-            
         try:
-            self.conn = psycopg2.connect(
-                dbname=settings['dbname'], user=settings['user'],
-                password=settings['password'], host=settings['host'], port=settings['port']
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
             )
-            self.cur = self.conn.cursor()
-            
-            # Get latest date
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = self.cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
-            else:
-                self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-                
-            # Preload seen URLs
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            for row in self.cur.fetchall():
-                self.seen_urls.add(row[0])
-                
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
+            self.logger.info(
+                f"Incremental scraping via {state['source']} from cutoff date: {self.cutoff_date}, urls: {len(self.seen_urls)}"
+            )
         except Exception as e:
             self.logger.error(f"Failed to connect to DB for initialization: {e}")
-
-    def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
 
     def start_requests(self):
         yield self.make_page_request(1)

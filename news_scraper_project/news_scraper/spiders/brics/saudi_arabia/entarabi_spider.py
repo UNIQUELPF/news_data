@@ -1,15 +1,16 @@
 # 沙特阿拉伯entarabi spider爬虫，负责抓取对应站点、机构或栏目内容。
 
-import json
-import logging
-from datetime import datetime, timezone
-from bs4 import BeautifulSoup
-import scrapy
-import psycopg2
 import html
+import json
+from datetime import datetime
 
+import psycopg2
+import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class EntarabiSpider(scrapy.Spider):
     """
@@ -18,6 +19,10 @@ class EntarabiSpider(scrapy.Spider):
     Supports full scan (from 2026-01-01) and incremental mode.
     """
     name = "saudi_entarabi"
+
+    country_code = 'SAU'
+
+    country = '沙特阿拉伯'
     allowed_domains = ["entarabi.com"]
     target_table = "saudi_entarabi_news"
     default_cutoff = datetime(2026, 1, 1)
@@ -61,17 +66,20 @@ class EntarabiSpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            # Ensure max_time is timezone-naive for comparison
-            if max_time.tzinfo is not None:
-                max_time = max_time.replace(tzinfo=None)
-            return max(max_time, self.default_cutoff)
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return max(state["cutoff_date"], self.default_cutoff)
         except Exception as exc:
             self.logger.error(f"DB init failed: {exc}")
             return self.default_cutoff

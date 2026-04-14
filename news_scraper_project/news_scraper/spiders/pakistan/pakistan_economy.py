@@ -11,6 +11,10 @@ from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
 class PakistanEconomySpider(PakistanBaseSpider):
     name = "pakistan_economy"
+
+    country_code = 'PAK'
+
+    country = '巴基斯坦'
     allowed_domains = ["economy.pk", "www.economy.pk"]
     target_table = "pak_economy"
     start_urls = [

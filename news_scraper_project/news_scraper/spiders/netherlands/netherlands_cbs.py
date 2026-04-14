@@ -9,6 +9,10 @@ from news_scraper.spiders.netherlands.base import NetherlandsBaseSpider
 
 class NetherlandsCbsSpider(NetherlandsBaseSpider):
     name = "netherlands_cbs"
+
+    country_code = 'NLD'
+
+    country = '荷兰'
     allowed_domains = []
     target_table = "nld_cbs"
     start_urls = ["data:,netherlands_cbs_start"]

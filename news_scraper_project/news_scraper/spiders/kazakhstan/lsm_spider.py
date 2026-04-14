@@ -9,6 +9,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class LSMSpider(scrapy.Spider):
     name = 'lsm'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['lsm.kz']
     
     # Global cutoff date will be set dynamically in from_crawler
@@ -17,7 +21,7 @@ class LSMSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(LSMSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_lsm')
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_lsm', spider_name=spider.name)
         return spider
 
     # Sections to scrape

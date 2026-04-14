@@ -1,7 +1,8 @@
-import scrapy
-import psycopg2
 from datetime import datetime
-from news_scraper.settings import POSTGRES_SETTINGS
+
+import scrapy
+from news_scraper.utils import get_incremental_state
+
 
 class BaseNewsSpider(scrapy.Spider):
     """
@@ -20,39 +21,20 @@ class BaseNewsSpider(scrapy.Spider):
 
     def init_db(self):
         try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            
-            # 1. 自动根据 target_table 建表
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    url TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP NOT NULL,
-                    author VARCHAR(255),
-                    language VARCHAR(50) DEFAULT 'en',
-                    section VARCHAR(100),
-                    scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            
-            # 2. 增量探测：获取最新发布时间并加载最近的 URL 指纹
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental Detection Enabled: Starting from {self.cutoff_date}")
-            
-            # 加载最近的 5000 条 URL 到内存中，用于前置过滤
-            cur.execute(f"SELECT url FROM {self.target_table} ORDER BY publish_time DESC LIMIT 5000")
-            rows = cur.fetchall()
-            self.scraped_urls = {row[0] for row in rows}
-            self.logger.info(f"Loaded {len(self.scraped_urls)} fingerprint(s) from DB for incremental check.")
-            
-            cur.close()
-            conn.close()
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+                url_limit=5000,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.scraped_urls = state["scraped_urls"]
+            self.logger.info(
+                f"Incremental Detection Enabled via {state['source']}: starting from {self.cutoff_date}"
+            )
+            self.logger.info(f"Loaded {len(self.scraped_urls)} fingerprint(s) for incremental check.")
         except Exception as e:
             self.logger.error(f"Database sync/init failed for {self.target_table}: {e}")
 

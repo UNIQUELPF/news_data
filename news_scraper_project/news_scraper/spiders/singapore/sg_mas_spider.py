@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class SgMasSpider(BaseNewsSpider):
     name = "sg_mas"
+
+    country_code = 'SGP'
+
+    country = '新加坡'
     allowed_domains = ["mas.gov.sg"]
     
     api_url = "https://www.mas.gov.sg/api/v1/search?q=*:*&fq=mas_mastercontenttypes_sm:%22News%22&sort=mas_date_tdt%20desc&start={}&rows=20&json.nl=map"

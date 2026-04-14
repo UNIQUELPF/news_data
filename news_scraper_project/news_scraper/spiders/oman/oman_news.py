@@ -24,6 +24,12 @@ class OmanNewsSpider(OmanBaseSpider):
     """
 
     name = "oman_news"
+
+
+    country_code = 'OMN'
+
+
+    country = '阿曼'
     allowed_domains = ["omannews.gov.om", "www.omannews.gov.om"]
     target_table = "omn_oman_news"
     start_urls = [

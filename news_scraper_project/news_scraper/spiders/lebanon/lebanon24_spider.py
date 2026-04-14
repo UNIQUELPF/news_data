@@ -1,17 +1,22 @@
-import scrapy
 import logging
-import psycopg2
 from datetime import datetime
-from dateutil import parser
-from bs4 import BeautifulSoup
 
-from news_scraper.settings import POSTGRES_SETTINGS
+import psycopg2
+import scrapy
+from bs4 import BeautifulSoup
+from dateutil import parser
 from news_scraper.items import NewsItem
+from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
 
 logger = logging.getLogger(__name__)
 
 class Lebanon24Spider(scrapy.Spider):
     name = "lebanon_lebanon24"
+
+    country_code = 'LBN'
+
+    country = '黎巴嫩'
     allowed_domains = ["lebanon24.com"]
     
     # Standard spider, no curl_cffi required since CF doesn't block LoadMore endpoint
@@ -50,13 +55,16 @@ class Lebanon24Spider(scrapy.Spider):
             if not cur.fetchone()[0]:
                 return datetime(2026, 1, 1)
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            res = cur.fetchone()[0]
             cur.close()
             conn.close()
-            
-            if res:
-                return res.replace(tzinfo=None)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as e:
             logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
             

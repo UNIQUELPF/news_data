@@ -4,11 +4,11 @@ import io
 from datetime import datetime
 
 import dateparser
-import psycopg2
 import scrapy
 from pypdf import PdfReader
 
 from news_scraper.items import NewsItem
+from news_scraper.utils import get_incremental_state
 
 
 class BahrainBaseSpider(scrapy.Spider):
@@ -32,43 +32,22 @@ class BahrainBaseSpider(scrapy.Spider):
         return spider
 
     def _init_db_and_get_cutoff(self):
-        settings = self.settings.get("POSTGRES_SETTINGS", {})
-        if not settings or not self.target_table:
+        if not self.target_table:
             return self.default_cutoff
 
         try:
-            conn = psycopg2.connect(
-                dbname=settings["dbname"],
-                user=settings["user"],
-                password=settings["password"],
-                host=settings["host"],
-                port=settings["port"],
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=self.full_scan,
             )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    title TEXT,
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
+            self.seen_urls = state["scraped_urls"]
+            self.logger.info(
+                f"Incremental state loaded via {state['source']} for {self.name}: {len(self.seen_urls)} URLs"
             )
-            conn.commit()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
-            cur.close()
-            conn.close()
-
-            if self.full_scan or not max_time:
-                return self.default_cutoff
-            return max_time
+            return state["cutoff_date"]
         except Exception as exc:
             self.logger.error(f"DB init failed for {self.target_table}: {exc}")
             return self.default_cutoff
@@ -118,4 +97,3 @@ class BahrainBaseSpider(scrapy.Spider):
             if text:
                 parts.append(text)
         return "\n\n".join(parts)
-

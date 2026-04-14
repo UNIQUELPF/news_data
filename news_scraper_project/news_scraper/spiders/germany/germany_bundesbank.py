@@ -12,6 +12,10 @@ from news_scraper.spiders.germany.base import GermanyBaseSpider
 
 class GermanyBundesbankSpider(GermanyBaseSpider):
     name = "germany_bundesbank"
+
+    country_code = 'DEU'
+
+    country = '德国'
     allowed_domains = ["bundesbank.de", "www.bundesbank.de"]
     target_table = "deu_bundesbank"
     start_urls = ["https://www.bundesbank.de/en/press/press-releases"]

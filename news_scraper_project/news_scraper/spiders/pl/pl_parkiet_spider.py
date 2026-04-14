@@ -5,6 +5,10 @@ from scrapy_playwright.page import PageMethod
 
 class PlParkietSpider(BaseNewsSpider):
     name = "pl_parkiet"
+
+    country_code = 'POL'
+
+    country = '波兰'
     allowed_domains = ["www.parkiet.com"]
     start_urls = ["https://www.parkiet.com/wiadomosci"]
     target_table = "pl_parkiet_news"

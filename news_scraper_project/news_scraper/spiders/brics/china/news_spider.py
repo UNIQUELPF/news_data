@@ -11,6 +11,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class NewsCNSpider(scrapy.Spider):
     name = 'news_cn'
+
+    country_code = 'CHN'
+
+    country = '中国'
     allowed_domains = ['news.cn']
     
     # 定义频道及其对应的起始URL和选择器配置
@@ -55,7 +59,7 @@ class NewsCNSpider(scrapy.Spider):
         spider = super(NewsCNSpider, cls).from_crawler(crawler, *args, **kwargs)
         spider.channel_cutoffs = {}
         for channel, config in spider.CHANNELS.items():
-            cutoff = get_dynamic_cutoff(crawler.settings, config['table'], is_string_format=True)
+            cutoff = get_dynamic_cutoff(crawler.settings, config['table'], is_string_format=True, spider_name=config.get('name'))
             if channel == 'silkroad' and cutoff == "20251231":
                 # Special early cutoff for silkroad's first run
                 spider.channel_cutoffs[channel] = "20251120"

@@ -10,6 +10,10 @@ from news_scraper.settings import POSTGRES_SETTINGS
 
 class IranIranIntlSpider(scrapy.Spider):
     name = 'iran_iranintl'
+
+    country_code = 'IRN'
+
+    country = '伊朗'
     target_table = 'iran_iranintl'
     allowed_domains = ['iranintl.com']
     

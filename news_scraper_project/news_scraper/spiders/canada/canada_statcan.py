@@ -6,6 +6,10 @@ from news_scraper.spiders.canada.base import CanadaBaseSpider
 
 class CanadaStatcanSpider(CanadaBaseSpider):
     name = "canada_statcan"
+
+    country_code = 'CAN'
+
+    country = '加拿大'
     allowed_domains = []
     target_table = "can_statcan"
     start_urls = ["https://www150.statcan.gc.ca/n1/dai-quo/index-eng.htm"]

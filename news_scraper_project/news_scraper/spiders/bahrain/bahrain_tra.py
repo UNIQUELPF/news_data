@@ -9,6 +9,10 @@ from news_scraper.spiders.bahrain.base import BahrainBaseSpider
 
 class BahrainTraSpider(BahrainBaseSpider):
     name = "bahrain_tra"
+
+    country_code = 'BHR'
+
+    country = '巴林'
     allowed_domains = ["tra.org.bh", "www.tra.org.bh"]
     target_table = "bhr_tra"
     start_urls = [

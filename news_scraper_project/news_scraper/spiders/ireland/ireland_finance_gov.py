@@ -16,6 +16,12 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
     """
 
     name = "ireland_finance_gov"
+
+
+    country_code = 'IRL'
+
+
+    country = '爱尔兰'
     allowed_domains = ["gov.ie", "www.gov.ie"]
     # 政府类：财政部官方新闻/公告表
     target_table = "irl_finance_gov"

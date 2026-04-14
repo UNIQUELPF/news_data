@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MexicoFayerWayerSpider(BaseNewsSpider):
     name = 'mexico_fayerwayer'
+
+    country_code = 'MEX'
+
+    country = '墨西哥'
     allowed_domains = ['fayerwayer.com']
     start_urls = ['https://www.fayerwayer.com/comercial/']
     

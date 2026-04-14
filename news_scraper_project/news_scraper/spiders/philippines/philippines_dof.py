@@ -11,6 +11,10 @@ from news_scraper.spiders.philippines.base import PhilippinesBaseSpider
 
 class PhilippinesDofSpider(PhilippinesBaseSpider):
     name = "philippines_dof"
+
+    country_code = 'PHL'
+
+    country = '菲律宾'
     allowed_domains = ["dof.gov.ph", "www.dof.gov.ph"]
     target_table = "phl_dof"
     start_urls = ["https://www.dof.gov.ph/news/"]

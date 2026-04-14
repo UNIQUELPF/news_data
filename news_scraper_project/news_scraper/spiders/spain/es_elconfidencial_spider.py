@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EsElconfidencialSpider(BaseNewsSpider):
     name = 'es_elconfidencial'
+
+    country_code = 'ESP'
+
+    country = '西班牙'
     allowed_domains = ['elconfidencial.com']
     
     # 实时新闻入口。结合探测，尝试 ?page=X 和 /pX/ 的兼容性

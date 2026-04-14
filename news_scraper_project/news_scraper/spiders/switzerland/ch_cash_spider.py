@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class CashCHSpider(BaseNewsSpider):
     name = 'ch_cash'
+
+    country_code = 'CHE'
+
+    country = '瑞士'
     allowed_domains = ['cash.ch']
     start_urls = ['https://www.cash.ch/news/top-news']
     target_table = 'ch_cash_news'

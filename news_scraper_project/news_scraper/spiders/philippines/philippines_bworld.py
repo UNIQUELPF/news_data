@@ -12,6 +12,10 @@ from news_scraper.spiders.philippines.base import PhilippinesBaseSpider
 
 class PhilippinesBworldSpider(PhilippinesBaseSpider):
     name = "philippines_bworld"
+
+    country_code = 'PHL'
+
+    country = '菲律宾'
     allowed_domains = ["bworldonline.com", "www.bworldonline.com"]
     target_table = "phl_bworld"
     start_urls = ["https://www.bworldonline.com/economy/"]

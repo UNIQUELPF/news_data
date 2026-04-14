@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UzNuzSpider(BaseNewsSpider):
     name = 'uz_nuz'
+
+    country_code = 'UZB'
+
+    country = '乌兹别克斯坦'
     allowed_domains = ['nuz.uz']
     
     # 政治板块入口

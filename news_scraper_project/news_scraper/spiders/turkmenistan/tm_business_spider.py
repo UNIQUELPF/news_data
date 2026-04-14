@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TmBusinessSpider(BaseNewsSpider):
     name = 'tm_business'
+
+    country_code = 'TKM'
+
+    country = '土库曼斯坦'
     allowed_domains = ['business.com.tm']
     
     # URL for pagination containing the explicit API index

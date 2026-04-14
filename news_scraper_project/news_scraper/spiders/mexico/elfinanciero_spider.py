@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MexicoElFinancieroSpider(BaseNewsSpider):
     name = 'mexico_elfinanciero'
+
+    country_code = 'MEX'
+
+    country = '墨西哥'
     allowed_domains = ['elfinanciero.com.mx']
     start_urls = ['https://www.elfinanciero.com.mx/economia/']
     

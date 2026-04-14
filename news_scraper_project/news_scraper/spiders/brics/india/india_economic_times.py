@@ -3,6 +3,7 @@
 import scrapy
 from datetime import datetime
 from news_scraper.items import NewsItem
+from news_scraper.utils import get_incremental_state
 
 
 class IndiaEconomicTimesSpider(scrapy.Spider):
@@ -15,6 +16,10 @@ class IndiaEconomicTimesSpider(scrapy.Spider):
     Each page returns ~16 articles within div.eachStory elements.
     """
     name = "india_economic_times"
+
+    country_code = 'IND'
+
+    country = '印度'
     allowed_domains = ["economictimes.indiatimes.com"]
     target_table = "ind_economic_times"
 
@@ -36,39 +41,16 @@ class IndiaEconomicTimesSpider(scrapy.Spider):
         self.cutoff_date = datetime(2026, 1, 1)
         self.seen_urls = set()
 
-        # DB init: create table + get latest publish_time for incremental scraping
         try:
-            import psycopg2
-            from scrapy.utils.project import get_project_settings
-            settings = get_project_settings()
-            pg = settings.get('POSTGRES_SETTINGS', {})
-            conn = psycopg2.connect(
-                host=pg.get('host', 'postgres'),
-                database=pg.get('database', 'scrapy_db'),
-                user=pg.get('user', 'your_user'),
-                password=pg.get('password', 'your_password'),
-                port=pg.get('port', 5432)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
             )
-            cur = conn.cursor()
-            cur.execute(
-                f"CREATE TABLE IF NOT EXISTS {self.target_table} ("
-                f"id SERIAL PRIMARY KEY, url TEXT UNIQUE, title TEXT, "
-                f"content TEXT, publish_time TIMESTAMP, author TEXT, "
-                f"language TEXT, section TEXT);"
-            )
-            conn.commit()
-
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            row = cur.fetchone()
-            if row and row[0]:
-                self.cutoff_date = max(self.cutoff_date, row[0].replace(tzinfo=None))
-
-            # Pre-load existing URLs to avoid refetching detail pages
-            cur.execute(f"SELECT url FROM {self.target_table}")
-            for r in cur.fetchall():
-                self.seen_urls.add(r[0])
-
-            conn.close()
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
             self.logger.info(f"Cutoff date: {self.cutoff_date}, existing URLs: {len(self.seen_urls)}")
         except Exception as e:
             self.logger.warning(f"DB init error: {e}")

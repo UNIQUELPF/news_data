@@ -11,6 +11,10 @@ from news_scraper.spiders.france.base import FranceBaseSpider
 
 class FranceAmfSpider(FranceBaseSpider):
     name = "france_amf"
+
+    country_code = 'FRA'
+
+    country = '法国'
     allowed_domains = ["amf-france.org", "www.amf-france.org"]
     target_table = "fra_amf"
     start_urls = [

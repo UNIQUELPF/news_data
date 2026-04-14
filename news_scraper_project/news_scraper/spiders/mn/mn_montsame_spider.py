@@ -13,6 +13,10 @@ class MnMontsameSpider(BaseNewsSpider):
     Strategy: Full backfill on first run, incremental on subsequent runs.
     """
     name = "mn_montsame"
+
+    country_code = 'MNG'
+
+    country = '蒙古'
     allowed_domains = ["www.montsame.mn"]
     start_urls = ["https://www.montsame.mn/cn/more/103"]
     target_table = "mn_montsame_news"

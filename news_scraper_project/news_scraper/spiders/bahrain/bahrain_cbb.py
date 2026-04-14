@@ -11,6 +11,10 @@ from news_scraper.spiders.bahrain.base import BahrainBaseSpider
 
 class BahrainCbbSpider(BahrainBaseSpider):
     name = "bahrain_cbb"
+
+    country_code = 'BHR'
+
+    country = '巴林'
     allowed_domains = ["cbb.gov.bh", "www.cbb.gov.bh"]
     target_table = "bhr_cbb"
     ajax_url = "https://www.cbb.gov.bh/wp-admin/admin-ajax.php"

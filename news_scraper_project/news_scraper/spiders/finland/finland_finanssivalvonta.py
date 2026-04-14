@@ -9,6 +9,10 @@ from news_scraper.spiders.finland.base import FinlandBaseSpider
 
 class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
     name = "finland_finanssivalvonta"
+
+    country_code = 'FIN'
+
+    country = '芬兰'
     allowed_domains = ["finanssivalvonta.fi", "www.finanssivalvonta.fi"]
     target_table = "fin_finanssivalvonta"
     start_urls = [

@@ -7,6 +7,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class PolitikaSpider(scrapy.Spider):
     name = 'politika'
+
+    country_code = 'SRB'
+
+    country = '塞尔维亚'
     allowed_domains = ['politika.rs']
     start_urls = ['https://www.politika.rs/scc/columns/archive/6']
     
@@ -19,7 +23,7 @@ class PolitikaSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(PolitikaSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         return spider
 
     def parse(self, response):

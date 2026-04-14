@@ -7,9 +7,8 @@ import dateparser
 import psycopg2
 import scrapy
 from bs4 import BeautifulSoup
-
 from news_scraper.items import NewsItem
-
+from news_scraper.utils import get_incremental_state
 
 # 阿尔及利亚政府/监管类来源
 # 站点：Bank of Algeria
@@ -27,6 +26,12 @@ class AlgeriaBankOfAlgeriaSpider(scrapy.Spider):
     """
 
     name = "algeria_bank_of_algeria"
+
+
+    country_code = 'DZA'
+
+
+    country = '阿尔及利亚'
     allowed_domains = ["bank-of-algeria.dz", "www.bank-of-algeria.dz"]
     target_table = "dza_bank_of_algeria"
 
@@ -80,14 +85,19 @@ class AlgeriaBankOfAlgeriaSpider(scrapy.Spider):
                 """
             )
             conn.commit()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            return max_time
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as exc:
             self.logger.error(f"DB init failed for {self.target_table}: {exc}")
             return self.default_cutoff

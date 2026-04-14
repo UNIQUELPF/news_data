@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ItIlsole24oreSpider(BaseNewsSpider):
     name = "it_ilsole24ore"
+
+    country_code = 'ITA'
+
+    country = '意大利'
     allowed_domains = ["ilsole24ore.com"]
     
     start_urls = [

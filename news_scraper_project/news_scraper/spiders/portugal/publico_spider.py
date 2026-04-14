@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalPublicoSpider(BaseNewsSpider):
     name = 'pt_publico'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['publico.pt']
     start_urls = ['https://www.publico.pt/economia']
     

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EsAdminSpider(BaseNewsSpider):
     name = 'es_admin'
+
+    country_code = 'ESP'
+
+    country = '西班牙'
     allowed_domains = ['administracion.gob.es', 'boe.es', 'interior.gob.es', 'sanidad.gob.es', 'moncloa.gob.es']
     
     # 列表页

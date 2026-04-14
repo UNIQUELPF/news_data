@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MexicoInfobaeSpider(BaseNewsSpider):
     name = 'mexico_infobae'
+
+    country_code = 'MEX'
+
+    country = '墨西哥'
     allowed_domains = ['infobae.com']
     start_urls = ['https://www.infobae.com/mexico/ultimas-noticias/']
     

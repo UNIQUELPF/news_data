@@ -9,6 +9,10 @@ from news_scraper.spiders.kyrgyzstan.base import KyrgyzstanBaseSpider
 
 class KyrgyzstanGovSpider(KyrgyzstanBaseSpider):
     name = "kyrgyzstan_gov"
+
+    country_code = 'KGZ'
+
+    country = '吉尔吉斯斯坦'
     allowed_domains = []
     target_table = "kgz_gov"
     start_urls = ["data:,kyrgyzstan_gov_start"]

@@ -8,6 +8,10 @@ import re
 
 class AlbaniaBankSpider(scrapy.Spider):
     name = 'albania_bank'
+
+    country_code = 'ALB'
+
+    country = '阿尔巴尼亚'
     allowed_domains = ['bankofalbania.org']
     start_urls = ['https://www.bankofalbania.org/Shtypi/Njoftimet_per_shtyp/']
     
@@ -18,7 +22,7 @@ class AlbaniaBankSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(AlbaniaBankSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         # Default starting point for newest news category
         min_cutoff = datetime(2026, 1, 1)
         spider.CUTOFF_DATE = max(dynamic_cutoff, min_cutoff) if dynamic_cutoff else min_cutoff

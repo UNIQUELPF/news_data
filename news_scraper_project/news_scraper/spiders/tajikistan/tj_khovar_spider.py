@@ -5,6 +5,10 @@ import re
 
 class TjKhovarSpider(BaseNewsSpider):
     name = 'tj_khovar'
+
+    country_code = 'TJK'
+
+    country = '塔吉克斯坦'
     allowed_domains = ['khovar.tj']
     start_urls = ['https://khovar.tj/category/economic/']
     

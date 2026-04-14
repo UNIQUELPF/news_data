@@ -9,6 +9,10 @@ from news_scraper.spiders.finland.base import FinlandBaseSpider
 
 class FinlandSuomenpankkiSpider(FinlandBaseSpider):
     name = "finland_suomenpankki"
+
+    country_code = 'FIN'
+
+    country = '芬兰'
     allowed_domains = ["suomenpankki.fi", "www.suomenpankki.fi"]
     target_table = "fin_suomenpankki"
     start_urls = ["https://www.suomenpankki.fi/en/news-and-topical/press-releases-and-news/"]

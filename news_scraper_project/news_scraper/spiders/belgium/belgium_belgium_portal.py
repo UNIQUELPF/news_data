@@ -9,6 +9,10 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumPortalSpider(BelgiumBaseSpider):
     name = "belgium_belgium_portal"
+
+    country_code = 'BEL'
+
+    country = '比利时'
     allowed_domains = ["belgium.be", "www.belgium.be"]
     target_table = "bel_belgium_portal"
     start_urls = ["https://www.belgium.be/en/News/overview?f%5B0%5D=theme%3A56"]

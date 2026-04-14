@@ -6,6 +6,10 @@ from news_scraper.spiders.qatar.base import QatarBaseSpider
 
 class QatarQcbSpider(QatarBaseSpider):
     name = "qatar_qcb"
+
+    country_code = 'QAT'
+
+    country = '卡塔尔'
     allowed_domains = []
     target_table = "qat_qcb"
     start_urls = ["https://www.qcb.gov.qa/en/News/Pages/default.aspx"]

@@ -9,6 +9,10 @@ from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
 class PakistanFinanceGovSpider(PakistanBaseSpider):
     name = "pakistan_finance_gov"
+
+    country_code = 'PAK'
+
+    country = '巴基斯坦'
     allowed_domains = ["finance.gov.pk", "www.finance.gov.pk"]
     target_table = "pak_finance_gov"
     start_urls = [

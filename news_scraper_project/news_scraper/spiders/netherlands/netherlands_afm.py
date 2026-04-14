@@ -9,6 +9,10 @@ from news_scraper.spiders.netherlands.base import NetherlandsBaseSpider
 
 class NetherlandsAfmSpider(NetherlandsBaseSpider):
     name = "netherlands_afm"
+
+    country_code = 'NLD'
+
+    country = '荷兰'
     allowed_domains = ["afm.nl", "www.afm.nl"]
     target_table = "nld_afm"
     start_urls = ["https://www.afm.nl/en/sector/actueel"]

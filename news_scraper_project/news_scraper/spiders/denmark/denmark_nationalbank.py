@@ -9,6 +9,10 @@ from news_scraper.spiders.denmark.base import DenmarkBaseSpider
 
 class DenmarkNationalbankSpider(DenmarkBaseSpider):
     name = "denmark_nationalbank"
+
+    country_code = 'DNK'
+
+    country = '丹麦'
     allowed_domains = ["nationalbanken.dk", "www.nationalbanken.dk"]
     target_table = "dnk_nationalbank"
     start_urls = ["https://www.nationalbanken.dk/en/news-and-knowledge/publications-and-speeches/"]

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MyanmarElevenSpider(BaseNewsSpider):
     name = 'mm_eleven'
+
+    country_code = 'MMR'
+
+    country = '缅甸'
     allowed_domains = ['news-eleven.com']
     start_urls = ['https://news-eleven.com/business']
     

@@ -10,6 +10,10 @@ import dateparser
 
 class UaeMubasherSpider(scrapy.Spider):
     name = "uae_mubasher"
+
+    country_code = 'ARE'
+
+    country = '阿联酋'
     allowed_domains = ["mubasher.info"]
     start_urls = ["https://www.mubasher.info/news/sa/now/latest"]
 

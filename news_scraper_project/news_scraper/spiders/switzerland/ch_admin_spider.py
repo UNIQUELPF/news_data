@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ChAdminSpider(BaseNewsSpider):
     name = 'ch_admin'
+
+    country_code = 'CHE'
+
+    country = '瑞士'
     allowed_domains = ['news.admin.ch', 'admin.ch', 'www.news.admin.ch']
     
     # 国家代码 + 网站

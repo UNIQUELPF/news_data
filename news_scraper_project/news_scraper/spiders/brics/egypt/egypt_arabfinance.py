@@ -1,14 +1,17 @@
-# 埃及arabfinance爬虫，负责抓取对应站点、机构或栏目内容。
-
-import scrapy
-import psycopg2
-import logging
 from datetime import datetime
+
 import dateparser
-import re
+import psycopg2
+import scrapy
+from news_scraper.utils import get_incremental_state
+
 
 class EgyptArabfinanceSpider(scrapy.Spider):
     name = 'egypt_arabfinance'
+
+    country_code = 'EGY'
+
+    country = '埃及'
     allowed_domains = ['arabfinance.com']
     target_table = 'egy_arabfinance'
 
@@ -43,13 +46,13 @@ class EgyptArabfinanceSpider(scrapy.Spider):
             return
 
         try:
-            self.conn = psycopg2.connect(
+            conn = psycopg2.connect(
                 dbname=settings['dbname'], user=settings['user'],
                 password=settings['password'], host=settings['host'], port=settings['port']
             )
-            self.cur = self.conn.cursor()
+            cur = conn.cursor()
 
-            self.cur.execute(f'''
+            cur.execute(f'''
                 CREATE TABLE IF NOT EXISTS {self.target_table} (
                     id SERIAL PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -62,28 +65,29 @@ class EgyptArabfinanceSpider(scrapy.Spider):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             ''')
-            self.conn.commit()
+            conn.commit()
+            cur.close()
+            conn.close()
 
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = self.cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
+            if state["source"] != "default":
+                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date} ({state['source']})")
             else:
                 self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            for row in self.cur.fetchall():
-                self.seen_urls.add(row[0])
 
         except Exception as e:
             self.logger.error(f"Failed to connect to DB for initialization: {e}")
 
     def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        return
 
     def start_requests(self):
         # We start with page 1

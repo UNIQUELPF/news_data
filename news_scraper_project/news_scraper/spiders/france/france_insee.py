@@ -11,6 +11,10 @@ from news_scraper.spiders.france.base import FranceBaseSpider
 
 class FranceInseeSpider(FranceBaseSpider):
     name = "france_insee"
+
+    country_code = 'FRA'
+
+    country = '法国'
     allowed_domains = ["insee.fr", "www.insee.fr"]
     target_table = "fra_insee"
     start_urls = ["https://www.insee.fr/fr/accueil"]

@@ -5,6 +5,10 @@ import re
 
 class TjAvestaSpider(BaseNewsSpider):
     name = 'tj_avesta'
+
+    country_code = 'TJK'
+
+    country = '塔吉克斯坦'
     allowed_domains = ['avesta.tj']
     start_urls = ['https://avesta.tj/news/ekonomika/']
     

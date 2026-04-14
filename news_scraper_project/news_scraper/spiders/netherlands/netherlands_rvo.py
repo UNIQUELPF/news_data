@@ -9,6 +9,10 @@ from news_scraper.spiders.netherlands.base import NetherlandsBaseSpider
 
 class NetherlandsRvoSpider(NetherlandsBaseSpider):
     name = "netherlands_rvo"
+
+    country_code = 'NLD'
+
+    country = '荷兰'
     allowed_domains = ["english.rvo.nl", "rvo.nl", "www.rvo.nl"]
     target_table = "nld_rvo"
     start_urls = ["https://english.rvo.nl/en/news"]

@@ -9,6 +9,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class AlbaniaMonitorSpider(scrapy.Spider):
     name = 'albania_monitor'
+
+    country_code = 'ALB'
+
+    country = '阿尔巴尼亚'
     allowed_domains = ['monitor.al']
     start_urls = ['https://monitor.al/ekonomi/']
     target_table = 'alb_monitor'
@@ -16,7 +20,7 @@ class AlbaniaMonitorSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(AlbaniaMonitorSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         spider.CUTOFF_DATE = max(dynamic_cutoff, datetime(2026, 1, 1)) if dynamic_cutoff else datetime(2026, 1, 1)
         return spider
 

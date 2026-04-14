@@ -7,13 +7,17 @@ from urllib.parse import parse_qs, urlparse
 import psycopg2
 import scrapy
 from bs4 import BeautifulSoup
-
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
 
 
 class IndonesiaKompasMoneySpider(scrapy.Spider):
     name = "indonesia_kompas_money"
+
+    country_code = 'IDN'
+
+    country = '印度尼西亚'
     allowed_domains = ["indeks.kompas.com", "money.kompas.com", "kompas.com"]
     start_urls = ["https://indeks.kompas.com/?site=money"]
     sitemap_urls = [
@@ -58,14 +62,19 @@ class IndonesiaKompasMoneySpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            return max(max_time, self.default_cutoff)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return max(state["cutoff_date"], self.default_cutoff)
         except Exception as exc:
             self.logger.error(f"DB init failed: {exc}")
             return self.default_cutoff

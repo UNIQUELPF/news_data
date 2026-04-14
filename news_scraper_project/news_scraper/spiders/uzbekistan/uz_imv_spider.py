@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UzImvSpider(BaseNewsSpider):
     name = 'uz_imv'
+
+    country_code = 'UZB'
+
+    country = '乌兹别克斯坦'
     allowed_domains = ['api.mf.uz', 'imv.uz', 'mf.uz']
     
     # API 列表入口

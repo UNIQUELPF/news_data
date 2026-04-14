@@ -9,6 +9,10 @@ from news_scraper.spiders.netherlands.base import NetherlandsBaseSpider
 
 class NetherlandsDnbSpider(NetherlandsBaseSpider):
     name = "netherlands_dnb"
+
+    country_code = 'NLD'
+
+    country = '荷兰'
     allowed_domains = []
     target_table = "nld_dnb"
     start_urls = ["data:,netherlands_dnb_start"]

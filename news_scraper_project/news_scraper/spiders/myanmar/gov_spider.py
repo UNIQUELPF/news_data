@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MyanmarGovSpider(BaseNewsSpider):
     name = 'mm_gov'
+
+    country_code = 'MMR'
+
+    country = '缅甸'
     allowed_domains = ['myanmar.gov.mm']
     start_urls = ['https://www.myanmar.gov.mm/news-media/news/latest-news']
     

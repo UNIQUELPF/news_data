@@ -11,6 +11,10 @@ from news_scraper.spiders.kyrgyzstan.base import KyrgyzstanBaseSpider
 
 class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
     name = "kyrgyzstan_nbkr"
+
+    country_code = 'KGZ'
+
+    country = '吉尔吉斯斯坦'
     allowed_domains = []
     target_table = "kgz_nbkr"
     start_urls = ["data:,kyrgyzstan_nbkr_start"]

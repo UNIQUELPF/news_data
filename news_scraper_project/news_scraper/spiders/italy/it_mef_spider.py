@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ItMefSpider(BaseNewsSpider):
     name = "it_mef"
+
+    country_code = 'ITA'
+
+    country = '意大利'
     allowed_domains = ["mef.gov.it"]
     # We use a base URL and increment pages manually in parse if needed, 
     # but starting with a few helps

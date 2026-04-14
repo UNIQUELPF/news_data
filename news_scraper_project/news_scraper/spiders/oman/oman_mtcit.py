@@ -24,6 +24,12 @@ class OmanMtcitSpider(OmanBaseSpider):
     """
 
     name = "oman_mtcit"
+
+
+    country_code = 'OMN'
+
+
+    country = '阿曼'
     allowed_domains = ["mtcit.gov.om", "www.mtcit.gov.om"]
     target_table = "omn_mtcit"
     start_urls = [

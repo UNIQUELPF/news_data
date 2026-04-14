@@ -16,6 +16,12 @@ class IrelandIrishExaminerSpider(IrelandBaseSpider):
     """
 
     name = "ireland_irish_examiner"
+
+
+    country_code = 'IRL'
+
+
+    country = '爱尔兰'
     allowed_domains = ["irishexaminer.com", "www.irishexaminer.com"]
     # 经济类：商业新闻媒体表
     target_table = "irl_irish_examiner"

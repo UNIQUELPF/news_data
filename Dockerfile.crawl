@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --default-timeout=300 --no-cache-dir -r requirements.txt
+
+RUN playwright install chromium
+
+COPY . .
+
+ENV PYTHONPATH=/app
+
+CMD ["celery", "-A", "pipeline.celery_app:celery_app", "worker", "-Q", "crawl", "--loglevel=info"]

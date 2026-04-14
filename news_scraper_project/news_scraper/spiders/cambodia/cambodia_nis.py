@@ -7,6 +7,10 @@ from news_scraper.spiders.cambodia.base import CambodiaBaseSpider
 
 class CambodiaNisSpider(CambodiaBaseSpider):
     name = "cambodia_nis"
+
+    country_code = 'KHM'
+
+    country = '柬埔寨'
     allowed_domains = []
     target_table = "khm_nis"
     start_urls = ["data:,cambodia_nis_start"]

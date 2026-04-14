@@ -1,5 +1,8 @@
-from scrapy import signals
 import time
+
+from scrapy import signals
+from scrapy.http import HtmlResponse
+
 
 class BatchDelayMiddleware:
     def __init__(self, crawler):
@@ -21,13 +24,21 @@ class BatchDelayMiddleware:
             time.sleep(self.delay)
             spider.logger.info("*** Resuming crawl... ***")
 
-    def process_request(self, request, spider):
+    def process_request(self, request):
         return None
 
-from scrapy.http import HtmlResponse
 
 class CurlCffiMiddleware:
-    def process_request(self, request, spider):
+    def __init__(self, crawler):
+        self.crawler = crawler
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler)
+
+    def process_request(self, request):
+        spider = getattr(self.crawler, "spider", None)
+
         # Skip requests marked for Playwright
         if request.meta.get('playwright'):
             return None

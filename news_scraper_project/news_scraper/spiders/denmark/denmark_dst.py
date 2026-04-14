@@ -11,6 +11,10 @@ from news_scraper.spiders.denmark.base import DenmarkBaseSpider
 
 class DenmarkDstSpider(DenmarkBaseSpider):
     name = "denmark_dst"
+
+    country_code = 'DNK'
+
+    country = '丹麦'
     allowed_domains = ["dst.dk", "www.dst.dk"]
     target_table = "dnk_dst"
     start_urls = ["https://www.dst.dk/en/Statistik/udgivelser"]

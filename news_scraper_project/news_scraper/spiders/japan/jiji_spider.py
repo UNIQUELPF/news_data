@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class JijiSpider(BaseNewsSpider):
     name = 'jp_jiji'
+
+    country_code = 'JPN'
+
+    country = '日本'
     allowed_domains = ['jiji.com']
     
     # 目标表名：jp_jiji_news

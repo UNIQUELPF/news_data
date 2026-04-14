@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TjPresidentSpider(BaseNewsSpider):
     name = 'tj_president'
+
+    country_code = 'TJK'
+
+    country = '塔吉克斯坦'
     allowed_domains = ['president.tj', 'controlpanel.president.tj']
     
     # 初始 API：从第 1 页开始

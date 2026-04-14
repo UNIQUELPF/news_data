@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MexicoExpansionSpider(BaseNewsSpider):
     name = 'mexico_expansion'
+
+    country_code = 'MEX'
+
+    country = '墨西哥'
     allowed_domains = ['expansion.mx']
     start_urls = ['https://expansion.mx/economia']
     

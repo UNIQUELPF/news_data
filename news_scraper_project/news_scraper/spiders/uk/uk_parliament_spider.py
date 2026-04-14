@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UkParliamentSpider(BaseNewsSpider):
     name = "uk_parliament"
+
+    country_code = 'GBR'
+
+    country = '英国'
     allowed_domains = ["parliament.uk", "r.jina.ai"]
     
     # 3 Parallel categories to cover 'Parliamentary news'

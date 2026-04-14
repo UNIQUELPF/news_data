@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class SgChannelNewsAsiaSpider(BaseNewsSpider):
     name = 'sg_channelnewsasia'
+
+    country_code = 'SGP'
+
+    country = '新加坡'
     allowed_domains = ['channelnewsasia.com', 'algolianet.com', 'algolia.net']
     
     algolia_app_id = 'KKWFBQ38XF'

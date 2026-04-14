@@ -11,6 +11,10 @@ from news_scraper.spiders.france.base import FranceBaseSpider
 
 class FranceBanqueFranceSpider(FranceBaseSpider):
     name = "france_banque_france"
+
+    country_code = 'FRA'
+
+    country = '法国'
     allowed_domains = ["banque-france.fr", "www.banque-france.fr"]
     target_table = "fra_banque_france"
     start_urls = ["https://www.banque-france.fr/fr/actualites"]

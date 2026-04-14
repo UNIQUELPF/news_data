@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class KyodoSpider(BaseNewsSpider):
     name = 'jp_kyodo'
+
+    country_code = 'JPN'
+
+    country = '日本'
     allowed_domains = ['kyodo.co.jp']
     start_urls = ['https://www.kyodo.co.jp/news/']
     

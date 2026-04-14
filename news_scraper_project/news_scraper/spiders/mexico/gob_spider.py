@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MexicoGobSpider(BaseNewsSpider):
     name = 'mexico_gob'
+
+    country_code = 'MEX'
+
+    country = '墨西哥'
     allowed_domains = ['www.gob.mx']
     start_urls = ['https://www.gob.mx/se/archivo/prensa?idiom=es']
     

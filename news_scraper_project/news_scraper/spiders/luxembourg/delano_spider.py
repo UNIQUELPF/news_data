@@ -1,14 +1,21 @@
-import scrapy
-import re
 import json
-import psycopg2
+import re
 from datetime import datetime
-import dateutil.parser
-from news_scraper.settings import POSTGRES_SETTINGS
+
+import psycopg2
+import scrapy
+from dateutil import parser as date_parser
 from news_scraper.items import NewsItem
+from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class DelanoSpider(scrapy.Spider):
     name = "luxembourg_delano"
+
+    country_code = 'LUX'
+
+    country = '卢森堡'
     allowed_domains = ["delano.lu"]
     target_table = "luxembourg_delano_news"
     
@@ -79,12 +86,17 @@ class DelanoSpider(scrapy.Spider):
             if not cur.fetchone()[0]:
                 return datetime(2026, 1, 1)
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            res = cur.fetchone()[0]
             cur.close()
             conn.close()
-            if res:
-                return res.replace(tzinfo=None)
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as e:
             self.logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
         return datetime(2026, 1, 1)
@@ -154,7 +166,7 @@ class DelanoSpider(scrapy.Spider):
                 continue
             
             try:
-                dt = dateutil.parser.isoparse(pub_date_str).replace(tzinfo=None)
+                dt = date_parser.isoparse(pub_date_str).replace(tzinfo=None)
             except Exception:
                 continue
                 
@@ -218,7 +230,7 @@ class DelanoSpider(scrapy.Spider):
             return
             
         try:
-            publish_time = dateutil.parser.isoparse(pub_date_str).replace(tzinfo=None)
+            publish_time = date_parser.isoparse(pub_date_str).replace(tzinfo=None)
         except Exception:
             return
             

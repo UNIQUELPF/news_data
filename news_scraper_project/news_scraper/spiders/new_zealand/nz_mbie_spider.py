@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NzMbieSpider(BaseNewsSpider):
     name = "nz_mbie"
+
+    country_code = 'NZL'
+
+    country = '新西兰'
     allowed_domains = ["mbie.govt.nz"]
     start_url_tmpl = "https://www.mbie.govt.nz/about/news?start={}"
     

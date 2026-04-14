@@ -11,6 +11,10 @@ from news_scraper.spiders.germany.base import GermanyBaseSpider
 
 class GermanyFinanceGovSpider(GermanyBaseSpider):
     name = "germany_finance_gov"
+
+    country_code = 'DEU'
+
+    country = '德国'
     allowed_domains = ["bundesfinanzministerium.de", "www.bundesfinanzministerium.de"]
     target_table = "deu_finance_gov"
     start_urls = ["https://www.bundesfinanzministerium.de/Web/EN/Press/Press_releases/press_releases.html"]

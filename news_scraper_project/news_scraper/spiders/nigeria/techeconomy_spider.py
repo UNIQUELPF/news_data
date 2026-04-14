@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NigeriaTechEconomySpider(BaseNewsSpider):
     name = 'ng_techeconomy'
+
+    country_code = 'NGA'
+
+    country = '尼日利亚'
     allowed_domains = ['techeconomy.ng']
     start_urls = ['https://techeconomy.ng/category/business/']
     

@@ -6,6 +6,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EsAbcSpider(BaseNewsSpider):
     name = 'es_abc'
+
+    country_code = 'ESP'
+
+    country = '西班牙'
     allowed_domains = ['abc.es']
     
     # 经济板块分页

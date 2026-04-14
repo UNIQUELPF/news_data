@@ -1,18 +1,248 @@
 services:
-  crawler:
-    build: .
-    container_name: data_collection_crawler
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: news_scheduler
     depends_on:
-      - postgres
       - redis
-    shm_size: '2gb'
-    # 挂载卷方便开发时同步代码
+    command:
+      [
+        "celery",
+        "-A",
+        "pipeline.celery_app:celery_app",
+        "beat",
+        "--loglevel=info",
+      ]
     volumes:
       - .:/app
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
     environment:
       TZ: Asia/Shanghai
       PYTHONUNBUFFERED: 1
-      PYTHONPATH: /app/news_scraper_project
+      PYTHONPATH: /app:/app/news_scraper_project
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LOCAL_EMBEDDING_DEVICE: ${LOCAL_EMBEDDING_DEVICE:-cpu}
+      LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+
+  crawl-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawl
+    container_name: news_crawl_worker
+    depends_on:
+      - redis
+    command:
+      [
+        "celery",
+        "-A",
+        "pipeline.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "crawl",
+        "-c",
+        "1",
+        "--loglevel=info",
+      ]
+    volumes:
+      - .:/app
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LOCAL_EMBEDDING_DEVICE: ${LOCAL_EMBEDDING_DEVICE:-cpu}
+      LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+
+  translation-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: news_translation_worker
+    depends_on:
+      - redis
+    command:
+      [
+        "celery",
+        "-A",
+        "pipeline.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "translate,default",
+        "-c",
+        "2",
+        "--loglevel=info",
+      ]
+    volumes:
+      - .:/app
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LOCAL_EMBEDDING_DEVICE: ${LOCAL_EMBEDDING_DEVICE:-cpu}
+      LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+
+  embedding-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.embed
+    container_name: news_embedding_worker
+    depends_on:
+      - redis
+    command:
+      [
+        "celery",
+        "-A",
+        "pipeline.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "embed",
+        "-c",
+        "2",
+        "--loglevel=info",
+      ]
+    volumes:
+      - .:/app
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LOCAL_EMBEDDING_DEVICE: ${LOCAL_EMBEDDING_DEVICE:-cpu}
+      LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: news_api
+    depends_on:
+      - postgres
+      - redis
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - .:/app
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LOCAL_EMBEDDING_DEVICE: ${LOCAL_EMBEDDING_DEVICE:-cpu}
+      LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: news_frontend
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_BASE: ""
+    ports:
+      - "13000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok) process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  web:
+    image: nginx:1.27-alpine
+    container_name: news_web
+    depends_on:
+      - api
+      - frontend
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "18080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   postgres:
     image: postgres:15
@@ -26,24 +256,24 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U your_user -d scrapy_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7
     container_name: scrapy_redis
     ports:
       - "6379:6379"
-
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: scrapy_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-      TZ: Asia/Shanghai
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres_data:

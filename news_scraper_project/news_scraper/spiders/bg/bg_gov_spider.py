@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class BgGovSpider(BaseNewsSpider):
     name = "bg_gov"
+
+    country_code = 'BGR'
+
+    country = '保加利亚'
     allowed_domains = ["www.gov.bg"]
     start_urls = ["https://www.gov.bg/bg/prestsentar/novini?page=1"]
     target_table = "bg_gov_news"

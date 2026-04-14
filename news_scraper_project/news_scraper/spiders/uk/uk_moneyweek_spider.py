@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class UkMoneyweekSpider(BaseNewsSpider):
     name = "uk_moneyweek"
+
+    country_code = 'GBR'
+
+    country = '英国'
     allowed_domains = ["moneyweek.com"]
     start_urls = ["https://moneyweek.com/economy/uk-economy"]
     

@@ -11,6 +11,10 @@ from news_scraper.spiders.bahrain.base import BahrainBaseSpider
 
 class BahrainEdbSpider(BahrainBaseSpider):
     name = "bahrain_edb"
+
+    country_code = 'BHR'
+
+    country = '巴林'
     allowed_domains = ["bahrainedb.com", "www.bahrainedb.com"]
     target_table = "bhr_edb"
     start_urls = [

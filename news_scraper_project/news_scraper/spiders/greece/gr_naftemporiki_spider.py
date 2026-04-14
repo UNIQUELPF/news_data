@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GrNaftemporikiSpider(BaseNewsSpider):
     name = 'gr_naftemporiki'
+
+    country_code = 'GRC'
+
+    country = '希腊'
     allowed_domains = ['naftemporiki.gr']
     
     # 航运报新闻大厅列表

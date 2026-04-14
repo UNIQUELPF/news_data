@@ -10,6 +10,10 @@ from news_scraper.spiders.korea.base import KoreaBaseSpider
 
 class KoreaBokSpider(KoreaBaseSpider):
     name = "korea_bok"
+
+    country_code = 'KOR'
+
+    country = '韩国'
     allowed_domains = ["www.bok.or.kr", "bok.or.kr"]
     target_table = "kor_bok"
     list_url = "https://www.bok.or.kr/eng/singl/newsDataEng/listCont.do"

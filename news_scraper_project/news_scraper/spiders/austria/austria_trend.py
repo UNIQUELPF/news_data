@@ -15,6 +15,10 @@ from news_scraper.spiders.austria.base import AustriaBaseSpider
 
 class AustriaTrendSpider(AustriaBaseSpider):
     name = "austria_trend"
+
+    country_code = 'AUT'
+
+    country = '奥地利'
     allowed_domains = ["trend.at", "www.trend.at"]
     target_table = "aut_trend"
     start_urls = [

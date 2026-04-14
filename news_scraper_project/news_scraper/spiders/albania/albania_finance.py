@@ -8,6 +8,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class AlbaniaFinanceSpider(scrapy.Spider):
     name = 'albania_finance'
+
+    country_code = 'ALB'
+
+    country = '阿尔巴尼亚'
     allowed_domains = ['financa.gov.al']
     start_urls = ['https://financa.gov.al/newsrooms/lajme/']
     target_table = 'alb_financa'
@@ -21,7 +25,7 @@ class AlbaniaFinanceSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(AlbaniaFinanceSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         # We want to crawl at least from 2026-01-01
         min_cutoff = datetime(2026, 1, 1)
         spider.CUTOFF_DATE = max(dynamic_cutoff, min_cutoff) if dynamic_cutoff else min_cutoff

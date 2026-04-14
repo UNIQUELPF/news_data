@@ -9,6 +9,10 @@ from news_scraper.spiders.laos.base import LaosBaseSpider
 
 class LaosLaotianTimesSpider(LaosBaseSpider):
     name = "laos_laotiantimes"
+
+    country_code = 'LAO'
+
+    country = '老挝'
     allowed_domains = ["laotiantimes.com", "www.laotiantimes.com"]
     target_table = "lao_laotiantimes"
     start_urls = ["https://laotiantimes.com/category/business/"]

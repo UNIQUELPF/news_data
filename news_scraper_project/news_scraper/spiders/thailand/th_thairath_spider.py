@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ThThairathSpider(BaseNewsSpider):
     name = 'th_thairath'
+
+    country_code = 'THA'
+
+    country = '泰国'
     allowed_domains = ['thairath.co.th']
     
     # 初始 URL：政治新闻最新列表

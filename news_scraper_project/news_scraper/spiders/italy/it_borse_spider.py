@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class ItBorseSpider(BaseNewsSpider):
     name = "it_borse"
+
+    country_code = 'ITA'
+
+    country = '意大利'
     allowed_domains = ["borse.it"]
     start_urls = ["https://www.borse.it/notizie"]
     

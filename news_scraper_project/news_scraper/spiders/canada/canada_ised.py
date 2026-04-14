@@ -6,6 +6,10 @@ from news_scraper.spiders.canada.base import CanadaBaseSpider
 
 class CanadaIsedSpider(CanadaBaseSpider):
     name = "canada_ised"
+
+    country_code = 'CAN'
+
+    country = '加拿大'
     allowed_domains = []
     target_table = "can_ised"
     start_urls = ["data:,canada_ised_start"]

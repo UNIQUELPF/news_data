@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class RoWallstreetSpider(BaseNewsSpider):
     name = "ro_wallstreet"
+
+    country_code = 'ROU'
+
+    country = '罗马尼亚'
     allowed_domains = ["www.wall-street.ro"]
     start_urls = ["https://www.wall-street.ro/articol/economie-and-finante/index.html"]
     target_table = "ro_wallstreet_news"

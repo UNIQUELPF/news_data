@@ -10,6 +10,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class InformKzSpider(scrapy.Spider):
     name = 'informkz'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['inform.kz']
     
     # Russian month map
@@ -41,7 +45,7 @@ class InformKzSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(InformKzSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_informkz')
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_informkz', spider_name=spider.name)
         return spider
 
     def start_requests(self):

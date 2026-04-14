@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EsEfeSpider(BaseNewsSpider):
     name = 'es_efe'
+
+    country_code = 'ESP'
+
+    country = '西班牙'
     allowed_domains = ['efe.com']
     
     # 埃菲社板块

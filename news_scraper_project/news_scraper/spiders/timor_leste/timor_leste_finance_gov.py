@@ -9,6 +9,10 @@ from news_scraper.spiders.timor_leste.base import TimorLesteBaseSpider
 
 class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
     name = "timor_leste_finance_gov"
+
+    country_code = 'TLS'
+
+    country = '东帝汶'
     allowed_domains = ["mof.gov.tl", "mofwebadmin.mof.gov.tl"]
     target_table = "tls_finance_gov"
     verify_ssl = False

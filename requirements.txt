@@ -1,7 +1,11 @@
 scrapy
 scrapy-playwright
 scrapy-redis
+celery[redis]
+fastapi
+uvicorn[standard]
 psycopg2-binary
+httpx
 beautifulsoup4
 feedparser
 curl_cffi

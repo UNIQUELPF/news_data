@@ -16,6 +16,12 @@ class IrelandIndependentSpider(IrelandBaseSpider):
     """
 
     name = "ireland_independent"
+
+
+    country_code = 'IRL'
+
+
+    country = '爱尔兰'
     allowed_domains = ["independent.ie", "www.independent.ie"]
     # 经济类：商业新闻媒体表
     target_table = "irl_independent"

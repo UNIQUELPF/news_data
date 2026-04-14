@@ -22,6 +22,12 @@ class OmanObserverSpider(OmanBaseSpider):
     """
 
     name = "oman_observer"
+
+
+    country_code = 'OMN'
+
+
+    country = '阿曼'
     allowed_domains = ["omanobserver.om", "www.omanobserver.om"]
     target_table = "omn_oman_observer"
     start_urls = [

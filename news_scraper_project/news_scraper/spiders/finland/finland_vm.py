@@ -9,6 +9,10 @@ from news_scraper.spiders.finland.base import FinlandBaseSpider
 
 class FinlandVmSpider(FinlandBaseSpider):
     name = "finland_vm"
+
+    country_code = 'FIN'
+
+    country = '芬兰'
     allowed_domains = ["vm.fi", "www.vm.fi"]
     target_table = "fin_vm"
     start_urls = ["https://vm.fi/en/press-releases"]

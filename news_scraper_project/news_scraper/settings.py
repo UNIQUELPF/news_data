@@ -2,22 +2,9 @@ import os
 
 BOT_NAME = 'news_scraper'
 
-# Dynamically discover all spider sub-packages (including nested ones like brics/)
-spider_base_dir = os.path.join(os.path.dirname(__file__), 'spiders')
-
-def _find_spider_modules(base_dir, base_pkg):
-    """Recursively find all spider sub-packages."""
-    modules = []
-    for item in os.listdir(base_dir):
-        item_path = os.path.join(base_dir, item)
-        if os.path.isdir(item_path) and item != '__pycache__':
-            pkg = f'{base_pkg}.{item}'
-            modules.append(pkg)
-            # Also check one level deeper (e.g. brics/china)
-            modules.extend(_find_spider_modules(item_path, pkg))
-    return modules
-
-SPIDER_MODULES = ['news_scraper.spiders'] + _find_spider_modules(spider_base_dir, 'news_scraper.spiders')
+# Let Scrapy discover spiders from the package root. Explicitly listing nested
+# sub-packages causes the same spider modules to be imported multiple times.
+SPIDER_MODULES = ['news_scraper.spiders']
 
 NEWSPIDER_MODULE = 'news_scraper.spiders'
 
@@ -46,6 +33,10 @@ ITEM_PIPELINES = {
     'news_scraper.pipelines.PostgresPipeline': 300,
 }
 
+ENABLE_UNIFIED_PIPELINE = os.getenv('ENABLE_UNIFIED_PIPELINE', '1') == '1'
+ENABLE_LEGACY_TABLES = os.getenv('ENABLE_LEGACY_TABLES', '1') == '1'
+ENABLE_POSTGRES_PIPELINE = os.getenv('ENABLE_POSTGRES_PIPELINE', '1') == '1'
+
 DOWNLOADER_MIDDLEWARES = {
     'news_scraper.middlewares.CurlCffiMiddleware': 101,
     'news_scraper.middlewares.BatchDelayMiddleware': 600,
@@ -53,6 +44,7 @@ DOWNLOADER_MIDDLEWARES = {
 
 TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
 FEED_EXPORT_ENCODING = 'utf-8'
+TELNETCONSOLE_ENABLED = os.getenv('TELNETCONSOLE_ENABLED', '0') == '1'
 
 # Playwright configuration
 PLAYWRIGHT_BROWSER_TYPE = "chromium"

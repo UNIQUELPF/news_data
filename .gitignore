@@ -14,4 +14,23 @@ __pycache__/
 .vscode/
 .DS_Store
 *.log.*
+
+# Project specific
+celerybeat-schedule
+.cache/
+.codex
+
+# Frontend
+node_modules/
+.next/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Text files - refined to allow requirements and documentation
 *.txt
+!requirements*.txt

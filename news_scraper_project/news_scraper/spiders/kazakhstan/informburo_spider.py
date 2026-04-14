@@ -10,6 +10,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class InformburoSpider(scrapy.Spider):
     name = 'informburo'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['informburo.kz']
     start_urls = ['https://informburo.kz/']
     
@@ -18,7 +22,7 @@ class InformburoSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(InformburoSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_informburo')
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_informburo', spider_name=spider.name)
         return spider
 
     def extract_date_from_url(self, url):

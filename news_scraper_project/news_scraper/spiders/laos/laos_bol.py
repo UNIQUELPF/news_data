@@ -8,6 +8,10 @@ from news_scraper.spiders.laos.base import LaosBaseSpider
 
 class LaosBolSpider(LaosBaseSpider):
     name = "laos_bol"
+
+    country_code = 'LAO'
+
+    country = '老挝'
     allowed_domains = ["bol.gov.la", "www.bol.gov.la"]
     target_table = "lao_bol"
     start_urls = [

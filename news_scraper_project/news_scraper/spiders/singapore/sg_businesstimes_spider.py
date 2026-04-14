@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class SgBusinessTimesSpider(BaseNewsSpider):
     name = 'sg_businesstimes'
+
+    country_code = 'SGP'
+
+    country = '新加坡'
     allowed_domains = ['businesstimes.com.sg']
     
     # 商业时报隐藏的分页 API (v1)

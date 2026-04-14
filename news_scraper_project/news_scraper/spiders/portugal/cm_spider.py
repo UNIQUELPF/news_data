@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalCMSpider(BaseNewsSpider):
     name = 'pt_cm'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['cmjornal.pt']
     start_urls = ['https://www.cmjornal.pt/economia']
     

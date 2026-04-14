@@ -11,6 +11,10 @@ from news_scraper.spiders.bahrain.base import BahrainBaseSpider
 
 class BahrainGdnSpider(BahrainBaseSpider):
     name = "bahrain_gdn"
+
+    country_code = 'BHR'
+
+    country = '巴林'
     allowed_domains = ["gdnonline.com", "www.gdnonline.com"]
     target_table = "bhr_gdn"
     start_urls = [

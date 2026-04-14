@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TrHurriyetSpider(BaseNewsSpider):
     name = 'tr_hurriyet'
+
+    country_code = 'TUR'
+
+    country = '土耳其'
     allowed_domains = ['hurriyet.com.tr']
     
     # 初始 URL：时政新闻列表

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalDNSpider(BaseNewsSpider):
     name = 'pt_dn'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['dn.pt', 'dinheirovivo.pt']
     start_urls = ['https://www.dn.pt/economia']
     

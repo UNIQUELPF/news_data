@@ -11,6 +11,10 @@ from news_scraper.spiders.philippines.base import PhilippinesBaseSpider
 
 class PhilippinesManilaTimesSpider(PhilippinesBaseSpider):
     name = "philippines_manila_times"
+
+    country_code = 'PHL'
+
+    country = '菲律宾'
     allowed_domains = ["manilatimes.net", "www.manilatimes.net"]
     target_table = "phl_manila_times"
     start_urls = ["https://www.manilatimes.net/business"]

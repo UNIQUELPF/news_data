@@ -11,6 +11,10 @@ from news_scraper.spiders.finland.base import FinlandBaseSpider
 
 class FinlandStatSpider(FinlandBaseSpider):
     name = "finland_stat"
+
+    country_code = 'FIN'
+
+    country = '芬兰'
     allowed_domains = ["stat.fi", "www.stat.fi"]
     target_table = "fin_stat"
     start_urls = ["https://stat.fi/en"]

@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TmFineconomicSpider(BaseNewsSpider):
     name = 'tm_fineconomic'
+
+    country_code = 'TKM'
+
+    country = '土库曼斯坦'
     allowed_domains = ['fineconomic.gov.tm']
     
     # 列表页入口

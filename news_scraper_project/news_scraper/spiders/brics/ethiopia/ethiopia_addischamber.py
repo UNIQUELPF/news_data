@@ -1,17 +1,21 @@
 # 埃塞俄比亚addischamber爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-from datetime import datetime
-import psycopg2
-import dateparser
-from bs4 import BeautifulSoup
 import re
+from datetime import datetime
 
-from news_scraper.items import NewsItem
+import dateparser
+import psycopg2
+import scrapy
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class EthiopiaAddisChamberSpider(scrapy.Spider):
     name = "ethiopia_addischamber"
+
+    country_code = 'ETH'
+
+    country = '埃塞俄比亚'
     allowed_domains = ["addischamber.com"]
     target_table = "ethi_addischamber"
     
@@ -56,15 +60,17 @@ class EthiopiaAddisChamberSpider(scrapy.Spider):
             ''')
             conn.commit()
             
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            
             cur.close()
             conn.close()
-            
-            if max_date:
-                return max_date
-            return datetime(2026, 1, 1)
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as e:
             self.logger.error(f"Database init error: {e}")
             return datetime(2026, 1, 1)

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NzNewsroomSpider(BaseNewsSpider):
     name = "nz_newsroom"
+
+    country_code = 'NZL'
+
+    country = '新西兰'
     allowed_domains = ["newsroom.co.nz"]
     start_urls = ["https://newsroom.co.nz/category/economy/"]
     

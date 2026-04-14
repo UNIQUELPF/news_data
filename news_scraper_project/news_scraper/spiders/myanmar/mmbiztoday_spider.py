@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class MyanmarBizTodaySpider(BaseNewsSpider):
     name = 'mm_mmbiztoday'
+
+    country_code = 'MMR'
+
+    country = '缅甸'
     allowed_domains = ['mmbiztoday.com']
     start_urls = ['https://mmbiztoday.com/category/investment-and-finance/']
     

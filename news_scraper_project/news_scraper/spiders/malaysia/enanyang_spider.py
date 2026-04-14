@@ -1,13 +1,19 @@
-import scrapy
 import json
-import psycopg2
 from datetime import datetime
-import dateutil.parser
-from news_scraper.settings import POSTGRES_SETTINGS
+
+import psycopg2
+import scrapy
 from news_scraper.items import NewsItem
+from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class EnanyangSpider(scrapy.Spider):
     name = "malaysia_enanyang"
+
+    country_code = 'MYS'
+
+    country = '马来西亚'
     allowed_domains = ["enanyang.my"]
     target_table = "malaysia_enanyang_news"
     
@@ -38,12 +44,16 @@ class EnanyangSpider(scrapy.Spider):
             if not cur.fetchone()[0]:
                 return datetime(2026, 1, 1)
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            res = cur.fetchone()[0]
             cur.close()
             conn.close()
-            if res:
-                return res.replace(tzinfo=None)
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            return state["cutoff_date"]
         except Exception as e:
             self.logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
         return datetime(2026, 1, 1)

@@ -7,6 +7,10 @@ from news_scraper.spiders.canada.base import CanadaBaseSpider
 
 class CanadaBankOfCanadaSpider(CanadaBaseSpider):
     name = "canada_bank_of_canada"
+
+    country_code = 'CAN'
+
+    country = '加拿大'
     allowed_domains = []
     target_table = "can_bank_of_canada"
     start_urls = ["data:,canada_bank_of_canada_start"]

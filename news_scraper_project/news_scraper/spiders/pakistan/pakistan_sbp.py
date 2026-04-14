@@ -9,6 +9,10 @@ from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
 class PakistanSbpSpider(PakistanBaseSpider):
     name = "pakistan_sbp"
+
+    country_code = 'PAK'
+
+    country = '巴基斯坦'
     allowed_domains = ["sbp.org.pk", "www.sbp.org.pk"]
     target_table = "pak_sbp"
     start_urls = [

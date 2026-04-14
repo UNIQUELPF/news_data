@@ -1,12 +1,19 @@
-import scrapy
 import json
-import psycopg2
 from datetime import datetime
+
+import psycopg2
+import scrapy
 from bs4 import BeautifulSoup
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class USACNBCSpider(scrapy.Spider):
     name = 'usa_cnbc'
+
+    country_code = 'USA'
+
+    country = '美国'
     allowed_domains = ['cnbc.com']
     
     # 按照需求列出五个板块：economy, finance, investigations, ai, energy
@@ -54,22 +61,33 @@ class USACNBCSpider(scrapy.Spider):
             """)
             conn.commit()
             
-            # 增量判断：获取库中最新时间
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental mode: starting from {self.cutoff_date}")
-            
             cur.close()
             conn.close()
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.scraped_urls = state["scraped_urls"]
+            if state["source"] != "default":
+                self.logger.info(f"Incremental mode: starting from {self.cutoff_date} ({state['source']})")
         except Exception as e:
             self.logger.error(f"Database init failed: {e}")
 
-    def start_requests(self):
+    def iter_start_requests(self):
         for url in self.section_urls:
             # 首先请求板块主页获取第一批文章
             yield scrapy.Request(url, callback=self.parse_section_page, meta={'section_url': url})
+
+    def start_requests(self):
+        yield from self.iter_start_requests()
+
+    async def start(self):
+        for request in self.iter_start_requests():
+            yield request
 
     def parse_section_page(self, response):
         section_url = response.meta['section_url']
@@ -78,7 +96,7 @@ class USACNBCSpider(scrapy.Spider):
         next_data_str = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
         if next_data_str:
             try:
-                data = json.loads(next_data_str)
+                json.loads(next_data_str)
                 # 提取文章列表逻辑
                 # 此处省略复杂路径，通常在 pageProps 下
                 # ...

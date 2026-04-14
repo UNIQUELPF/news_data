@@ -7,6 +7,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class BloombergSpider(BaseNewsSpider):
     name = 'jp_bloomberg'
+
+    country_code = 'JPN'
+
+    country = '日本'
     allowed_domains = ['bloomberg.com']
     start_urls = ['https://www.bloomberg.com/jp/economics']
     

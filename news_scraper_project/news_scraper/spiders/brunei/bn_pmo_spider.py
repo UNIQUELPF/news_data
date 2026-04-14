@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class BnPmoSpider(BaseNewsSpider):
     name = 'bn_pmo'
+
+    country_code = 'BRN'
+
+    country = '文莱'
     allowed_domains = ['pmo.gov.bn']
     
     # 列表页入口

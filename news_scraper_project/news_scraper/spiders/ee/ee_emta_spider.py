@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EeEmtaSpider(BaseNewsSpider):
     name = "ee_emta"
+
+    country_code = 'EST'
+
+    country = '爱沙尼亚'
     allowed_domains = ["www.emta.ee", "search.service.eu-live.vportal.ee"]
     # Internal JSON API endpoint for search/news
     api_url = "https://search.service.eu-live.vportal.ee/v1/search/emta?filters%5Btype%5D=Uudis&sort_by=created&page={page}&langcode=et&limit=15"

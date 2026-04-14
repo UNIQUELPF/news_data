@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalTekSapoSpider(BaseNewsSpider):
     name = 'pt_tek_sapo'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['tek.sapo.pt']
     start_urls = ['https://tek.sapo.pt/ultimas/']
     

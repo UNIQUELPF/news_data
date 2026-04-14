@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NigeriaVanguardSpider(BaseNewsSpider):
     name = 'ng_vanguard'
+
+    country_code = 'NGA'
+
+    country = '尼日利亚'
     allowed_domains = ['vanguardngr.com']
     start_urls = ['https://www.vanguardngr.com/category/business/']
     

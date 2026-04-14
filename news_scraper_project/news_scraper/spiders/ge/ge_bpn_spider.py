@@ -7,6 +7,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GeBpnSpider(BaseNewsSpider):
     name = "ge_bpn"
+
+    country_code = 'GEO'
+
+    country = '格鲁吉亚'
     allowed_domains = ["www.bpn.ge"]
     start_urls = ["https://www.bpn.ge/category/161-ekonomika/"]
     target_table = "ge_bpn_news"

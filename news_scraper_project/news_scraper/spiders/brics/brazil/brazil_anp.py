@@ -1,12 +1,19 @@
 # 巴西anp爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-from datetime import datetime
 import json
+from datetime import datetime
+
+import scrapy
 from news_scraper.items import NewsItem
+from news_scraper.utils import get_incremental_state
+
 
 class BrazilANPSpider(scrapy.Spider):
     name = "brazil_anp"
+
+    country_code = 'BRA'
+
+    country = '巴西'
     allowed_domains = ["gov.br"]
     target_table = "bra_anp"
 
@@ -16,25 +23,15 @@ class BrazilANPSpider(scrapy.Spider):
         self.start_index = 0
         self.base_url = "https://www.gov.br/anp/pt-br/canais_atendimento/imprensa/noticias-comunicados?b_start:int={}"
         
-        # Connect to Postgres to find latest date (incremental support)
         try:
-            import psycopg2
-            from scrapy.utils.project import get_project_settings
-            settings = get_project_settings()
-            pg = settings.get('POSTGRES_SETTINGS', {})
-            conn = psycopg2.connect(
-                host=pg.get('host', 'postgres'),
-                database=pg.get('database', 'scrapy_db'),
-                user=pg.get('user', 'your_user'),
-                password=pg.get('password', 'your_password'),
-                port=pg.get('port', 5432)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
             )
-            cur = conn.cursor()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            row = cur.fetchone()
-            if row and row[0]:
-                self.cutoff_date = max(self.cutoff_date, row[0].replace(tzinfo=None))
-            conn.close()
+            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
             self.logger.info(f"Using cutoff date: {self.cutoff_date}")
         except Exception as e:
             self.logger.warning(f"Error fetching max date from DB: {e}")

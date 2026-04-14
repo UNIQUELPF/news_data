@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class NigeriaNairametricsSpider(BaseNewsSpider):
     name = 'ng_nairametrics'
+
+    country_code = 'NGA'
+
+    country = '尼日利亚'
     allowed_domains = ['nairametrics.com']
     start_urls = ['https://nairametrics.com/category/economy/']
     

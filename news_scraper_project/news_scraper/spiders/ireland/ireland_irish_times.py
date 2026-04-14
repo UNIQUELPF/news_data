@@ -18,6 +18,12 @@ class IrelandIrishTimesSpider(IrelandBaseSpider):
     """
 
     name = "ireland_irish_times"
+
+
+    country_code = 'IRL'
+
+
+    country = '爱尔兰'
     allowed_domains = ["irishtimes.com", "www.irishtimes.com"]
     # 经济类：商业新闻媒体表
     target_table = "irl_irish_times"

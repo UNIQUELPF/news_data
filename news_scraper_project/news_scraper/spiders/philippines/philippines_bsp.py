@@ -9,6 +9,10 @@ from news_scraper.spiders.philippines.base import PhilippinesBaseSpider
 
 class PhilippinesBspSpider(PhilippinesBaseSpider):
     name = "philippines_bsp"
+
+    country_code = 'PHL'
+
+    country = '菲律宾'
     allowed_domains = ["bsp.gov.ph", "www.bsp.gov.ph"]
     target_table = "phl_bsp"
     api_base = "https://www.bsp.gov.ph/_api/web/lists/getbytitle('Media Releases and Advisories')/items"

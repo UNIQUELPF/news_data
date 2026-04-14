@@ -10,6 +10,10 @@ from news_scraper.utils import get_dynamic_cutoff
 
 class KapitalSpider(scrapy.Spider):
     name = 'kapital'
+
+    country_code = 'KAZ'
+
+    country = '哈萨克斯坦'
     allowed_domains = ['kapital.kz']
     
     custom_settings = {
@@ -34,7 +38,7 @@ class KapitalSpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(KapitalSpider, cls).from_crawler(crawler, *args, **kwargs)
-        base_cutoff = get_dynamic_cutoff(crawler.settings, 'news_kapital')
+        base_cutoff = get_dynamic_cutoff(crawler.settings, 'news_kapital', spider_name=spider.name)
         spider.CUTOFF_DATE = base_cutoff.replace(tzinfo=timezone.utc)
         return spider
 

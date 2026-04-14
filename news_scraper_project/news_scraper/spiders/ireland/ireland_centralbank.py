@@ -16,6 +16,12 @@ class IrelandCentralBankSpider(IrelandBaseSpider):
     """
 
     name = "ireland_centralbank"
+
+
+    country_code = 'IRL'
+
+
+    country = '爱尔兰'
     allowed_domains = ["centralbank.ie", "www.centralbank.ie"]
     # 政府/监管类：中央银行官方新闻与监管信息表
     target_table = "irl_centralbank"

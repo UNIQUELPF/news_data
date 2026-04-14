@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalGovSpider(BaseNewsSpider):
     name = 'pt_gov'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['portugal.gov.pt']
     start_urls = ['https://www.portugal.gov.pt/pt/gc25/comunicacao/noticias']
     

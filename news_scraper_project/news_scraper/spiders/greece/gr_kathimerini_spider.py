@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GrKathimeriniSpider(BaseNewsSpider):
     name = 'gr_kathimerini'
+
+    country_code = 'GRC'
+
+    country = '希腊'
     allowed_domains = ['kathimerini.gr']
     
     # 航运报经济板块

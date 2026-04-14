@@ -10,6 +10,10 @@ class PlaceraSESpider(BaseNewsSpider):
     策略：通过 sitemap.xml 获取文章 URL 列表，再逐个抓详情页
     """
     name = 'se_placera'
+
+    country_code = 'SWE'
+
+    country = '瑞典'
     allowed_domains = ['placera.se']
     target_table = 'se_placera_news'
     use_curl_cffi = True

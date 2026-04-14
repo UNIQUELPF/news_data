@@ -1,12 +1,13 @@
-import scrapy
 import json
-import psycopg2
-from datetime import datetime, timezone
-import logging
-from bs4 import BeautifulSoup
+from datetime import datetime
 
+import psycopg2
+import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class LebanonNnaSpider(scrapy.Spider):
     """
@@ -15,6 +16,10 @@ class LebanonNnaSpider(scrapy.Spider):
     Supports full scan (from 2026-01-01) and incremental mode.
     """
     name = "lebanon_nna"
+
+    country_code = 'LBN'
+
+    country = '黎巴嫩'
     allowed_domains = ["nna-leb.gov.lb"]
     target_table = "lebanon_nna_news"
     default_cutoff = datetime(2026, 1, 1)
@@ -62,16 +67,19 @@ class LebanonNnaSpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
+            if self.full_scan:
                 return self.default_cutoff
-            if max_time.tzinfo is not None:
-                max_time = max_time.replace(tzinfo=None)
-            return max(max_time, self.default_cutoff)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=False,
+            )
+            return max(state["cutoff_date"], self.default_cutoff)
         except Exception as exc:
             self.logger.error(f"DB init failed: {exc}")
             return self.default_cutoff

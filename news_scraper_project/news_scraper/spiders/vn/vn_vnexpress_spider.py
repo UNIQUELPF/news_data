@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class VnVnexpressSpider(BaseNewsSpider):
     name = "vn_vnexpress"
+
+    country_code = 'VNM'
+
+    country = '越南'
     allowed_domains = ["vnexpress.net"]
     start_urls = ["https://vnexpress.net/kinh-doanh"]
     target_table = "vn_vnexpress_news"

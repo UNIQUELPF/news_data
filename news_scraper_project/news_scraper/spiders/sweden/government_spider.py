@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GovernmentSESpider(BaseNewsSpider):
     name = 'se_government'
+
+    country_code = 'SWE'
+
+    country = '瑞典'
     allowed_domains = ['government.se']
     start_urls = ['https://www.government.se/government-policy/economic-policy/']
     target_table = 'se_government_news'

@@ -15,6 +15,10 @@ from news_scraper.spiders.austria.base import AustriaBaseSpider
 
 class AustriaBmawSpider(AustriaBaseSpider):
     name = "austria_bmaw"
+
+    country_code = 'AUT'
+
+    country = '奥地利'
     allowed_domains = ["bmaw.gv.at", "www.bmaw.gv.at", "bmwet.gv.at", "www.bmwet.gv.at"]
     target_table = "aut_bmaw"
     start_urls = [

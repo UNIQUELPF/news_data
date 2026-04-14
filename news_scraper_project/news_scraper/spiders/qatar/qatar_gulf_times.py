@@ -8,6 +8,10 @@ from news_scraper.spiders.qatar.base import QatarBaseSpider
 
 class QatarGulfTimesSpider(QatarBaseSpider):
     name = "qatar_gulf_times"
+
+    country_code = 'QAT'
+
+    country = '卡塔尔'
     allowed_domains = []
     target_table = "qat_gulf_times"
     start_urls = ["https://www.gulf-times.com/business"]

@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class PortugalJornalNegociosSpider(BaseNewsSpider):
     name = 'pt_jornaldenegocios'
+
+    country_code = 'PRT'
+
+    country = '葡萄牙'
     allowed_domains = ['jornaldenegocios.pt']
     start_urls = ['https://www.jornaldenegocios.pt/economia']
     

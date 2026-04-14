@@ -11,6 +11,10 @@ from news_scraper.spiders.korea.base import KoreaBaseSpider
 
 class KoreaKrxSpider(KoreaBaseSpider):
     name = "korea_krx"
+
+    country_code = 'KOR'
+
+    country = '韩国'
     allowed_domains = ["global.krx.co.kr"]
     target_table = "kor_krx"
     board_id = "GLB0501070000"

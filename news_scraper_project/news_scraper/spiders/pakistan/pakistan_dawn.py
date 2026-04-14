@@ -11,6 +11,10 @@ from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
 class PakistanDawnSpider(PakistanBaseSpider):
     name = "pakistan_dawn"
+
+    country_code = 'PAK'
+
+    country = '巴基斯坦'
     allowed_domains = ["dawn.com", "www.dawn.com"]
     target_table = "pak_dawn"
     start_urls = [

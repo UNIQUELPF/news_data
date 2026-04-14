@@ -1,14 +1,19 @@
-# 伊朗mehr en爬虫，负责抓取对应站点、机构或栏目内容。
-
-import scrapy
-import psycopg2
 import time
 from datetime import datetime
+
+import psycopg2
+import scrapy
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class IranMehrEnSpider(scrapy.Spider):
     name = 'iran_mehr_en'
+
+    country_code = 'IRN'
+
+    country = '伊朗'
     allowed_domains = ['en.mehrnews.com']
     
     def __init__(self, *args, **kwargs):
@@ -37,19 +42,22 @@ class IranMehrEnSpider(scrapy.Spider):
                 )
             """)
             conn.commit()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
             cur.close()
             conn.close()
-
             if self.full_scan:
                 return datetime(2026, 1, 1)
-            
-            if max_date:
-                # Incremental mode: only today onwards
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            if state["source"] in ("unified", "legacy"):
                 now = datetime.now()
                 return datetime(now.year, now.month, now.day)
-            
+
             return datetime(2026, 1, 1)
         except Exception as exc:
             self.logger.error(f"Database init error: {exc}")

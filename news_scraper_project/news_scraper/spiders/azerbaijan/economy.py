@@ -13,6 +13,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class EconomySpider(scrapy.Spider):
     name = 'economy'
+
+    country_code = 'AZE'
+
+    country = '阿塞拜疆'
     allowed_domains = ['economy.gov.az']
     start_urls = ['https://www.economy.gov.az/az/page/media/news']
     
@@ -30,7 +34,7 @@ class EconomySpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(EconomySpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table)
+        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
         # Ensure we use 2026-01-01 if it's the first run
         if spider.CUTOFF_DATE > datetime(2026, 1, 1):
              spider.CUTOFF_DATE = datetime(2026, 1, 1)

@@ -8,6 +8,10 @@ from news_scraper.spiders.cambodia.base import CambodiaBaseSpider
 
 class CambodiaTaxSpider(CambodiaBaseSpider):
     name = "cambodia_tax"
+
+    country_code = 'KHM'
+
+    country = '柬埔寨'
     allowed_domains = []
     target_table = "khm_tax"
     start_urls = ["https://www.tax.gov.kh/en"]

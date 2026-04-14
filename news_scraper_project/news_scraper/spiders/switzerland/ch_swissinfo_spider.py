@@ -12,6 +12,10 @@ def should_abort_request(request):
 
 class SwissinfoSpider(BaseNewsSpider):
     name = 'ch_swissinfo'
+
+    country_code = 'CHE'
+
+    country = '瑞士'
     allowed_domains = ['swissinfo.ch', 'www.swissinfo.ch']
     
     target_table = 'ch_swissinfo_news'

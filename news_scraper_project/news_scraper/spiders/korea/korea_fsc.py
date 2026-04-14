@@ -7,6 +7,10 @@ from news_scraper.spiders.korea.base import KoreaBaseSpider
 
 class KoreaFscSpider(KoreaBaseSpider):
     name = "korea_fsc"
+
+    country_code = 'KOR'
+
+    country = '韩国'
     allowed_domains = ["www.fsc.go.kr", "fsc.go.kr"]
     target_table = "kor_fsc"
     start_urls = [

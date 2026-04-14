@@ -1,8 +1,10 @@
 import os
 import subprocess
-from scrapy.utils.project import get_project_settings
-from scrapy.spiderloader import SpiderLoader
 from datetime import datetime
+
+from scrapy.spiderloader import SpiderLoader
+from scrapy.utils.project import get_project_settings
+
 
 def build_scrapy_env(project_dir):
     env = os.environ.copy()
@@ -29,7 +31,6 @@ def run_project_spiders(project_dir):
         'malaysia_': 5,
         'lebanon_': 6,
         'luxembourg_': 7,
-        'jp_': 8
     }
     
     def get_priority(spider_name):

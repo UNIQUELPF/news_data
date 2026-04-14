@@ -11,6 +11,10 @@ from news_scraper.spiders.france.base import FranceBaseSpider
 
 class FranceFinanceGovSpider(FranceBaseSpider):
     name = "france_finance_gov"
+
+    country_code = 'FRA'
+
+    country = '法国'
     allowed_domains = ["presse.economie.gouv.fr", "economie.gouv.fr"]
     target_table = "fra_finance_gov"
     start_urls = ["https://presse.economie.gouv.fr/"]

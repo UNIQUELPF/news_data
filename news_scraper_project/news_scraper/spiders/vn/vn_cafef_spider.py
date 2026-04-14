@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class VnCafefSpider(BaseNewsSpider):
     name = "vn_cafef"
+
+    country_code = 'VNM'
+
+    country = '越南'
     allowed_domains = ["cafef.vn"]
     # category id 18836 is 'Doanh nghiệp'
     target_table = "vn_cafef_news"

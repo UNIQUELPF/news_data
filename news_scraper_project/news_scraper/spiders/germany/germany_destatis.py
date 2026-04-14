@@ -11,6 +11,10 @@ from news_scraper.spiders.germany.base import GermanyBaseSpider
 
 class GermanyDestatisSpider(GermanyBaseSpider):
     name = "germany_destatis"
+
+    country_code = 'DEU'
+
+    country = '德国'
     allowed_domains = ["destatis.de", "www.destatis.de"]
     target_table = "deu_destatis"
     start_urls = ["https://www.destatis.de/EN/Press/press_node.html"]

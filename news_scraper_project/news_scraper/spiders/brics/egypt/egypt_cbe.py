@@ -1,15 +1,21 @@
 # 埃及cbe爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
 import re
 from datetime import datetime
+
 import psycopg2
+import scrapy
+from news_scraper.utils import get_incremental_state
 from scrapy.utils.project import get_project_settings
-from news_scraper.items import NewsItem
 from w3lib.html import remove_tags
+
 
 class EgyptCbeSpider(scrapy.Spider):
     name = "egypt_cbe"
+
+    country_code = 'EGY'
+
+    country = '埃及'
     allowed_domains = ["cbe.org.eg"]
     target_table = "egy_cbe"
     start_urls = ["https://www.cbe.org.eg/sitemap.xml"]
@@ -67,23 +73,20 @@ class EgyptCbeSpider(scrapy.Spider):
                 )
             ''')
             
-            # Fetch max date for incremental logic
-            cur.execute('SELECT MAX(publish_time) FROM egy_cbe')
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Initialized cutoff date from DB: {self.cutoff_date}")
-            else:
-                self.logger.info(f"No existing data, using default cutoff: {self.cutoff_date}")
-
-            # Pre-load seen URLs to optimize
-            cur.execute('SELECT url FROM egy_cbe')
-            for row in cur.fetchall():
-                self.seen_urls.add(row[0])
-                
             conn.commit()
             cur.close()
             conn.close()
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
+            self.seen_urls = state["scraped_urls"]
+            self.logger.info(f"Using cutoff_date={self.cutoff_date}, seen_urls={len(self.seen_urls)}")
             
         except psycopg2.Error as e:
             self.logger.error(f"Database error during initialization: {e}")

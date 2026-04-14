@@ -1,12 +1,17 @@
-import scrapy
 import json
-import psycopg2
 from datetime import datetime
+
+import scrapy
 from bs4 import BeautifulSoup
-from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class USAForbesSpider(scrapy.Spider):
     name = 'usa_forbes'
+
+    country_code = 'USA'
+
+    country = '美国'
     allowed_domains = ['forbes.com']
     start_urls = ['https://www.forbes.com/money/']
     
@@ -29,48 +34,35 @@ class USAForbesSpider(scrapy.Spider):
 
     def init_db(self):
         try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    url TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP NOT NULL,
-                    author VARCHAR(255),
-                    language VARCHAR(50) DEFAULT 'en',
-                    section VARCHAR(100),
-                    scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            
-            # 增量检查：获取最新发布时间
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-            
-            cur.close()
-            conn.close()
+            state = get_incremental_state(
+                getattr(self, "settings", None),
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.scraped_urls = state["scraped_urls"]
         except Exception as e:
             self.logger.error(f"DB init error: {e}")
 
-    def start_requests(self):
+    def iter_start_requests(self):
         # 1. 第一步：抓取首页 HTML 上的首批文章
         yield scrapy.Request(self.start_urls[0], callback=self.parse_list)
 
-        # 2. 第二步：启动 API 翻页获取历史文章
-        # 福布斯的 simple-data 接口非常直接：
-        # https://www.forbes.com/simple-data/channel/money/?start=50&size=50
-        yield from self.request_api(start=20)
+    def start_requests(self):
+        yield from self.iter_start_requests()
+
+    async def start(self):
+        for request in self.iter_start_requests():
+            yield request
 
     def parse_list(self, response):
         # 从 Next.js 的 JSON 脚本中直接提取
         data_script = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
         if data_script:
             try:
-                data = json.loads(data_script)
+                json.loads(data_script)
                 # 提取首页推荐列表
                 # ... 示例中使用选择器
             except:
@@ -85,9 +77,19 @@ class USAForbesSpider(scrapy.Spider):
     def request_api(self, start):
         # API 结构：基于 offset (start) & size
         api_url = f"https://www.forbes.com/simple-data/channel/money/?start={start}&size=50"
-        yield scrapy.Request(api_url, callback=self.parse_api_json, meta={'start': start})
+        yield scrapy.Request(
+            api_url,
+            callback=self.parse_api_json,
+            meta={'start': start},
+            dont_filter=True,
+            handle_httpstatus_list=[403],
+        )
 
     def parse_api_json(self, response):
+        if response.status == 403:
+            self.logger.info("Forbes simple-data API returned 403, skipping API pagination fallback.")
+            return
+
         try:
             data = json.loads(response.text)
             # Forbes API 的结构通常是 list 或结果数组

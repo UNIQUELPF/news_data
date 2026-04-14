@@ -8,6 +8,10 @@ from news_scraper.spiders.qatar.base import QatarBaseSpider
 
 class QatarInvestSpider(QatarBaseSpider):
     name = "qatar_invest"
+
+    country_code = 'QAT'
+
+    country = '卡塔尔'
     allowed_domains = []
     target_table = "qat_invest"
     start_urls = ["https://www.invest.qa/en/media-centre/news-and-articles"]

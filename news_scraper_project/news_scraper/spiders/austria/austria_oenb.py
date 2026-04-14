@@ -15,6 +15,10 @@ from news_scraper.spiders.austria.base import AustriaBaseSpider
 
 class AustriaOenbSpider(AustriaBaseSpider):
     name = "austria_oenb"
+
+    country_code = 'AUT'
+
+    country = '奥地利'
     allowed_domains = ["oenb.at", "www.oenb.at"]
     target_table = "aut_oenb"
     start_urls = [

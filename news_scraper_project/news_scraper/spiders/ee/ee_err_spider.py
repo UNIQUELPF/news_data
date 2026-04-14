@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class EeErrSpider(BaseNewsSpider):
     name = "ee_err"
+
+    country_code = 'EST'
+
+    country = '爱沙尼亚'
     allowed_domains = ["news.err.ee"]
     start_urls = ["https://news.err.ee/k/business"]
     target_table = "ee_err_news"

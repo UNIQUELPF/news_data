@@ -7,6 +7,10 @@ from news_scraper.spiders.laos.base import LaosBaseSpider
 
 class LaosLsbSpider(LaosBaseSpider):
     name = "laos_lsb"
+
+    country_code = 'LAO'
+
+    country = '老挝'
     allowed_domains = ["www.lsb.gov.la", "lsb.gov.la"]
     target_table = "lao_lsb"
     api_url = "https://www.lsb.gov.la/index.php?rest_route=/wp/v2/posts&per_page=12"

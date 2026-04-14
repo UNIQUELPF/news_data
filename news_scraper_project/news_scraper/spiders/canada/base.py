@@ -1,6 +1,6 @@
 # 加拿大国家通用基类，负责建表、增量时间和公共抓取方法。
-from datetime import datetime
 import json
+from datetime import datetime
 
 import dateparser
 import psycopg2
@@ -8,9 +8,9 @@ import requests
 import scrapy
 from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
-from scrapy.http import HtmlResponse
-
 from news_scraper.items import NewsItem
+from news_scraper.utils import get_incremental_state
+from scrapy.http import HtmlResponse
 
 
 class CanadaBaseSpider(scrapy.Spider):
@@ -68,14 +68,18 @@ class CanadaBaseSpider(scrapy.Spider):
                 """
             )
             conn.commit()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_time = cur.fetchone()[0]
             cur.close()
             conn.close()
 
-            if self.full_scan or not max_time:
-                return self.default_cutoff
-            return max_time
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.default_cutoff,
+                full_scan=self.full_scan,
+            )
+            self.seen_urls = state["scraped_urls"]
+            return state["cutoff_date"]
         except Exception as exc:
             self.logger.error(f"DB init failed for {self.target_table}: {exc}")
             return self.default_cutoff

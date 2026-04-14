@@ -1,16 +1,23 @@
 # 伊朗donya爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-import psycopg2
-import jdatetime
 import time
 from datetime import datetime
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+
+import jdatetime
+import psycopg2
+import scrapy
 from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class IranDonyaSpider(scrapy.Spider):
     name = 'iran_donya'
+
+    country_code = 'IRN'
+
+    country = '伊朗'
     allowed_domains = ['donya-e-eqtesad.com']
     
     # Persian digits translation table
@@ -42,20 +49,23 @@ class IranDonyaSpider(scrapy.Spider):
                 )
             """)
             conn.commit()
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
             cur.close()
             conn.close()
 
             if self.full_scan:
                 return datetime(2026, 1, 1)
 
-            if max_date:
-                # Incremental mode: only today's data
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            if state["source"] in ("unified", "legacy"):
                 now = datetime.now()
                 return datetime(now.year, now.month, now.day)
             
-            # Default to 2026-01-01
             return datetime(2026, 1, 1)
         except Exception as exc:
             self.logger.error(f"Database init error: {exc}")

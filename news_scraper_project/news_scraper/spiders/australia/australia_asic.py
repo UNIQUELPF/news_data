@@ -12,6 +12,10 @@ from news_scraper.spiders.australia.base import AustraliaBaseSpider
 
 class AustraliaAsicSpider(AustraliaBaseSpider):
     name = "australia_asic"
+
+    country_code = 'AUS'
+
+    country = '澳大利亚'
     allowed_domains = ["asic.gov.au", "www.asic.gov.au"]
     target_table = "aus_asic"
     start_urls = [

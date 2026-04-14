@@ -9,6 +9,10 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumFsmaSpider(BelgiumBaseSpider):
     name = "belgium_fsma"
+
+    country_code = 'BEL'
+
+    country = '比利时'
     allowed_domains = ["fsma.be", "www.fsma.be"]
     target_table = "bel_fsma"
     start_urls = ["https://www.fsma.be/en/news-articles"]

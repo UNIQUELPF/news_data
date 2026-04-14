@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class IqMojSpider(BaseNewsSpider):
     name = "iq_moj"
+
+    country_code = 'IRQ'
+
+    country = '伊拉克'
     allowed_domains = ["moj.gov.iq"]
     start_urls = ["https://www.moj.gov.iq/news/"]
     

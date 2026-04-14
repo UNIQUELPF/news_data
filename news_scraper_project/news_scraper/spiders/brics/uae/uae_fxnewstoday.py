@@ -9,6 +9,10 @@ from news_scraper.items import NewsItem
 
 class UaeFxNewsTodaySpider(scrapy.Spider):
     name = "uae_fxnewstoday"
+
+    country_code = 'ARE'
+
+    country = '阿联酋'
     allowed_domains = ["fxnewstoday.ae"]
     start_urls = ["https://www.fxnewstoday.ae/latest-news"]
     

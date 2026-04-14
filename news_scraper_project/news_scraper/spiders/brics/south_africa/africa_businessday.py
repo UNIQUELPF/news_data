@@ -1,15 +1,20 @@
 # 南非africa businessday爬虫，负责抓取对应站点、机构或栏目内容。
 
-import scrapy
-from datetime import datetime, timedelta
-import psycopg2
-import logging
 import json
-from scrapy.exceptions import CloseSpider
 import re
+from datetime import datetime
+
+import psycopg2
+import scrapy
+from news_scraper.utils import get_incremental_state
+
 
 class AfricaBusinessDaySpider(scrapy.Spider):
     name = 'africa_businessday'
+
+    country_code = 'ZAF'
+
+    country = '南非'
     allowed_domains = ['businessday.co.za']
     target_table = 'afr_businessday'
 
@@ -44,32 +49,44 @@ class AfricaBusinessDaySpider(scrapy.Spider):
             return
             
         try:
-            self.conn = psycopg2.connect(
+            conn = psycopg2.connect(
                 dbname=settings['dbname'], user=settings['user'],
                 password=settings['password'], host=settings['host'], port=settings['port']
             )
-            self.cur = self.conn.cursor()
-            
-            self.cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = self.cur.fetchone()[0]
-            if max_date:
-                self.cutoff_date = max_date
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date}")
-            else:
-                self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-                
-            self.cur.execute(f"SELECT url FROM {self.target_table}")
-            for row in self.cur.fetchall():
-                self.seen_urls.add(row[0])
-                
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.target_table} (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT,
+                    publish_time TIMESTAMP,
+                    author TEXT,
+                    content TEXT,
+                    url TEXT UNIQUE,
+                    language TEXT,
+                    section TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=self.cutoff_date,
+                full_scan=False,
+            )
+            self.cutoff_date = state["cutoff_date"]
+            self.seen_urls = state["scraped_urls"]
         except Exception as e:
             self.logger.error(f"Failed to connect to DB for initialization: {e}")
 
     def closed(self, reason):
-        if hasattr(self, 'cur'):
-            self.cur.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        return
 
     def start_requests(self):
         # We use sitemap index and section indices to reliably pull everything
@@ -151,7 +168,6 @@ class AfricaBusinessDaySpider(scrapy.Spider):
                 pass
                 
         if not publish_time:
-            import json
             for script in response.css('script[type="application/ld+json"]::text').getall():
                 try:
                     data = json.loads(script)
@@ -185,7 +201,6 @@ class AfricaBusinessDaySpider(scrapy.Spider):
             
         content_text = ' '.join([p.css('::text').getall() and ' '.join(p.css('::text').getall()).strip() or '' for p in paragraphs])
         
-        import re
         content_text = re.sub(r'\s+', ' ', content_text).strip()
 
         if not content_text:

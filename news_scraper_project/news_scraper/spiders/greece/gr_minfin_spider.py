@@ -4,6 +4,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class GrMinfinSpider(BaseNewsSpider):
     name = 'gr_minfin'
+
+    country_code = 'GRC'
+
+    country = '希腊'
     allowed_domains = ['minfin.gov.gr']
     
     # 财政部新闻大厅

@@ -9,6 +9,10 @@ from news_scraper.spiders.korea.base import KoreaBaseSpider
 
 class KoreaMoefSpider(KoreaBaseSpider):
     name = "korea_moef"
+
+    country_code = 'KOR'
+
+    country = '韩国'
     allowed_domains = ["english.moef.go.kr"]
     target_table = "kor_moef"
     rss_url = "http://english.moef.go.kr/pc/engmosfrss.do?boardCd=N0001"

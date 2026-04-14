@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class BnBrudirectSpider(BaseNewsSpider):
     name = 'bn_brudirect'
+
+    country_code = 'BRN'
+
+    country = '文莱'
     allowed_domains = ['brudirect.com']
     
     # 列表页: 其中 category=national-headline 对应新闻版块

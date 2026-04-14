@@ -8,6 +8,10 @@ from news_scraper.spiders.kuwait.base import KuwaitBaseSpider
 
 class KuwaitKdipaSpider(KuwaitBaseSpider):
     name = "kuwait_kdipa"
+
+    country_code = 'KWT'
+
+    country = '科威特'
     allowed_domains = []
     target_table = "kwt_kdipa"
     start_urls = ["https://kdipa.gov.kw/media-center/news/"]

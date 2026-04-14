@@ -22,6 +22,12 @@ class OmanDailySpider(OmanBaseSpider):
     """
 
     name = "oman_daily"
+
+
+    country_code = 'OMN'
+
+
+    country = '阿曼'
     allowed_domains = ["omandaily.om", "www.omandaily.om"]
     target_table = "omn_oman_daily"
     start_urls = [

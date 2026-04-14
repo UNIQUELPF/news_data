@@ -5,6 +5,10 @@ from news_scraper.spiders.base_spider import BaseNewsSpider
 
 class TrHaberturkSpider(BaseNewsSpider):
     name = 'tr_haberturk'
+
+    country_code = 'TUR'
+
+    country = '土耳其'
     allowed_domains = ['haberturk.com']
     
     # 无限加载接口

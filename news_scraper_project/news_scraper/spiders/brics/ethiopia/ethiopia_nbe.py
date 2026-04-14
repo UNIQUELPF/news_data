@@ -2,13 +2,19 @@
 
 import re
 from datetime import datetime
+
 import psycopg2
 import scrapy
-from news_scraper.items import NewsItem
 from news_scraper.settings import POSTGRES_SETTINGS
+from news_scraper.utils import get_incremental_state
+
 
 class EthiopiaNBESpider(scrapy.Spider):
     name = "ethiopia_nbe"
+
+    country_code = 'ETH'
+
+    country = '埃塞俄比亚'
     allowed_domains = ["nbe.gov.et"]
     target_table = "ethi_nbe"
 
@@ -58,18 +64,20 @@ class EthiopiaNBESpider(scrapy.Spider):
             )
             conn.commit()
 
-            cur.execute(f"SELECT MAX(publish_time) FROM {self.target_table}")
-            max_date = cur.fetchone()[0]
-
             cur.close()
             conn.close()
 
-            if max_date:
-                # 第二次及之后运行只更新当日数据 (逻辑：如果已有数据，cutoff设为今天凌晨)
+            state = get_incremental_state(
+                self.settings,
+                spider_name=self.name,
+                table_name=self.target_table,
+                default_cutoff=datetime(2026, 1, 1),
+                full_scan=False,
+            )
+            if state["source"] in ("unified", "legacy"):
                 now = datetime.now()
                 return datetime(now.year, now.month, now.day)
-            
-            # 第一次全量，回溯到 2026-01-01
+
             return datetime(2026, 1, 1)
         except Exception as exc:
             self.logger.error(f"Database init error: {exc}")
