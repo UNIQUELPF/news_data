@@ -42,6 +42,11 @@ services:
     container_name: news_crawl_worker
     depends_on:
       - redis
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    mem_limit: 4g
     command:
       [
         "celery",
