@@ -201,7 +201,12 @@ def translate_article_content(
             "- For globally known giants, USE Chinese names: e.g., Google->谷歌, Intel->英特尔, NVIDIA->英伟达, "
             "Meta->Meta, Apple->苹果公司, Tesla->特斯拉, Microsoft->微软, Amazon->亚马逊, OpenAI->OpenAI.\n"
             "- DO NOT miss entities that appear in the title. If no companies are found, return empty string.\n\n"
-            "Return strict JSON format."
+            "Return strict JSON format with the following exact keys:\n"
+            "- title_translated: translated title in Simplified Chinese\n"
+            "- summary_translated: 2-4 sentence summary in Simplified Chinese capturing the core impact\n"
+            "- content_translated: translated full content in Simplified Chinese\n"
+            "- category: one of the specified categories from the list above\n"
+            "- involved_companies: comma-separated string of company names (or empty string if none found)"
         ),
         user_prompt=(
             f"Source language: {source_language or 'unknown'}\n"
