@@ -86,18 +86,30 @@ Current workers:
 
 ## Backfill Dispatch Flow
 
-`POST /api/v1/pipeline/backfill` creates a Celery task:
+前端管理面板提供独立的回填功能：
 
-- `pipeline.tasks.backfill.run_translation_embedding_backfill`
+### 全球翻译回填
+`POST /api/v1/pipeline/process/global` creates a Celery task:
 
-That wrapper task is consumed by `translation-worker` from the `default` queue, then dispatches sub-tasks in sequence:
+- `pipeline.tasks.backfill.manual_global_processing`
+  - queue: `translate`
+  - consumed by `translation-worker`
+  - 内部调用 `pipeline.tasks.translate.translate_backfill_articles`
 
-1. `pipeline.tasks.translate.translate_backfill_articles`
-   - queue: `translate`
-   - consumed by `translation-worker`
-2. `pipeline.tasks.embed.embed_backfill_articles`
-   - queue: `embed`
-   - consumed by `embedding-worker`
+### 向量索引生成
+`POST /api/v1/pipeline/process/embed` creates a Celery task:
+
+- `pipeline.tasks.backfill.manual_generate_embeddings`
+  - queue: `embed`
+  - consumed by `embedding-worker`
+  - 内部调用 `pipeline.tasks.embed.embed_backfill_articles`
+
+### 国内元数据回填
+`POST /api/v1/pipeline/process/domestic` creates a Celery task:
+
+- `pipeline.tasks.backfill.run_domestic_metadata_backfill`
+  - queue: `default`
+  - consumed by `translation-worker`
 
 ```mermaid
 sequenceDiagram
@@ -109,21 +121,18 @@ sequenceDiagram
     participant DS as DeepSeek
     participant HF as Hugging Face / bge-m3
 
-    UI->>Redis: enqueue run_translation_embedding_backfill
-    Redis->>TW: deliver backfill wrapper task
-
-    TW->>Redis: enqueue translate_backfill_articles
-    Redis->>TW: deliver translate_backfill_articles
+    UI->>Redis: enqueue manual_global_processing
+    Redis->>TW: deliver manual_global_processing
     TW->>DS: translate content
     TW->>PG: write article_translations + translation_status=completed
+    TW->>UI: return translation result
 
-    TW->>Redis: enqueue embed_backfill_articles
-    Redis->>EW: deliver embed_backfill_articles
-    EW->>HF: download/load bge-m3 if needed
-    EW->>PG: write article_chunks + article_embeddings + embedding_status=completed
-
-    EW-->>TW: task result
-    TW-->>Redis: complete wrapper task
+    UI->>Redis: enqueue manual_generate_embeddings
+    Redis->>EW: deliver manual_generate_embeddings
+    EW->>PG: read article_chunks
+    EW->>HF: compute embeddings
+    EW->>PG: write article_embeddings + embedding_status=completed
+    EW->>UI: return embedding result
 ```
 
 ## Current Execution Semantics

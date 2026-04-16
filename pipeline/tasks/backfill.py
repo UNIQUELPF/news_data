@@ -9,51 +9,7 @@ from pipeline.llm_client import extract_domestic_article_metadata, is_llm_enable
 
 
 
-@celery_app.task(name="pipeline.tasks.backfill.run_translation_embedding_backfill", bind=True)
-def run_translation_embedding_backfill(
-    self,
-    target_language: str = "zh-CN",
-    translate_limit: int = 100,
-    embed_limit: int = 100,
-    force_translate: bool = False,
-    force_embed: bool = False,
-    parent_task_id: str | None = None,
-) -> dict:
-    effective_parent_id = parent_task_id or self.request.id
-    translation_async = celery_app.send_task(
-        "pipeline.tasks.translate.translate_backfill_articles",
-        kwargs={
-            "target_language": target_language,
-            "limit": translate_limit,
-            "force": force_translate,
-            "parent_task_id": effective_parent_id,
-        },
-        queue="translate",
-    )
-    translation_result = translation_async.get(disable_sync_subtasks=False)
 
-    embedding_async = celery_app.send_task(
-        "pipeline.tasks.embed.embed_backfill_articles",
-        kwargs={
-            "limit": embed_limit,
-            "force": force_embed,
-            "parent_task_id": effective_parent_id,
-        },
-        queue="embed",
-    )
-    embedding_result = embedding_async.get(disable_sync_subtasks=False)
-
-    translation_failed = int(translation_result.get("failed", 0))
-    embedding_failed = int(embedding_result.get("failed", 0))
-
-    return {
-        "status": "completed" if translation_failed == 0 and embedding_failed == 0 else "partial",
-        "target_language": target_language,
-        "translation_task_id": translation_async.id,
-        "embedding_task_id": embedding_async.id,
-        "translation": translation_result,
-        "embedding": embedding_result,
-    }
 
 
 @celery_app.task(name="pipeline.tasks.backfill.run_domestic_metadata_backfill", bind=True)

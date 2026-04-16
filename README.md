@@ -218,16 +218,21 @@ docker compose exec -T embedding-worker celery -A pipeline.celery_app:celery_app
 - 如果文章没有 `article_embeddings` 记录，也会被纳入回填
 - `force=true` 会直接重跑，不看当前 embedding 状态
 
-串行执行“翻译回填 + embedding 回填”：
+分别执行翻译回填和 embedding 回填：
 
 ```bash
-docker compose exec -T embedding-worker celery -A pipeline.celery_app:celery_app call pipeline.tasks.backfill.run_translation_embedding_backfill --kwargs='{"target_language":"zh-CN","translate_limit":50,"embed_limit":50}'
+# 执行翻译回填
+docker compose exec -T embedding-worker celery -A pipeline.celery_app:celery_app call pipeline.tasks.backfill.manual_global_processing --kwargs='{"target_language":"zh-CN","limit":50,"force":false}'
+
+# 执行 embedding 回填
+docker compose exec -T embedding-worker celery -A pipeline.celery_app:celery_app call pipeline.tasks.backfill.manual_generate_embeddings --kwargs='{"limit":50,"force":false}'
 ```
 
 说明：
 
-- 先执行翻译回填，再执行 embedding 回填
+- 可以分别控制翻译和 embedding 回填
 - 适合补历史数据或初始化语义搜索索引
+- 通过前端管理面板可以更方便地控制这些任务
 - 如果要全量重跑，可传 `force_translate=true` 和 `force_embed=true`
 
 串行执行“爬虫 -> 翻译回填 -> embedding 回填”：

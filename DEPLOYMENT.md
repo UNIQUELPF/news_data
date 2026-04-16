@@ -329,5 +329,5 @@ export LOCAL_EMBEDDING_BATCH_SIZE=8
 `pipeline_run` 一直 `PENDING`
 
 - 检查是否启动了 `crawl-worker`
-- `pipeline.tasks.orchestrate.run_end_to_end_pipeline` 当前路由到 `crawl` queue
-- 如果只起了 `translation-worker` / `embedding-worker`，完整流水线任务不会被消费
+- 爬虫任务路由到 `crawl` queue
+- 如果只起了 `translation-worker` / `embedding-worker`，爬虫任务不会被消费

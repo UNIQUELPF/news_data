@@ -26,9 +26,7 @@ from pipeline.task_state import (
 )
 from pipeline.tasks.backfill import (
     run_domestic_metadata_backfill,
-    run_translation_embedding_backfill,
 )
-from pipeline.tasks.orchestrate import run_end_to_end_pipeline
 
 app = FastAPI(title="Global Political Economy API", version="0.1.0")
 ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "").strip()

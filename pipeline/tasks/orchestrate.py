@@ -1,53 +1,7 @@
 from pipeline.celery_app import celery_app
-from pipeline.tasks.backfill import run_translation_embedding_backfill
-from pipeline.tasks.crawl import run_spider
 
 
-@celery_app.task(name="pipeline.tasks.orchestrate.run_end_to_end_pipeline", bind=True)
-def run_end_to_end_pipeline(
-    self,
-    spiders: list[str] | None = None,
-    target_language: str = "zh-CN",
-    crawl_extra_args: dict | None = None,
-    translate_limit: int = 100,
-    embed_limit: int = 100,
-    force_translate: bool = False,
-    force_embed: bool = False,
-) -> dict:
-    parent_id = self.request.id
-    crawl_results = []
-    crawl_failed = 0
 
-    for spider_name in spiders or []:
-        result = run_spider(spider_name=spider_name, extra_args=crawl_extra_args, parent_task_id=parent_id)
-        crawl_results.append(result)
-        if result.get("status") != "success":
-            crawl_failed += 1
-
-    backfill_result = run_translation_embedding_backfill(
-        target_language=target_language,
-        translate_limit=translate_limit,
-        embed_limit=embed_limit,
-        force_translate=force_translate,
-        force_embed=force_embed,
-        parent_task_id=parent_id,
-    )
-
-    backfill_failed = backfill_result.get("status") not in {"completed", "empty"}
-    overall_status = "completed"
-    if crawl_failed or backfill_failed:
-        overall_status = "partial"
-
-    return {
-        "status": overall_status,
-        "spiders": spiders or [],
-        "crawl": {
-            "processed": len(crawl_results),
-            "failed": crawl_failed,
-            "results": crawl_results,
-        },
-        "backfill": backfill_result,
-    }
 
 
 def _match_cron_field(field_expr, value, max_val):

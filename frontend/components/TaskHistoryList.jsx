@@ -3,12 +3,17 @@ import { formatDate, stateClass, summarizeCrawlResult, summarizeTaskResult } fro
 
 function formatTaskNameFriendly(taskName) {
   const shortName = (taskName || "").split('.').pop();
-  if (shortName === "run_end_to_end_pipeline") return "🕷️ 全球收割组 (End-to-End Crawler)";
-  if (shortName === "run_translation_embedding_backfill") return "🔄 历史回填组 (Backfill)";
+  // 历史任务名称（已不再使用，但可能出现在历史记录中）
+  if (shortName === "run_end_to_end_pipeline") return "🕷️ 全球收割组 (End-to-End Crawler) [已弃用]";
+  if (shortName === "run_translation_embedding_backfill") return "🔄 历史回填组 (Backfill) [已弃用]";
+  // 当前使用的任务名称
   if (shortName === "auto_translate_articles") return "⚙️ 后台自动翻译 (Auto Translate)";
   if (shortName === "auto_embed_articles") return "⚙️ 后台自动向量 (Auto Embed)";
   if (shortName === "run_all_spiders_automatic") return "🕷️ 全量自动爬虫巡航 (Crawler Auto-Run)";
   if (shortName === "manual_ingest_from_spiders") return "🚀 手动触发抓取 (Manual Ingest)";
+  if (shortName === "manual_global_processing") return "🌍 全球翻译回填 (Global Translation)";
+  if (shortName === "manual_generate_embeddings") return "🔍 向量索引生成 (Embedding Generation)";
+  if (shortName === "run_domestic_metadata_backfill") return "🇨🇳 国内元数据回填 (Domestic Metadata)";
   return `📦 ${shortName}`;
 }
 

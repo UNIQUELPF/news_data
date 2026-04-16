@@ -1,10 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
-from pipeline.tasks.backfill import run_translation_embedding_backfill
 from pipeline.tasks.crawl import _extract_items_scraped
 from pipeline.tasks.embed import _chunk_text, embed_article
-from pipeline.tasks.orchestrate import run_end_to_end_pipeline
 from pipeline.domestic_taxonomy import (
     infer_domestic_category,
     infer_domestic_location,
@@ -64,97 +62,7 @@ class PipelineTaskHelpersTest(unittest.TestCase):
         self.assertEqual(split_organization_and_company("中国汽车工业协会"), ("中国汽车工业协会", None))
         self.assertEqual(split_organization_and_company("华创证券,南方基金"), (None, "华创证券,南方基金"))
 
-    @patch("pipeline.tasks.backfill.celery_app.send_task")
-    def test_run_translation_embedding_backfill_completed(self, mock_send_task):
-        translation_async = MagicMock()
-        translation_async.id = "translate-1"
-        translation_async.get.return_value = {"status": "completed", "failed": 0, "processed": 2}
-        embedding_async = MagicMock()
-        embedding_async.id = "embed-1"
-        embedding_async.get.return_value = {"status": "completed", "failed": 0, "processed": 2}
-        mock_send_task.side_effect = [translation_async, embedding_async]
-
-        result = run_translation_embedding_backfill.run(
-            target_language="zh-CN",
-            translate_limit=2,
-            embed_limit=2,
-            force_translate=True,
-            force_embed=True,
-            parent_task_id="parent-1",
-        )
-
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["translation"]["processed"], 2)
-        self.assertEqual(result["embedding"]["processed"], 2)
-        self.assertEqual(result["translation_task_id"], "translate-1")
-        self.assertEqual(result["embedding_task_id"], "embed-1")
-        self.assertEqual(mock_send_task.call_count, 2)
-
-    @patch("pipeline.tasks.backfill.celery_app.send_task")
-    def test_run_translation_embedding_backfill_partial_when_failures_exist(self, mock_send_task):
-        translation_async = MagicMock()
-        translation_async.id = "translate-1"
-        translation_async.get.return_value = {"status": "completed", "failed": 1}
-        embedding_async = MagicMock()
-        embedding_async.id = "embed-1"
-        embedding_async.get.return_value = {"status": "completed", "failed": 0}
-        mock_send_task.side_effect = [translation_async, embedding_async]
-
-        result = run_translation_embedding_backfill.run(parent_task_id="parent-1")
-
-        self.assertEqual(result["status"], "partial")
-
-    @patch("pipeline.tasks.orchestrate.run_translation_embedding_backfill")
-    @patch("pipeline.tasks.orchestrate.run_spider")
-    def test_run_end_to_end_pipeline_completed(self, mock_run_spider, mock_backfill):
-        mock_run_spider.side_effect = [
-            {"spider": "a", "status": "success"},
-            {"spider": "b", "status": "success"},
-        ]
-        mock_backfill.return_value = {"status": "completed"}
-
-        task_class = run_end_to_end_pipeline._get_current_object().__class__
-        with patch.object(task_class, "request", new_callable=PropertyMock, return_value=MagicMock(id="parent-1")):
-            result = run_end_to_end_pipeline.run(
-                spiders=["a", "b"],
-                target_language="zh-CN",
-                crawl_extra_args={"start_date": "2026-04-01"},
-                translate_limit=20,
-                embed_limit=20,
-                force_translate=True,
-                force_embed=False,
-            )
-
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["crawl"]["processed"], 2)
-        self.assertEqual(result["crawl"]["failed"], 0)
-        self.assertEqual(result["backfill"]["status"], "completed")
-        mock_run_spider.assert_any_call(spider_name="a", extra_args={"start_date": "2026-04-01"}, parent_task_id="parent-1")
-        mock_run_spider.assert_any_call(spider_name="b", extra_args={"start_date": "2026-04-01"}, parent_task_id="parent-1")
-        mock_backfill.assert_called_once_with(
-            target_language="zh-CN",
-            translate_limit=20,
-            embed_limit=20,
-            force_translate=True,
-            force_embed=False,
-            parent_task_id="parent-1",
-        )
-
-    @patch("pipeline.tasks.orchestrate.run_translation_embedding_backfill")
-    @patch("pipeline.tasks.orchestrate.run_spider")
-    def test_run_end_to_end_pipeline_partial_when_crawl_fails(self, mock_run_spider, mock_backfill):
-        mock_run_spider.side_effect = [
-            {"spider": "a", "status": "success"},
-            {"spider": "b", "status": "failed"},
-        ]
-        mock_backfill.return_value = {"status": "completed"}
-
-        task_class = run_end_to_end_pipeline._get_current_object().__class__
-        with patch.object(task_class, "request", new_callable=PropertyMock, return_value=MagicMock(id="parent-1")):
-            result = run_end_to_end_pipeline.run(spiders=["a", "b"])
-
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["crawl"]["failed"], 1)
+)
 
     @patch("pipeline.tasks.translate.get_db_connection")
     @patch("pipeline.tasks.translate._fetch_article")
