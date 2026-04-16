@@ -13,3 +13,4 @@ dateparser==1.2.0
 playwright-stealth==1.0.6
 jdatetime
 pypdf
+croniter
