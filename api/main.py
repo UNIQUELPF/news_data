@@ -1386,16 +1386,92 @@ class ScheduleUpdateRequest(BaseModel):
 @app.post("/api/v1/pipeline/schedules/{schedule_id}/update")
 def update_periodic_schedule(schedule_id: int, req: ScheduleUpdateRequest, x_admin_token: Optional[str] = Header(default=None)):
     _require_admin_token(x_admin_token)
-    # Basic validation
-    parts = req.cron_expr.split()
-    if len(parts) != 5:
-        raise HTTPException(status_code=400, detail="Invalid cron expression. Must have exactly 5 parts.")
+    
+    # 使用croniter进行完整的cron表达式验证
+    try:
+        from croniter import croniter
+        from datetime import datetime
+        import pytz
+        
+        # 验证cron表达式
+        tz = pytz.timezone('Asia/Shanghai')
+        base_time = tz.localize(datetime.now())
+        
+        # 尝试创建croniter对象，如果表达式无效会抛出异常
+        cron = croniter(req.cron_expr, base_time)
+        
+        # 可选：计算下一个执行时间用于预览
+        next_time = cron.get_next(datetime)
+        
+    except ImportError:
+        # 如果croniter未安装，使用基本验证
+        logger.warning("croniter库未安装，使用基本cron表达式验证")
+        parts = req.cron_expr.split()
+        if len(parts) != 5:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid cron expression. Must have exactly 5 parts (minute hour day month weekday)."
+            )
+    except Exception as e:
+        # 使用具体的异常类型而不是字符串匹配
+        from croniter import (
+            CroniterError,
+            CroniterBadCronError,
+            CroniterBadDateError,
+            CroniterNotAlphaError,
+            CroniterUnsupportedSyntaxError,
+        )
+        
+        error_msg = str(e)
+        
+        # 根据具体的异常类型提供错误信息
+        if isinstance(e, CroniterBadDateError):
+            detail = f"Invalid cron expression: invalid date. {error_msg}"
+        elif isinstance(e, CroniterNotAlphaError):
+            detail = f"Invalid cron expression: syntax error (non-numeric character). {error_msg}"
+        elif isinstance(e, CroniterUnsupportedSyntaxError):
+            detail = f"Invalid cron expression: unsupported syntax. {error_msg}"
+        elif isinstance(e, CroniterBadCronError):
+            # CroniterBadCronError 包含多种错误：范围错误、语法错误等
+            if "out of range" in error_msg:
+                detail = f"Invalid cron expression: value out of range. {error_msg}"
+            elif "invalid range" in error_msg or "must not be zero" in error_msg:
+                detail = f"Invalid cron expression: invalid value. {error_msg}"
+            elif "Exactly 5, 6 or 7 columns" in error_msg:
+                detail = "Invalid cron expression: must have exactly 5 parts (minute hour day month weekday)."
+            else:
+                detail = f"Invalid cron expression: syntax error. {error_msg}"
+        elif isinstance(e, CroniterError):
+            detail = f"Invalid cron expression: {error_msg}"
+        else:
+            detail = f"Invalid cron expression: {error_msg}"
+        
+        raise HTTPException(status_code=400, detail=detail)
     
     connection = get_db_connection()
     try:
         cursor = connection.cursor()
         cursor.execute("UPDATE pipeline_periodic_tasks SET cron_expr = %s WHERE id = %s", (req.cron_expr, schedule_id))
         connection.commit()
-        return {"status": "success", "cron_expr": req.cron_expr}
+        
+        # 返回更多信息
+        response = {
+            "status": "success", 
+            "cron_expr": req.cron_expr,
+            "message": "Schedule updated successfully"
+        }
+        
+        # 如果croniter可用，添加下一个执行时间预览
+        try:
+            from croniter import croniter
+            tz = pytz.timezone('Asia/Shanghai')
+            base_time = tz.localize(datetime.now())
+            cron = croniter(req.cron_expr, base_time)
+            next_time = cron.get_next(datetime)
+            response["next_execution"] = next_time.strftime('%Y-%m-%d %H:%M')
+        except:
+            pass
+            
+        return response
     finally:
         connection.close()
