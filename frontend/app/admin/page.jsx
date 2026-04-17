@@ -9,6 +9,7 @@ export default function AdminPage() {
   const {
     adminActor,
     adminToken,
+    activeTab,
     activeTask,
     activeTaskId,
     autoRefresh,
@@ -27,13 +28,13 @@ export default function AdminPage() {
     batchRetryTasks,
     cancelTask,
     retryTask,
+    setActiveTab,
     setActiveTaskId,
     setAdminActor,
     setAdminToken,
     setAutoRefresh,
     setShowRunningOnly,
     setTaskLimit,
-    spiderPresets,
     onIngest,
     onProcessGlobal,
     onProcessDomestic,
@@ -57,6 +58,7 @@ export default function AdminPage() {
           <TaskPanel
             adminActor={adminActor}
             adminToken={adminToken}
+            activeTab={activeTab}
             activeTask={activeTask}
             activeTaskId={activeTaskId}
             autoRefresh={autoRefresh}
@@ -71,6 +73,7 @@ export default function AdminPage() {
             taskLimit={taskLimit}
             taskSummary={taskSummary}
             tasks={tasks}
+            onActiveTabChange={setActiveTab}
             onActiveTaskChange={setActiveTaskId}
             onAdminActorBlur={persistAdminActor}
             onAdminActorChange={setAdminActor}
@@ -82,7 +85,6 @@ export default function AdminPage() {
             onBatchRetryTasks={batchRetryTasks}
             onCancelTask={cancelTask}
             onRetryTask={retryTask}
-            spiderPresets={spiderPresets}
             onShowRunningOnlyChange={setShowRunningOnly}
             onIngest={onIngest}
             onProcessGlobal={onProcessGlobal}

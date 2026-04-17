@@ -4,7 +4,6 @@ import { parseSpiderCsv, removeSpiderFromCsv, summarizeSpiderInput } from "../li
 export default function TaskPanelForm({
   backfillForm,
   onBackfillFormChange,
-  spiderPresets,
   onIngest,
   onProcessGlobal,
   onProcessDomestic,
@@ -88,16 +87,7 @@ export default function TaskPanelForm({
             <span className="chip" style={{ marginLeft: 'auto' }}>共有 {availableSpiders.length} 个爬虫</span>
           </div>
 
-          <div className="preset-row">
-            <strong>预设方案:</strong>
-            {spiderPresets.map((preset) => (
-              <div key={preset.id} className="preset-group">
-                <button className="preset-chip" onClick={() => onBackfillFormChange("spiders_text", preset.value)} type="button">
-                  {preset.label}
-                </button>
-              </div>
-            ))}
-          </div>
+
 
           {selectedSpiders.length ? (
             <div className="selected-spider-list">

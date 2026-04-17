@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from pipeline.celery_app import celery_app
 from pipeline.db import get_db_connection
 from pipeline.llm_client import embed_texts, get_pipeline_runtime_status, is_embedding_enabled
-from pipeline.presets import PIPELINE_SPIDER_PRESETS
 from pipeline.search_config import get_hybrid_ranking_weights
 from pipeline.task_state import (
     append_pipeline_task_note as _append_pipeline_task_note_helper,
@@ -1078,12 +1077,6 @@ def trigger_embed_process(
     return {"task_id": task.id, "status": "queued"}
 
 
-@app.get("/api/v1/pipeline/presets")
-def list_pipeline_presets(x_admin_token: Optional[str] = Header(default=None)):
-    _require_admin_token(x_admin_token)
-    return {
-        "items": PIPELINE_SPIDER_PRESETS
-    }
 
 
 @app.get("/api/v1/pipeline/tasks/{task_id}")

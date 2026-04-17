@@ -33,7 +33,6 @@ export default function TaskPanel({
   onBatchRetryTasks,
   onCancelTask,
   onRetryTask,
-  spiderPresets,
   onShowRunningOnlyChange,
   onIngest,
   onProcessGlobal,
@@ -44,9 +43,10 @@ export default function TaskPanel({
   persistAdminActor,
   persistAdminToken,
   loadPanel,
-  availableSpiders
+  availableSpiders,
+  activeTab,
+  onActiveTabChange
 }) {
-  const [activeTab, setActiveTab] = useState("overview");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [toast, setToast] = useState(null); // { message, type: 'success' | 'error' }
@@ -61,7 +61,7 @@ export default function TaskPanel({
       await triggerFn();
       showToast(`${taskName} 任务已成功提交`, 'success');
       // 自动切换到日志选项卡，方便查看进度
-      setActiveTab('logs');
+      onActiveTabChange('logs');
     } catch (err) {
       showToast(`提交失败: ${err.message || '未知错误'}`, 'error');
     }
@@ -172,7 +172,7 @@ export default function TaskPanel({
 
       <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid var(--border-color, #e2e8f0)', marginBottom: '24px' }}>
         <button 
-          onClick={() => setActiveTab('overview')}
+          onClick={() => onActiveTabChange('overview')}
           style={{ 
             padding: '12px 24px', 
             background: activeTab === 'overview' ? '#1890ff' : 'transparent',
@@ -187,7 +187,7 @@ export default function TaskPanel({
           📊 运行总览
         </button>
         <button 
-          onClick={() => setActiveTab('control')}
+          onClick={() => onActiveTabChange('control')}
           style={{ 
             padding: '12px 24px', 
             background: activeTab === 'control' ? '#1890ff' : 'transparent',
@@ -202,7 +202,7 @@ export default function TaskPanel({
           ⚙️ 任务控制台
         </button>
         <button 
-          onClick={() => setActiveTab('logs')}
+          onClick={() => onActiveTabChange('logs')}
           style={{ 
             padding: '12px 24px', 
             background: activeTab === 'logs' ? '#1890ff' : 'transparent',
@@ -217,7 +217,7 @@ export default function TaskPanel({
           📝 任务执行日志
         </button>
         <button 
-          onClick={() => setActiveTab('schedules')}
+          onClick={() => onActiveTabChange('schedules')}
           style={{ 
             padding: '12px 24px', 
             background: activeTab === 'schedules' ? '#1890ff' : 'transparent',
@@ -255,7 +255,6 @@ export default function TaskPanel({
             onAdminTokenChange={onAdminTokenChange}
             onAutoRefreshChange={onAutoRefreshChange}
             onBackfillFormChange={onBackfillFormChange}
-            spiderPresets={spiderPresets}
             onShowRunningOnlyChange={onShowRunningOnlyChange}
             onIngest={() => handleTaskTrigger(onIngest, "数据抓取")}
             onProcessGlobal={() => handleTaskTrigger(onProcessGlobal, "全球资讯处理")}

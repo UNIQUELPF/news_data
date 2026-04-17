@@ -32,9 +32,9 @@ export function usePipelinePanel() {
   const [taskLimit, setTaskLimit] = useState(5);
   const [showRunningOnly, setShowRunningOnly] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
   const [panelError, setPanelError] = useState("");
   const [backfillForm, setBackfillForm] = useState(defaultBackfillForm);
-  const [spiderPresets, setSpiderPresets] = useState([]);
   const [availableSpiders, setAvailableSpiders] = useState([]);
 
   useEffect(() => {
@@ -42,64 +42,106 @@ export function usePipelinePanel() {
     setAdminActor(window.localStorage.getItem(ADMIN_ACTOR_STORAGE_KEY) || "");
   }, []);
 
-  const loadPanel = useCallback(async (force = false) => {
-    if (!adminToken && !force) {
-      // Don't set error if it's just initial state sync delay
-      if (typeof window !== "undefined" && window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)) {
-        return;
-      }
-      setPanelError("管理面板需要有效的 Admin Token");
-      setTaskSummary(null);
-      setMonitorSummary(null);
-      setTaskMonitorSummary(null);
-      setRuntimeStatus(null);
-      setTasks([]);
-      return;
+  const loadMetadata = useCallback(async () => {
+    if (!adminToken) return;
+    const [spiderData] = await Promise.all([
+      request("/api/v1/pipeline/spiders", { adminToken, adminActor })
+    ]);
+
+    setAvailableSpiders(spiderData.spiders || []);
+  }, [adminActor, adminToken]);
+
+  const loadStatus = useCallback(async () => {
+    if (!adminToken) return;
+    
+    const tasks = [];
+    // overview needs monitor and runtime
+    if (activeTab === "overview") {
+      tasks.push(request("/api/v1/pipeline/monitor", { adminToken, adminActor }));
+      tasks.push(request("/api/v1/pipeline/runtime", { adminToken, adminActor }));
+    } 
+    // control needs runtime (for warnings)
+    else if (activeTab === "control") {
+      tasks.push(request("/api/v1/pipeline/runtime", { adminToken, adminActor }));
     }
-    try {
-      const [monitorData, runtimeData, groupsTaskData, presetData, spiderData] = await Promise.all([
-        request("/api/v1/pipeline/monitor", { adminToken, adminActor }),
-        request("/api/v1/pipeline/runtime", { adminToken, adminActor }),
-        request("/api/v1/pipeline/groups", {
-          adminToken,
-          adminActor,
-          query: { limit: taskLimit * 2 } // fetch more logic since it includes sub-tasks
-        }),
-        request("/api/v1/pipeline/presets", {
-          adminToken,
-          adminActor
-        }),
-        request("/api/v1/pipeline/spiders", {
-          adminToken,
-          adminActor
-        })
-      ]);
-      const mergedTasks = combineTaskLists(groupsTaskData.items || []);
+    // logs needs groups (task list)
+    else if (activeTab === "logs") {
+      tasks.push(request("/api/v1/pipeline/groups", {
+        adminToken,
+        adminActor,
+        query: { limit: taskLimit * 2 }
+      }));
+    }
+
+    if (tasks.length === 0) return;
+
+    const results = await Promise.all(tasks);
+    
+    if (activeTab === "overview") {
+      const [monitorData, runtimeData] = results;
       setTaskSummary(monitorData.pipeline || null);
       setMonitorSummary(monitorData.crawl || null);
       setTaskMonitorSummary(monitorData.tasks || null);
       setRuntimeStatus(normalizeRuntimeStatus(runtimeData));
+    } else if (activeTab === "control") {
+      const [runtimeData] = results;
+      setRuntimeStatus(normalizeRuntimeStatus(runtimeData));
+    } else if (activeTab === "logs") {
+      const [groupsTaskData] = results;
+      const mergedTasks = combineTaskLists(groupsTaskData.items || []);
       setTasks(mergedTasks);
-      setSpiderPresets(
-        (presetData.items || []).map((preset) => ({
-          ...preset,
-          value: serializeSpiderPreset(preset.spiders)
-        }))
-      );
-      setAvailableSpiders(spiderData.spiders || []);
-      setPanelError("");
       if (!activeTaskId && mergedTasks.length) {
         setActiveTaskId(mergedTasks[0].task_id);
       }
-    } catch (panelLoadError) {
-      setPanelError(panelLoadError.message);
-      setTaskSummary(null);
-      setMonitorSummary(null);
-      setTaskMonitorSummary(null);
-      setRuntimeStatus(null);
-      setTasks([]);
     }
-  }, [activeTaskId, adminActor, adminToken, taskLimit]);
+  }, [activeTab, activeTaskId, adminActor, adminToken, taskLimit]);
+
+  const loadPanel = useCallback(
+    async (full = false) => {
+      if (!adminToken && !full) {
+        if (typeof window !== "undefined" && window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)) {
+          return;
+        }
+        setPanelError("管理面板需要有效的 Admin Token");
+        setTaskSummary(null);
+        setMonitorSummary(null);
+        setTaskMonitorSummary(null);
+        setRuntimeStatus(null);
+        setTasks([]);
+        return;
+      }
+      try {
+        if (full) {
+          // Full load still fetches everything to ensure consistency
+          const [monitorData, runtimeData, groupsTaskData, spiderData] = await Promise.all([
+            request("/api/v1/pipeline/monitor", { adminToken, adminActor }),
+            request("/api/v1/pipeline/runtime", { adminToken, adminActor }),
+            request("/api/v1/pipeline/groups", { adminToken, adminActor, query: { limit: taskLimit * 2 } }),
+            request("/api/v1/pipeline/spiders", { adminToken, adminActor })
+          ]);
+          
+          setTaskSummary(monitorData.pipeline || null);
+          setMonitorSummary(monitorData.crawl || null);
+          setTaskMonitorSummary(monitorData.tasks || null);
+          setRuntimeStatus(normalizeRuntimeStatus(runtimeData));
+          
+          const mergedTasks = combineTaskLists(groupsTaskData.items || []);
+          setTasks(mergedTasks);
+          if (!activeTaskId && mergedTasks.length) {
+            setActiveTaskId(mergedTasks[0].task_id);
+          }
+
+          setAvailableSpiders(spiderData.spiders || []);
+        } else {
+          await loadStatus();
+        }
+        setPanelError("");
+      } catch (panelLoadError) {
+        setPanelError(panelLoadError.message);
+      }
+    },
+    [activeTaskId, adminActor, adminToken, loadStatus, taskLimit]
+  );
 
   const loadTaskDetail = useCallback(async (taskId) => {
     if (!taskId || !adminToken) return;
@@ -252,7 +294,7 @@ export function usePipelinePanel() {
   useEffect(() => {
     if (!autoRefresh || !adminToken) return undefined;
     const timer = window.setInterval(() => {
-      loadPanel(true);
+      loadPanel(false);
     }, 10000);
     return () => window.clearInterval(timer);
   }, [adminToken, autoRefresh, loadPanel]);
@@ -262,15 +304,15 @@ export function usePipelinePanel() {
   }, [activeTaskId, taskDetails, tasks]);
 
   useEffect(() => {
-    if (!activeTaskId || !adminToken) return undefined;
+    if (!activeTaskId || !adminToken || activeTab !== "logs") return undefined;
     loadTaskDetail(activeTaskId);
     if (!isActiveTaskState(activeTaskState)) return undefined;
     const timer = window.setInterval(() => {
       loadTaskDetail(activeTaskId);
-      loadPanel(true);
+      loadPanel(false);
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [activeTaskId, activeTaskState, adminToken, loadPanel, loadTaskDetail]);
+  }, [activeTaskId, activeTaskState, activeTab, adminToken, loadPanel, loadTaskDetail]);
 
   useEffect(() => {
     if (!highlightTaskId) return undefined;
@@ -287,6 +329,7 @@ export function usePipelinePanel() {
   return {
     adminActor,
     adminToken,
+    activeTab,
     activeTask,
     activeTaskId,
     autoRefresh,
@@ -306,13 +349,13 @@ export function usePipelinePanel() {
     cancelTask,
     loadPanel,
     retryTask,
+    setActiveTab,
     setActiveTaskId,
     setAdminActor,
     setAdminToken,
     setAutoRefresh,
     setShowRunningOnly,
     setTaskLimit,
-    spiderPresets,
     availableSpiders,
     onIngest,
     onProcessGlobal,
