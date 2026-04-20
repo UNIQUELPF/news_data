@@ -76,8 +76,8 @@ def dispatch_periodic_tasks(self):
 
         if dispatched_ids:
             cursor.execute(
-                "UPDATE pipeline_periodic_tasks SET last_run_at = CURRENT_TIMESTAMP WHERE id = ANY(%s)",
-                (dispatched_ids,)
+                "UPDATE pipeline_periodic_tasks SET last_run_at = %s WHERE id = ANY(%s)",
+                (now, dispatched_ids)
             )
             connection.commit()
 

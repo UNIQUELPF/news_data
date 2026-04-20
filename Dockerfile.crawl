@@ -3,6 +3,9 @@ FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 WORKDIR /app
 
 COPY requirements.txt .
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && \
+    rm -rf /var/lib/apt/lists/*
 RUN pip install --default-timeout=300 --no-cache-dir -r requirements.txt
 
 RUN playwright install chromium
