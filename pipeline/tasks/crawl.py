@@ -8,6 +8,7 @@ from celery import group, chain
 
 from pipeline.celery_app import celery_app
 from pipeline.db import get_db_connection
+from pipeline.task_state import record_pipeline_task, sync_pipeline_task_state, classify_task_type
 
 DEFAULT_PROJECT_DIR = os.getenv("SCRAPY_PROJECT_DIR", "/app/news_scraper_project")
 CRAWL_BATCH_SIZE = int(os.getenv("CRAWL_BATCH_SIZE", "5"))
@@ -84,108 +85,143 @@ def _finish_crawl_job(job_id: int | None, *, status: str, items_scraped: int = 0
             connection.close()
 
 
-def _extract_items_scraped(stdout: str | None) -> int:
-    if not stdout:
-        return 0
+import billiard
+import scrapy
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from scrapy.signalmanager import dispatcher
 
-    marker = "'item_scraped_count':"
-    index = stdout.rfind(marker)
-    if index == -1:
-        return 0
-
-    tail = stdout[index + len(marker):].strip()
-    digits = []
-    for char in tail:
-        if char.isdigit():
-            digits.append(char)
-        elif digits:
-            break
-    return int("".join(digits)) if digits else 0
-
-
-@celery_app.task(name="pipeline.tasks.crawl.run_spider")
-def run_spider(spider_name: str, extra_args: dict | None = None, parent_task_id: str | None = None) -> dict:
-    project_dir = DEFAULT_PROJECT_DIR
-    env = _build_scrapy_env(project_dir)
-    cmd = ["scrapy", "crawl", spider_name]
-    job_id = _create_crawl_job(spider_name)
-
-    for key, value in (extra_args or {}).items():
-        cmd.extend(["-a", f"{key}={value}"])
-
-    started_at = datetime.now().isoformat()
+def _execute_spider(spider_name: str, extra_args: dict, result_queue: billiard.Queue):
+    """
+    Internal function to run Scrapy in a dedicated process.
+    """
     try:
-        completed = subprocess.run(
-            cmd,
-            cwd=project_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True,
+        # Load settings and set the module environment
+        os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'news_scraper.settings')
+        settings = get_project_settings()
+        
+        # This container will hold our results
+        stats_result = {"items": 0, "status": "failed", "error": None}
+        
+        def collect_stats(spider):
+            # This is called when spider is closed
+            stats = crawler.stats
+            stats_result["items"] = stats.get_value('item_scraped_count', 0)
+            stats_result["status"] = "success"
+
+        # Initialize Crawler and connect signal
+        process = CrawlerProcess(settings)
+        crawler = process.create_crawler(spider_name)
+        
+        # Connect the spider_closed signal to our collector
+        dispatcher.connect(collect_stats, signal=scrapy.signals.spider_closed)
+        
+        process.crawl(crawler, **(extra_args or {}))
+        process.start() # Blocks until finished
+        
+        result_queue.put(stats_result)
+    except Exception as e:
+        import traceback
+        result_queue.put({"items": 0, "status": "failed", "error": f"{str(e)}\n{traceback.format_exc()}"})
+
+@celery_app.task(name="pipeline.tasks.crawl.run_spider", bind=True)
+def run_spider(self, spider_name: str, extra_args: dict | None = None, parent_task_id: str | None = None) -> dict:
+    task_id = self.request.id
+    started_at = datetime.now().isoformat()
+    
+    # 1. Register task in tracking table
+    record_pipeline_task(
+        task_id=task_id,
+        task_name=f"Crawl: {spider_name}",
+        task_type="crawl",
+        params={"spider_name": spider_name, "extra_args": extra_args},
+        parent_task_id=parent_task_id,
+        state="RUNNING"
+    )
+    
+    job_id = _create_crawl_job(spider_name)
+    
+    result_queue = billiard.Queue()
+    p = billiard.Process(
+        target=_execute_spider, 
+        args=(spider_name, extra_args or {}, result_queue)
+    )
+    
+    try:
+        p.start()
+        p.join() # Wait for spider to finish
+        
+        result = {"items": 0, "status": "failed", "error": "Process terminated unexpectedly"}
+        if not result_queue.empty():
+            result = result_queue.get()
+            
+        status = result["status"]
+        items_scraped = result["items"]
+        error_message = result["error"]
+        
+        # 2. Update status in our tracking tables
+        _finish_crawl_job(job_id, status=status, items_scraped=items_scraped, error_message=error_message)
+        
+        celery_state = "SUCCESS" if status == "success" else "FAILURE"
+        sync_pipeline_task_state(
+            task_id=task_id, 
+            state=celery_state, 
+            result={"items_scraped": items_scraped, "error": error_message}
         )
-        items_scraped = _extract_items_scraped(completed.stdout)
-        _finish_crawl_job(job_id, status="success", items_scraped=items_scraped)
+        
         return {
             "spider": spider_name,
             "started_at": started_at,
             "finished_at": datetime.now().isoformat(),
-            "status": "success",
+            "status": status,
             "items_scraped": items_scraped,
-            "stdout_tail": completed.stdout[-4000:],
+            "error": error_message
         }
-    except subprocess.CalledProcessError as exc:
-        items_scraped = _extract_items_scraped(exc.stdout)
-        _finish_crawl_job(
-            job_id,
-            status="failed",
-            items_scraped=items_scraped,
-            error_message=(exc.stderr or exc.stdout or "")[-2000:],
-        )
+    except Exception as e:
+        import traceback
+        err_msg = f"{str(e)}\n{traceback.format_exc()}"
+        _finish_crawl_job(job_id, status="failed", items_scraped=0, error_message=err_msg)
+        sync_pipeline_task_state(task_id=task_id, state="FAILURE", result={"error": err_msg})
         return {
             "spider": spider_name,
-            "started_at": started_at,
-            "finished_at": datetime.now().isoformat(),
             "status": "failed",
-            "items_scraped": items_scraped,
-            "returncode": exc.returncode,
-            "stdout_tail": (exc.stdout or "")[-4000:],
-            "stderr_tail": (exc.stderr or "")[-4000:],
+            "error": err_msg
         }
 
 
 @celery_app.task(name="pipeline.tasks.crawl.run_all_spiders_automatic", bind=True)
 def run_all_spiders_automatic(self) -> dict:
     """
-    Orchestrate all discovered spiders in batches.
-    Uses Celery's chain and group to throttle execution.
+    Orchestrate all discovered spiders in a streaming fashion.
+    Tasks are dispatched individually to the Celery queue.
     """
     all_spiders = get_all_spiders()
     parent_id = self.request.id
     
+    # Register parent task
+    record_pipeline_task(
+        task_id=parent_id,
+        task_name="Crawler Auto-Cruise (Streaming)",
+        task_type="crawl",
+        params={"spider_count": len(all_spiders)},
+        state="RUNNING"
+    )
+    
     if not all_spiders:
         return {"status": "empty", "message": "No spiders found in project"}
 
-    # Split into batches of size CRAWL_BATCH_SIZE
-    batches = [all_spiders[i:i + CRAWL_BATCH_SIZE] for i in range(0, len(all_spiders), CRAWL_BATCH_SIZE)]
+    # Dispatch all tasks to the queue. Celery handles the concurrency.
+    for name in all_spiders:
+        run_spider.delay(spider_name=name, parent_task_id=parent_id)
     
-    # Build a chain of groups
-    task_chain = []
-    for batch in batches:
-        # Each group contains spiders that will run in parallel
-        # We pass parent_task_id so they can be aggregated in the UI
-        s_group = group(run_spider.s(spider_name=name, parent_task_id=parent_id) for name in batch)
-        task_chain.append(s_group)
-    
-    # Execute the chain
-    chain(*task_chain).delay()
-    
-    return {
-        "status": "triggered",
+    result = {
+        "status": "dispatched",
         "total_spiders": len(all_spiders),
-        "batch_count": len(batches),
-        "batch_size": CRAWL_BATCH_SIZE,
         "parent_task_id": parent_id
     }
+    sync_pipeline_task_state(task_id=parent_id, state="SUCCESS", result=result)
+    
+    return result
 
 
 @celery_app.task(name="pipeline.tasks.crawl.manual_ingest_from_spiders", bind=True)
@@ -195,18 +231,25 @@ def manual_ingest_from_spiders(self, spiders: list[str]) -> dict:
         return {"status": "empty", "message": "No spiders selected"}
     
     parent_id = self.request.id
-    # Split into batches
-    batches = [spiders[i:i + CRAWL_BATCH_SIZE] for i in range(0, len(spiders), CRAWL_BATCH_SIZE)]
     
-    task_chain = []
-    for batch in batches:
-        s_group = group(run_spider.s(spider_name=name, parent_task_id=parent_id) for name in batch)
-        task_chain.append(s_group)
+    # Register parent task
+    record_pipeline_task(
+        task_id=parent_id,
+        task_name="Manual Ingestion (Streaming)",
+        task_type="crawl",
+        params={"spiders": spiders},
+        state="RUNNING"
+    )
     
-    chain(*task_chain).delay()
+    # Dispatch all tasks
+    for name in spiders:
+        run_spider.delay(spider_name=name, parent_task_id=parent_id)
     
-    return {
-        "status": "triggered",
+    result = {
+        "status": "dispatched",
         "count": len(spiders),
         "parent_task_id": parent_id
     }
+    sync_pipeline_task_state(task_id=parent_id, state="SUCCESS", result=result)
+    
+    return result

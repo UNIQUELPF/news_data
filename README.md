@@ -2,13 +2,13 @@
 
 当前仓库用于建设“全球政治经济数据库”的采集与检索底座。
 
-部署与联调步骤见 [DEPLOYMENT.md](/home/fanhe/NingTai/news_data/DEPLOYMENT.md)。
-发版约定见 [RELEASE.md](/home/fanhe/NingTai/news_data/RELEASE.md)。
-上线前待办见 [LAUNCH_TODO.md](/home/fanhe/NingTai/news_data/LAUNCH_TODO.md)。
-搜索调优基线见 [SEARCH_TUNING.md](/home/fanhe/NingTai/news_data/SEARCH_TUNING.md)。
-生产回填 runbook 见 [PRODUCTION_ROLLOUT.md](/home/fanhe/NingTai/news_data/PRODUCTION_ROLLOUT.md)。
-搜索验收步骤见 [SEARCH_VALIDATION.md](/home/fanhe/NingTai/news_data/SEARCH_VALIDATION.md)。
-流程架构图见 [PIPELINE_ARCHITECTURE.md](/home/fanhe/NingTai/news_data/PIPELINE_ARCHITECTURE.md)。
+部署与联调步骤见 [DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+发版约定见 [RELEASE.md](docs/RELEASE.md)。
+上线前待办见 [LAUNCH_TODO.md](docs/LAUNCH_TODO.md)。
+搜索调优基线见 [SEARCH_TUNING.md](docs/SEARCH_TUNING.md)。
+生产回填 runbook 见 [PRODUCTION_ROLLOUT.md](docs/PRODUCTION_ROLLOUT.md)。
+搜索验收步骤见 [SEARCH_VALIDATION.md](docs/SEARCH_VALIDATION.md)。
+流程架构图见 [PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md)。
 
 前端工程化骨架已创建在 [frontend](/home/fanhe/NingTai/news_data/frontend)。
 当前默认入口就是 React / Next.js 工程化前端：
@@ -20,7 +20,7 @@ CI 也已补齐最小骨架，位于 [.github/workflows/frontend-ci.yml](/home/f
 
 - `Frontend CI`：安装前端依赖、运行 `npm test`、校验 `docker compose config`、构建 `frontend` 镜像
 - `Frontend CI`：安装前端依赖、运行 `npm run lint`、`npm test`、校验 `docker compose config`、构建 `frontend` 镜像
-- `Python CI / python-lint`：安装 Python 依赖和开发依赖，执行 `ruff check api pipeline tests runner.py`
+- `Python CI / python-lint`：安装 Python 依赖和开发依赖，执行 `ruff check api pipeline tests`
 - `Python CI / python-test`：安装 Python 依赖，执行 `python -m compileall api pipeline news_scraper_project`，并运行 `python -m unittest discover -s tests -p "test_*.py"`
 - `Release Images`：按 `v*` tag 或手动触发规则构建 API / Frontend 镜像，并生成统一 tag
 
@@ -34,7 +34,7 @@ CI 已启用依赖缓存：
 
 ```bash
 ./.venv/bin/pip install -r requirements-dev.txt
-./.venv/bin/ruff check api pipeline tests runner.py
+./.venv/bin/ruff check api pipeline tests
 ./.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
@@ -91,7 +91,7 @@ zsh scripts/bootstrap_stack.sh .env --with-demo-seed
 
 已完成第一阶段的基础改造：
 
-- 新增统一数据模型设计文档：[ARCHITECTURE.md](/home/fanhe/NingTai/news_data/ARCHITECTURE.md)
+- 新增统一数据模型设计文档：[ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 新增统一新闻主表迁移脚本：[migrations/000001_unified_news_schema.sql](/home/fanhe/NingTai/news_data/migrations/000001_unified_news_schema.sql)
 - Scrapy pipeline 已支持：
   - 写入统一主表 `sources` / `articles`
@@ -351,7 +351,7 @@ export LOCAL_EMBEDDING_BATCH_SIZE=16
 
 如果你的 Python 环境默认拉到的是 CUDA 版 `torch`，建议显式安装 CPU 版 `torch` 后再安装本地 embedding 依赖；否则包体积会非常大。
 
-更完整的安装说明见 [LOCAL_EMBEDDING_SETUP.md](/home/fanhe/NingTai/news_data/LOCAL_EMBEDDING_SETUP.md)。
+更完整的安装说明见 [LOCAL_EMBEDDING_SETUP.md](docs/LOCAL_EMBEDDING_SETUP.md)。
 
 可以先复制环境变量模板：
 
@@ -465,10 +465,10 @@ docker compose up -d api web
 
 说明：
 
-- `api` 使用独立的轻量镜像 [Dockerfile.api](/home/fanhe/NingTai/news_data/Dockerfile.api)
-- `scheduler` 和 `translation-worker` 使用轻量 Celery 镜像 [Dockerfile.celery](/home/fanhe/NingTai/news_data/Dockerfile.celery)
-- `crawl-worker` 使用带 Playwright 的爬虫镜像 [Dockerfile.crawl](/home/fanhe/NingTai/news_data/Dockerfile.crawl)
-- `embedding-worker` 使用带本地 embedding 依赖的镜像 [Dockerfile.embed](/home/fanhe/NingTai/news_data/Dockerfile.embed)
+- `api` 使用独立的轻量镜像 [Dockerfile.api](docker/Dockerfile.api)
+- `scheduler` 和 `translation-worker` 使用轻量 Celery 镜像 [Dockerfile.celery](docker/Dockerfile.celery)
+- `crawl-worker` 使用带 Playwright 的爬虫镜像 [Dockerfile.crawl](docker/Dockerfile.crawl)
+- `embedding-worker` 使用带本地 embedding 依赖的镜像 [Dockerfile.embed](docker/Dockerfile.embed)
 - 后端接口迭代和联调会明显更快
 - `web` 使用 `nginx` 反向代理静态页面和 `/api/*`
 - 同域入口默认是 `http://127.0.0.1:18080`
@@ -604,22 +604,7 @@ http://127.0.0.1:18080
 docker compose exec -T postgres psql -U your_user -d scrapy_db < migrations/000004_pipeline_task_audit_columns.sql
 ```
 
-## Pipeline 开关
-
-默认启用统一表和 legacy table 双写：
-
-- `ENABLE_UNIFIED_PIPELINE=1`
-- `ENABLE_LEGACY_TABLES=1`
-
-如果只想验证新表写入，可关闭 legacy 双写：
-
-```bash
-ENABLE_UNIFIED_PIPELINE=1 ENABLE_LEGACY_TABLES=0 python runner.py
-```
-
-## 下一步
-
-后续将按 [ARCHITECTURE.md](/home/fanhe/NingTai/news_data/ARCHITECTURE.md) 继续推进：
+后续将按 [ARCHITECTURE.md](docs/ARCHITECTURE.md) 继续推进：
 
 - 将 spider 增量逻辑从 legacy table 迁移到统一 `articles`
 - 引入 `Celery + Redis` 调度

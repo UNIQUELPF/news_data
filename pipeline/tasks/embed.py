@@ -8,6 +8,9 @@ from pipeline.llm_client import (
     get_embedding_provider,
     is_embedding_enabled,
 )
+from pipeline.qdrant_utils import get_qdrant_client, COLLECTION_NAME
+from qdrant_client.http.models import PointStruct
+import uuid
 
 
 def _set_embedding_status(cursor, article_id: int, status: str):
@@ -84,10 +87,15 @@ def _fetch_embedding_source(cursor, article_id: int, target_language: str):
         SELECT
             a.id,
             a.title_original,
-            a.content_original,
+            a.content_plain,
             t.title_translated,
             t.summary_translated,
-            t.content_translated
+            t.content_translated,
+            a.company,
+            a.publish_time,
+            a.category,
+            a.country_code,
+            a.language
         FROM articles a
         LEFT JOIN article_translations t
             ON t.article_id = a.id
@@ -99,80 +107,94 @@ def _fetch_embedding_source(cursor, article_id: int, target_language: str):
     return cursor.fetchone()
 
 
-def _chunk_text(text: str | None, chunk_size: int = 1200) -> list[str]:
+import re
+
+def _chunk_text(text: str | None, chunk_size: int = 1000, chunk_overlap: int = 200) -> list[str]:
     if not text:
         return []
-    compact = " ".join(text.split())
-    return [compact[i:i + chunk_size] for i in range(0, len(compact), chunk_size)]
+    
+    text = text.strip()
+    if not text:
+        return []
+
+    # 1. 智能断句：按中英文标点、换行符切分，并保留切分符
+    parts = re.split(r'([。！？\?\!]+|\n+|；|;|\.\s+)', text)
+    
+    sentences = []
+    for i in range(0, len(parts) - 1, 2):
+        sentence = parts[i] + parts[i+1]
+        if sentence.strip():
+            sentences.append(sentence.strip())
+            
+    # 兜底：处理剩余部分
+    if len(parts) % 2 != 0 and parts[-1].strip():
+        sentences.append(parts[-1].strip())
+        
+    chunks = []
+    current_chunk = []
+    current_length = 0
+
+    # 2. 拼装分块并保留 Overlap
+    for sentence in sentences:
+        sentence_len = len(sentence)
+        
+        # 异常情况：单句极长，强制硬切
+        if sentence_len > chunk_size:
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+            
+            for i in range(0, sentence_len, chunk_size - chunk_overlap):
+                chunks.append(sentence[i:i+chunk_size])
+            continue
+            
+        # 超出当前块容量时，结算并处理 Overlap
+        if current_length + sentence_len > chunk_size and current_chunk:
+            chunks.append(" ".join(current_chunk))
+            
+            overlap_chunk = []
+            overlap_length = 0
+            for s in reversed(current_chunk):
+                if overlap_length + len(s) <= chunk_overlap:
+                    overlap_chunk.insert(0, s)
+                    overlap_length += len(s) + 1 # +1 是为了补上空格长度
+                else:
+                    break
+            
+            current_chunk = overlap_chunk
+            current_length = overlap_length
+
+        current_chunk.append(sentence)
+        current_length += sentence_len + 1 
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+
+    return chunks
 
 
-def _upsert_chunks(cursor, article_id: int, chunks: list[str]) -> list[tuple[int, int]]:
-    cursor.execute("DELETE FROM article_embeddings WHERE article_id = %s", (article_id,))
-    cursor.execute("DELETE FROM article_chunks WHERE article_id = %s", (article_id,))
-    chunk_refs: list[tuple[int, int]] = []
-    for index, chunk in enumerate(chunks):
-        cursor.execute(
-            """
-            INSERT INTO article_chunks (
-                article_id,
-                chunk_index,
-                content_text,
-                token_count,
-                embedding_status,
-                updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-            RETURNING id, chunk_index
-            """,
-            (
-                article_id,
-                index,
-                chunk,
-                max(1, len(chunk) // 4),
-                "completed" if is_embedding_enabled() else "pending",
-            ),
-        )
-        chunk_refs.append(cursor.fetchone())
-    return chunk_refs
+def _upsert_embeddings(article_id: int, chunks: list[str], vectors: list[list[float]], metadata: dict):
+    q_client = get_qdrant_client()
+    points = []
 
+    for chunk_index, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"article_{article_id}_chunk_{chunk_index}"))
+        payload = {
+            "article_id": article_id,
+            "chunk_index": chunk_index,
+            "chunk_text": chunk_text,
+            "company": metadata.get("company"),
+            "country_code": metadata.get("country_code"),
+            "language": metadata.get("language"),
+            "publish_time": metadata.get("publish_time").isoformat() if metadata.get("publish_time") else None,
+            "category": metadata.get("category"),
+            "title": metadata.get("title")
+        }
+        points.append(PointStruct(id=point_id, vector=vector, payload=payload))
 
-def _upsert_embeddings(cursor, article_id: int, chunk_refs: list[tuple[int, int]], vectors: list[list[float]], model_name: str):
-    for (chunk_id, chunk_index), vector in zip(chunk_refs, vectors):
-        cursor.execute(
-            """
-            INSERT INTO article_embeddings (
-                article_id,
-                chunk_id,
-                chunk_index,
-                embedding_model,
-                embedding_dimensions,
-                embedding_vector,
-                updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb, CURRENT_TIMESTAMP)
-            ON CONFLICT (article_id, chunk_index, embedding_model) DO UPDATE SET
-                chunk_id = EXCLUDED.chunk_id,
-                embedding_dimensions = EXCLUDED.embedding_dimensions,
-                embedding_vector = EXCLUDED.embedding_vector,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                article_id,
-                chunk_id,
-                chunk_index,
-                model_name,
-                len(vector),
-                json.dumps(vector),
-            ),
-        )
-        cursor.execute(
-            """
-            UPDATE article_chunks
-            SET embedding_status = 'completed', updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            (chunk_id,),
-        )
+    if points:
+        q_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
 
 @celery_app.task(name="pipeline.tasks.embed.embed_article")
@@ -191,11 +213,20 @@ def embed_article(article_id: int, parent_task_id: str | None = None) -> dict:
 
         content_text = row[5] or row[4] or row[2] or ""
         title_text = row[3] or row[1] or ""
+        
+        metadata = {
+            "company": row[6],
+            "publish_time": row[7],
+            "category": row[8],
+            "country_code": row[9],
+            "language": row[10],
+            "title": title_text
+        }
+
         chunks = _chunk_text("\n\n".join(part for part in [title_text, content_text] if part))
-        chunk_refs = _upsert_chunks(cursor, article_id, chunks)
         if is_embedding_enabled() and chunks:
             vectors, model_name = embed_texts(chunks)
-            _upsert_embeddings(cursor, article_id, chunk_refs, vectors, model_name)
+            _upsert_embeddings(article_id, chunks, vectors, metadata)
         _set_embedding_status(cursor, article_id, "completed")
         connection.commit()
         return {

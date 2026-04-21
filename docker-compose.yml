@@ -2,7 +2,7 @@ services:
   scheduler:
     build:
       context: .
-      dockerfile: Dockerfile.celery
+      dockerfile: docker/Dockerfile.celery
     container_name: news_scheduler
     depends_on:
       - redis
@@ -34,11 +34,17 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      QDRANT_URL: http://qdrant:6333
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
 
   crawl-worker:
     build:
       context: .
-      dockerfile: Dockerfile.crawl
+      dockerfile: docker/Dockerfile.crawl
     container_name: news_crawl_worker
     depends_on:
       - redis
@@ -79,11 +85,17 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      QDRANT_URL: http://qdrant:6333
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
 
   translation-worker:
     build:
       context: .
-      dockerfile: Dockerfile.celery
+      dockerfile: docker/Dockerfile.celery
     container_name: news_translation_worker
     depends_on:
       - redis
@@ -119,11 +131,17 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      QDRANT_URL: http://qdrant:6333
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
 
   embedding-worker:
     build:
       context: .
-      dockerfile: Dockerfile.embed
+      dockerfile: docker/Dockerfile.embed
     container_name: news_embedding_worker
     depends_on:
       - redis
@@ -159,11 +177,44 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      QDRANT_URL: http://qdrant:6333
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+
+  monitor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.celery
+    container_name: news_celery_monitor
+    depends_on:
+      - redis
+      - postgres
+    command:
+      [
+        "python",
+        "pipeline/monitor.py"
+      ]
+    volumes:
+      - .:/app
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
 
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: docker/Dockerfile.api
     container_name: news_api
     depends_on:
       - postgres
@@ -193,6 +244,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      QDRANT_URL: http://qdrant:6333
     ports:
       - "8000:8000"
     healthcheck:
@@ -280,5 +332,31 @@ services:
       retries: 5
       start_period: 5s
 
+  qdrant:
+    image: qdrant/qdrant:v1.13.0
+    container_name: news_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: news_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
 volumes:
   postgres_data:
+  qdrant_data:

@@ -16,26 +16,10 @@ celery_app = Celery(
 )
 
 
+# Legacy PipelineTrackedTask is disabled to align with V2 architecture.
+# Native Celery status management will be used instead.
 class PipelineTrackedTask(Task):
-    def before_start(self, task_id, args, kwargs):
-        parent_task_id = (kwargs or {}).get("parent_task_id")
-        record_pipeline_task(
-            task_id,
-            self.name,
-            classify_task_type(self.name),
-            kwargs or {"args": list(args)},
-            state="STARTED",
-            parent_task_id=parent_task_id,
-        )
-
-    def on_success(self, retval, task_id, args, kwargs):
-        sync_pipeline_task_state(task_id, "SUCCESS", retval)
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
-        sync_pipeline_task_state(task_id, "FAILURE", exc)
-
-    def on_retry(self, exc, task_id, args, kwargs, einfo):
-        sync_pipeline_task_state(task_id, "RETRY", {"error": str(exc)})
+    pass
 
 
 celery_app.Task = PipelineTrackedTask
@@ -47,21 +31,18 @@ celery_app.conf.update(
     accept_content=["json"],
     result_serializer="json",
     task_track_started=True,
+    worker_send_task_events=True,
+    task_send_sent_event=True,
     worker_prefetch_multiplier=1,
     task_default_queue="default",
     task_routes={
         "pipeline.tasks.backfill.*": {"queue": "translate"},
         "pipeline.tasks.crawl.*": {"queue": "crawl"},
-        "pipeline.tasks.orchestrate.*": {"queue": "crawl"},
         "pipeline.tasks.translate.*": {"queue": "translate"},
         "pipeline.tasks.embed.*": {"queue": "embed"},
     },
-    beat_schedule={
-        "dispatch-periodic-tasks-every-minute": {
-            "task": "pipeline.tasks.orchestrate.dispatch_periodic_tasks",
-            "schedule": 60.0,
-        },
-    },
+    beat_scheduler='celery_sqlalchemy_scheduler.schedulers:DatabaseScheduler',
+    beat_dburi=f"postgresql://{_env('POSTGRES_USER', 'your_user')}:{_env('POSTGRES_PASSWORD', 'your_password')}@{_env('POSTGRES_HOST', 'postgres')}:{_env('POSTGRES_PORT', '5432')}/{_env('POSTGRES_DB', 'scrapy_db')}",
 )
 
 celery_app.autodiscover_tasks(["pipeline.tasks"])

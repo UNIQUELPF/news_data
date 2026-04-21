@@ -61,33 +61,6 @@ CREATE TABLE IF NOT EXISTS article_translations (
     UNIQUE(article_id, target_language)
 );
 
-CREATE TABLE IF NOT EXISTS article_chunks (
-    id BIGSERIAL PRIMARY KEY,
-    article_id BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    content_text TEXT NOT NULL,
-    token_count INTEGER,
-    embedding_status TEXT NOT NULL DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(article_id, chunk_index)
-);
-
-CREATE TABLE IF NOT EXISTS article_embeddings (
-    id BIGSERIAL PRIMARY KEY,
-    article_id BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    chunk_id BIGINT REFERENCES article_chunks(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    embedding_model TEXT NOT NULL,
-    embedding_dimensions INTEGER,
-    embedding_vector JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(article_id, chunk_index, embedding_model)
-);
-
-CREATE INDEX IF NOT EXISTS idx_article_embeddings_article_id ON article_embeddings(article_id);
-CREATE INDEX IF NOT EXISTS idx_article_embeddings_chunk_id ON article_embeddings(chunk_id);
 
 CREATE TABLE IF NOT EXISTS crawl_jobs (
     id BIGSERIAL PRIMARY KEY,

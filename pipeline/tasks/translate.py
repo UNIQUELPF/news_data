@@ -12,6 +12,14 @@ from pipeline.llm_client import (
     translate_article_content,
 )
 
+# Sources that are known to be Chinese and should skip translation
+BYPASS_ORGANIZATIONS = [
+    "Central Bank of China", 
+    "People's Bank of China",
+    "Xinhua News Agency",
+    "China Securities Journal"
+]
+
 
 def _placeholder_translate_text(text: str | None, target_language: str) -> str | None:
     if not text:
@@ -59,7 +67,7 @@ def _set_translation_status(cursor, article_id: int, status: str):
 def _fetch_article(cursor, article_id: int):
     cursor.execute(
         """
-        SELECT id, title_original, content_original, language, translation_status, section, category
+        SELECT id, title_original, content_plain, language, translation_status, section, category
         FROM articles
         WHERE id = %s
         """,
@@ -90,7 +98,7 @@ def _claim_next_pending_articles(cursor, limit: int = 1):
     return [row[0] for row in cursor.fetchall()]
 
 
-def _select_backfill_article_ids(cursor, target_language: str, limit: int, force: bool = False) -> list[int]:
+def _select_backfill_article_ids(cursor, target_language: str, limit: int, force: bool = False, include_failed: bool = True) -> list[int]:
     if force:
         cursor.execute(
             """
@@ -102,11 +110,12 @@ def _select_backfill_article_ids(cursor, target_language: str, limit: int, force
             (limit,),
         )
     else:
+        status_filter = "('pending', 'failed')" if include_failed else "('pending')"
         cursor.execute(
-            """
+            f"""
             SELECT a.id
             FROM articles a
-            WHERE a.translation_status IN ('pending', 'failed')
+            WHERE a.translation_status IN {status_filter}
                OR NOT EXISTS (
                     SELECT 1
                     FROM article_translations t
@@ -210,7 +219,15 @@ def translate_article(article_id: int, target_language: str = "zh-CN", parent_ta
             }
 
         _set_translation_status(cursor, article_id, "processing")
-        if _is_same_language_passthrough(article[3], target_language):
+        
+        # Smart Bypass Check: Same language OR Known Chinese organization
+        is_bypass = (
+            _is_same_language_passthrough(article[3], target_language) or
+            article[6] in BYPASS_ORGANIZATIONS or  # item[6] is category/organization? wait, check fetch_article
+            any(org in (article[1] or "") for org in BYPASS_ORGANIZATIONS)
+        )
+
+        if is_bypass:
             metadata = _normalized_domestic_metadata(article[1], article[2], article[5], article[6])
             if is_llm_enabled():
                 try:
@@ -349,6 +366,9 @@ def auto_translate_articles(self, limit: int = 3, target_language: str = "zh-CN"
 
 @celery_app.task(name="pipeline.tasks.translate.translate_backfill_articles")
 def translate_backfill_articles(target_language: str = "zh-CN", limit: int = 100, force: bool = False, parent_task_id: str | None = None) -> dict:
+    """
+    Manual/Scheduled task to process articles in bulk.
+    """
     connection = get_db_connection()
     try:
         cursor = connection.cursor()
@@ -363,33 +383,54 @@ def translate_backfill_articles(target_language: str = "zh-CN", limit: int = 100
         connection.close()
 
     if not article_ids:
-        return {
-            "status": "empty",
-            "target_language": target_language,
-            "limit": limit,
-            "force": force,
-            "processed": 0,
-        }
+        return {"status": "empty", "processed": 0}
 
     results = []
-    completed = 0
-    failed = 0
-    for article_id in article_ids:
-        result = translate_article(article_id=article_id, target_language=target_language, parent_task_id=parent_task_id)
-        results.append(result)
-        if result.get("status") == "completed":
-            completed += 1
-        else:
-            failed += 1
+    for aid in article_ids:
+        # We use delay() here for true parallel processing if the pool allows
+        translate_article.delay(aid, target_language, parent_task_id)
+        results.append(aid)
 
     return {
-        "status": "completed" if failed == 0 else "partial",
-        "target_language": target_language,
-        "limit": limit,
-        "force": force,
-        "processed": len(article_ids),
-        "completed": completed,
-        "failed": failed,
-        "article_ids": article_ids,
-        "results": results,
+        "status": "dispatched",
+        "count": len(results),
+        "article_ids": results
+    }
+
+@celery_app.task(name="pipeline.tasks.translate.retry_failed_pipeline_tasks")
+def retry_failed_pipeline_tasks(limit: int = 50) -> dict:
+    """
+    Periodic task to find and retry articles stuck in 'failed' status 
+    across different pipeline stages.
+    """
+    connection = get_db_connection()
+    retried_counts = {"translation": 0}
+    
+    try:
+        cursor = connection.cursor()
+        
+        # 1. Retry Translation
+        cursor.execute(
+            """
+            SELECT id FROM articles 
+            WHERE translation_status = 'failed' 
+            ORDER BY updated_at DESC LIMIT %s
+            """, (limit,)
+        )
+        failed_trans = [row[0] for row in cursor.fetchall()]
+        for aid in failed_trans:
+            translate_article.delay(aid)
+            retried_counts["translation"] += 1
+            
+        connection.commit()
+    except Exception as e:
+        connection.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        connection.close()
+        
+    return {
+        "status": "success",
+        "retried": retried_counts,
+        "total": sum(retried_counts.values())
     }

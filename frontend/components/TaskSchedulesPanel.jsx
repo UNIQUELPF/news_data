@@ -69,6 +69,25 @@ export default function TaskSchedulesPanel({ adminToken, adminActor }) {
     }
   };
 
+  const triggerSchedule = async (id, name) => {
+    if (!confirm(`确定要立刻执行一次 "${name}" 吗？`)) return;
+    try {
+      const res = await fetch(`/api/v1/pipeline/schedules/${id}/trigger`, {
+        method: "POST",
+        headers: {
+          "x-admin-token": adminToken || "",
+          "x-admin-actor": adminActor || ""
+        }
+      });
+      if (!res.ok) throw new Error("触发失败");
+      const data = await res.json();
+      alert(`任务已提交，Task ID: ${data.task_id}`);
+      loadSchedules();
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
   const startEditing = (sch) => {
     setEditingId(sch.id);
     setEditCron(sch.cron_expr);
@@ -138,29 +157,49 @@ export default function TaskSchedulesPanel({ adminToken, adminActor }) {
               </div>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "12px" }}>
-                <div style={{ textAlign: "right" }}>
-                   <div className="muted" style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase" }}>Last Dispatched</div>
-                   <div style={{ fontSize: "13px", color: "var(--text)", fontWeight: "600" }}>{sch.last_run_at ? formatDate(sch.last_run_at) : 'Never triggered'}</div>
-                </div>
-                
-                <button 
-                  onClick={() => toggleSchedule(sch.id, !sch.is_enabled)}
-                  style={{ 
-                    background: sch.is_enabled ? "#fff" : "var(--primary)", 
-                    color: sch.is_enabled ? "var(--danger)" : "#fff", 
-                    border: sch.is_enabled ? "1px solid var(--danger)" : "none", 
-                    borderRadius: "8px", 
-                    padding: "8px 16px", 
-                    fontSize: "13px", 
-                    cursor: "pointer", 
-                    fontWeight: "800",
-                    transition: "all 0.2s"
-                  }}
-                >
-                  {sch.is_enabled ? 'STOP SCHEDULE' : 'ACTIVATE NOW'}
-                </button>
-            </div>
+                 <div style={{ textAlign: "right" }}>
+                    <div className="muted" style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase" }}>Last Dispatched</div>
+                    <div style={{ fontSize: "13px", color: "var(--text)", fontWeight: "600" }}>{sch.last_run_at ? formatDate(sch.last_run_at) : 'Never triggered'}</div>
+                    <div className="muted" style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", marginTop: "8px" }}>Next Execution</div>
+                    <div style={{ fontSize: "13px", color: "var(--primary)", fontWeight: "700" }}>{sch.next_run_at ? formatDate(sch.next_run_at) : (sch.is_enabled ? 'Calculating...' : 'Paused')}</div>
+                    <div className="muted" style={{ fontSize: "10px", marginTop: "6px" }}>累计运行: <strong>{sch.total_run_count || 0}</strong> 次</div>
+                 </div>
+                 
+                 <div style={{ display: "flex", gap: "8px" }}>
+                    <button 
+                      onClick={() => triggerSchedule(sch.id, sch.name)}
+                      style={{ 
+                        background: "#f0fdf4", 
+                        color: "#166534", 
+                        border: "1px solid #bbf7d0", 
+                        borderRadius: "8px", 
+                        padding: "8px 12px", 
+                        fontSize: "12px", 
+                        cursor: "pointer", 
+                        fontWeight: "700",
+                        transition: "all 0.2s"
+                      }}
+                      title="跳过 Cron 计划，立即在后台启动该任务"
+                    >
+                      ⚡ 立刻触发一次
+                    </button>
+                    <button 
+                      onClick={() => toggleSchedule(sch.id, !sch.is_enabled)}
+                      style={{ 
+                        background: sch.is_enabled ? "#fff" : "var(--primary)", 
+                        color: sch.is_enabled ? "var(--danger)" : "#fff", 
+                        border: sch.is_enabled ? "1px solid var(--danger)" : "none", 
+                        borderRadius: "8px", 
+                        padding: "8px 16px", 
+                        fontSize: "13px", 
+                        cursor: "pointer", 
+                        fontWeight: "800",
+                        transition: "all 0.2s"
+                      }}
+                    >
+                      {sch.is_enabled ? 'STOP' : 'ACTIVATE'}
+                    </button>
+                 </div>
           </div>
         ))}
       </div>

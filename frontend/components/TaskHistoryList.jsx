@@ -26,6 +26,7 @@ export default function TaskHistoryList({
   onBatchCancelTasks,
   onBatchRetryTasks,
   onCancelTask,
+  onRevokeTask,
   onRetryTask
 }) {
   const [expandedGroups, setExpandedGroups] = useState({});
@@ -93,9 +94,10 @@ export default function TaskHistoryList({
             <div className="task-detail" style={{ background: "rgba(255,255,255,0.5)", padding: "12px", borderRadius: "8px" }}>
               <pre style={{ fontSize: "11px", margin: "0 0 8px 0" }}>{JSON.stringify(effectiveTask.params || {}, null, 2)}</pre>
               {effectiveTask.error_message && <pre style={{ color: "#dc2626", fontSize: "11px", margin: "0 0 8px 0" }}>{effectiveTask.error_message}</pre>}
-              <div className="inline-actions">
+              <div className="inline-actions" style={{ display: 'flex', gap: '8px' }}>
                 {canRetry && <button className="secondary" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto" }} onClick={() => onRetryTask(effectiveTask.task_id)}>重试</button>}
-                {canCancel && <button className="danger" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto" }} onClick={() => onCancelTask(effectiveTask.task_id)}>取消</button>}
+                {canCancel && <button className="secondary" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto" }} onClick={() => onCancelTask(effectiveTask.task_id)}>取消</button>}
+                {canCancel && <button className="danger" style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto", background: '#be123c' }} onClick={() => onRevokeTask(effectiveTask.task_id)}>强杀</button>}
               </div>
             </div>
           )}

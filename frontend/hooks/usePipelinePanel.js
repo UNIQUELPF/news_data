@@ -235,6 +235,18 @@ export function usePipelinePanel() {
     }
   }
 
+  async function revokeTask(taskId) {
+    if (!window.confirm(`⚠️ 警告：强制终止任务 ${taskId} 会立刻杀死 Worker 进程，可能导致数据状态不一致。确认继续吗？`)) return;
+    await request(`/api/v1/pipeline/tasks/${taskId}/revoke`, {
+      method: "POST",
+      adminToken,
+      adminActor
+    });
+    setActiveTaskId(taskId);
+    setHighlightTaskId(taskId);
+    await loadPanel(true);
+  }
+
   async function batchCancelTasks(taskIds) {
     if (!taskIds.length) return;
     if (!window.confirm(`确认批量取消这 ${taskIds.length} 个任务吗？`)) return;
@@ -347,6 +359,7 @@ export function usePipelinePanel() {
     batchCancelTasks,
     batchRetryTasks,
     cancelTask,
+    revokeTask,
     loadPanel,
     retryTask,
     setActiveTab,

@@ -31,7 +31,7 @@ def run_domestic_metadata_backfill(
         if force:
             cursor.execute(
                 """
-                SELECT id, title_original, content_original, section, category
+                SELECT id, title_original, content_plain, section, category
                 FROM articles
                 WHERE language LIKE 'zh%%'
                 ORDER BY publish_time DESC NULLS LAST, id DESC
@@ -43,7 +43,7 @@ def run_domestic_metadata_backfill(
             # Only articles likely to be domestic that are missing some key metadata
             cursor.execute(
                 """
-                SELECT id, title_original, content_original, section, category
+                SELECT id, title_original, content_plain, section, category
                 FROM articles
                 WHERE language LIKE 'zh%%'
                   AND (province IS NULL OR city IS NULL OR company IS NULL OR category IS NULL OR category = '其他')

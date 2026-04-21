@@ -60,6 +60,7 @@ export default function Page() {
               onNextPage={() => loadArticles(pagination.page + 1)}
               onOpenArticle={openArticle}
               onPrevPage={() => loadArticles(Math.max(1, pagination.page - 1))}
+              onJumpPage={(p) => loadArticles(p)}
             />
           ) : (
             <ArticleDetail

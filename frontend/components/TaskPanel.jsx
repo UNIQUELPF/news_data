@@ -32,6 +32,7 @@ export default function TaskPanel({
   onBatchCancelTasks,
   onBatchRetryTasks,
   onCancelTask,
+  onRevokeTask,
   onRetryTask,
   onShowRunningOnlyChange,
   onIngest,
@@ -517,7 +518,7 @@ export default function TaskPanel({
             </div>
           </div>
 
-          <ActiveTaskCard activeTask={activeTask} taskDetail={taskDetails[activeTask?.task_id]} onCancelTask={onCancelTask} />
+          <ActiveTaskCard activeTask={activeTask} taskDetail={taskDetails[activeTask?.task_id]} onCancelTask={onCancelTask} onRevokeTask={onRevokeTask} />
 
           <TaskHistoryList
             activeTaskId={activeTaskId}
@@ -528,6 +529,7 @@ export default function TaskPanel({
             onBatchCancelTasks={onBatchCancelTasks}
             onBatchRetryTasks={onBatchRetryTasks}
             onCancelTask={onCancelTask}
+            onRevokeTask={onRevokeTask}
             onRetryTask={onRetryTask}
           />
         </div>

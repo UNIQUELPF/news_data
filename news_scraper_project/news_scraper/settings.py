@@ -58,3 +58,16 @@ DOWNLOAD_HANDLERS = {
     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
+# Incremental Crawling Settings
+DEFAULT_START_DATE = "2026-01-01"
+INCREMENTAL_WINDOW_DAYS = 7
+
+# --- Scrapy-Redis Distributed Settings ---
+# Use scrapy_redis.dupefilter.RFPDupeFilter for distributed deduplication
+DUPEFILTER_CLASS = "scrapy_redis.dupefilter.RFPDupeFilter"
+# Use scrapy_redis.scheduler.Scheduler for distributed scheduling
+SCHEDULER = "scrapy_redis.scheduler.Scheduler"
+# Persist the queue in Redis (allows pause/resume)
+SCHEDULER_PERSIST = True
+# Redis connection details
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/1")

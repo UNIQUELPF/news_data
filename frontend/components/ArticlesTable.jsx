@@ -10,7 +10,8 @@ export default function ArticlesTable({
   variant = "global",
   onOpenArticle,
   onPrevPage,
-  onNextPage
+  onNextPage,
+  onJumpPage
 }) {
   const isDomestic = variant === "domestic";
 
@@ -37,7 +38,7 @@ export default function ArticlesTable({
           </table>
         </div>
       ) : null}
-      <PaginationBar pagination={pagination} onPrevPage={onPrevPage} onNextPage={onNextPage} />
+      <PaginationBar pagination={pagination} onPrevPage={onPrevPage} onNextPage={onNextPage} onJumpPage={onJumpPage} />
     </div>
   );
 }

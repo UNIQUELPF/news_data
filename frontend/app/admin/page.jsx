@@ -27,6 +27,7 @@ export default function AdminPage() {
     batchCancelTasks,
     batchRetryTasks,
     cancelTask,
+    revokeTask,
     retryTask,
     setActiveTab,
     setActiveTaskId,
@@ -84,6 +85,7 @@ export default function AdminPage() {
             onBatchCancelTasks={batchCancelTasks}
             onBatchRetryTasks={batchRetryTasks}
             onCancelTask={cancelTask}
+            onRevokeTask={revokeTask}
             onRetryTask={retryTask}
             onShowRunningOnlyChange={setShowRunningOnly}
             onIngest={onIngest}

@@ -1,6 +1,6 @@
 import { stateClass, summarizeCrawlResult, summarizeTaskResult } from "../lib/formatters";
 
-export default function ActiveTaskCard({ activeTask, taskDetail, onCancelTask }) {
+export default function ActiveTaskCard({ activeTask, taskDetail, onCancelTask, onRevokeTask }) {
   if (!activeTask) return null;
 
   const summary = summarizeTaskResult(taskDetail?.result || activeTask.result);
@@ -40,8 +40,9 @@ export default function ActiveTaskCard({ activeTask, taskDetail, onCancelTask })
             </div>
           </div>
         ) : null}
-      <div className="inline-actions" style={{ marginTop: 12 }}>
-        <button className="danger" onClick={() => onCancelTask(activeTask.task_id)}>取消任务</button>
+      <div className="inline-actions" style={{ marginTop: 12, display: 'flex', gap: '10px' }}>
+        <button className="secondary" onClick={() => onCancelTask(activeTask.task_id)}>取消队列</button>
+        <button className="danger" onClick={() => onRevokeTask(activeTask.task_id)} style={{ background: '#be123c' }}>🛑 强制终止进程</button>
       </div>
     </div>
   );

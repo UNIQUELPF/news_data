@@ -1,9 +1,11 @@
 import math
 import os
+import uuid
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -11,6 +13,8 @@ from pipeline.celery_app import celery_app
 from pipeline.db import get_db_connection
 from pipeline.llm_client import embed_texts, get_pipeline_runtime_status, is_embedding_enabled
 from pipeline.search_config import get_hybrid_ranking_weights
+from pipeline.qdrant_utils import get_qdrant_client, COLLECTION_NAME
+from qdrant_client.http import models as q_models
 from pipeline.task_state import (
     append_pipeline_task_note as _append_pipeline_task_note_helper,
 )
@@ -27,8 +31,23 @@ from pipeline.tasks.backfill import (
     run_domestic_metadata_backfill,
 )
 
-app = FastAPI(title="Global Political Economy API", version="0.1.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize Qdrant schema on startup
+    from pipeline.qdrant_utils import init_qdrant_schema
+    try:
+        init_qdrant_schema()
+    except Exception as e:
+        print(f"Warning: Failed to initialize Qdrant schema during startup: {e}")
+    yield
+
+app = FastAPI(title="Global Political Economy API", version="0.1.0", lifespan=lifespan)
 ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "").strip()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 class DomesticProcessRequest(BaseModel):
@@ -346,10 +365,10 @@ def _build_filter_conditions(
     if organization and organization != "all":
         if organization in MEGA_ORGANIZATIONS:
             codes = MEGA_ORGANIZATIONS[organization]
-            conditions.append(f"({alias}.country_code = ANY(%s) OR {alias}.organization = %s)")
+            conditions.append(f"({alias}.country_code = ANY(%s) OR s.organization = %s)")
             params.extend([list(codes), organization])
         else:
-            conditions.append(f"{alias}.organization = %s")
+            conditions.append(f"s.organization = %s")
             params.append(organization)
 
     company = _normalize_empty(company)
@@ -384,9 +403,8 @@ def _build_keyword_condition(search_term: Optional[str], alias: str = "a"):
         f"""
         (
             {alias}.title_original ILIKE %s OR
-            {alias}.content_original ILIKE %s OR
+            {alias}.content_plain ILIKE %s OR
             {alias}.country ILIKE %s OR
-            {alias}.organization ILIKE %s OR
             COALESCE({alias}.company, '') ILIKE %s OR
             COALESCE({alias}.province, '') ILIKE %s OR
             COALESCE({alias}.city, '') ILIKE %s OR
@@ -402,7 +420,7 @@ def _build_keyword_condition(search_term: Optional[str], alias: str = "a"):
             )
         )
         """,
-        [like, like, like, like, like, like, like, like, like, like],
+        [like, like, like, like, like, like, like, like, like],
     )
 
 
@@ -410,9 +428,8 @@ def _build_keyword_score_expr(alias: str = "a") -> str:
     return f"""
         (
             CASE WHEN {alias}.title_original ILIKE %s THEN 3 ELSE 0 END +
-            CASE WHEN {alias}.content_original ILIKE %s THEN 1 ELSE 0 END +
+            CASE WHEN {alias}.content_plain ILIKE %s THEN 1 ELSE 0 END +
             CASE WHEN {alias}.country ILIKE %s THEN 2 ELSE 0 END +
-            CASE WHEN {alias}.organization ILIKE %s THEN 2 ELSE 0 END +
             CASE WHEN COALESCE({alias}.company, '') ILIKE %s THEN 2 ELSE 0 END +
             CASE WHEN COALESCE({alias}.province, '') ILIKE %s THEN 1 ELSE 0 END +
             CASE WHEN COALESCE({alias}.city, '') ILIKE %s THEN 1 ELSE 0 END +
@@ -449,7 +466,7 @@ def _base_article_select(extra_columns: str = "") -> str:
             a.province,
             a.city,
             a.country_code,
-            COALESCE(t.summary_translated, LEFT(a.content_original, 280)) AS summary,
+            COALESCE(t.summary_translated, LEFT(a.content_plain, 280)) AS summary,
             a.publish_time,
             a.source_url,
             s.display_name AS source_name,
@@ -462,6 +479,14 @@ def _base_article_select(extra_columns: str = "") -> str:
             ON t.article_id = a.id
            AND t.target_language = 'zh-CN'
     """
+
+def _format_article_response(article: dict):
+    """Ensure strict UTC ISO format with Z suffix for dates."""
+    if article.get("publish_time") and isinstance(article["publish_time"], datetime):
+        # Convert to UTC and add Z
+        dt = article["publish_time"]
+        article["publish_time"] = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return article
 
 
 def _normalize_vector(value) -> list[float]:
@@ -494,126 +519,177 @@ def _semantic_search_candidates(
     province: Optional[str] = None,
     city: Optional[str] = None,
     time_range: Optional[str] = None,
-    semantic_limit: int = 300,
+    semantic_limit: int = 100,
 ):
     if not is_embedding_enabled():
-        raise HTTPException(status_code=400, detail="Semantic search is unavailable: embedding provider is not configured")
+        raise HTTPException(status_code=400, detail="Semantic search unavailable")
 
-    query_vectors, model_name = embed_texts([search_term])
+    query_vectors, _ = embed_texts([search_term])
     if not query_vectors:
         return []
-    query_vector = query_vectors[0]
+    
+    q_client = get_qdrant_client()
+    
+    # 1. Build Qdrant Filters
+    must_filters = []
+    if category and category != "all":
+        must_filters.append(q_models.FieldCondition(key="category", match=q_models.MatchValue(value=category)))
+    if country_code and country_code != "all":
+        must_filters.append(q_models.FieldCondition(key="country_code", match=q_models.MatchValue(value=country_code)))
+    if company and company != "all":
+        must_filters.append(q_models.FieldCondition(key="company", match=q_models.MatchValue(value=company)))
+    
+    since = _time_range_to_since(time_range)
+    if since:
+        must_filters.append(q_models.FieldCondition(key="publish_time", range=q_models.Range(gte=since.isoformat())))
 
-    conditions, params = _build_filter_conditions(
-        category=category,
-        country=country,
-        country_code=country_code,
-        organization=organization,
-        company=company,
-        province=province,
-        city=city,
-        time_range=time_range,
-        alias="a",
+    # 2. Search in Qdrant
+    search_results = q_client.search(
+        collection_name=COLLECTION_NAME,
+        query_vector=query_vectors[0],
+        query_filter=q_models.Filter(must=must_filters) if must_filters else None,
+        limit=semantic_limit,
+        with_payload=True
     )
-    conditions.append("e.embedding_model = %s")
-    params.append(model_name)
 
-    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    connection = get_db_connection()
-    try:
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            f"""
-            {_base_article_select("e.embedding_vector, e.chunk_index")}
-            JOIN article_embeddings e ON e.article_id = a.id
-            {where_sql}
-            ORDER BY a.publish_time DESC NULLS LAST, a.id DESC, e.chunk_index ASC
-            LIMIT %s
-            """,
-            params + [semantic_limit],
-        )
-        rows = cursor.fetchall()
-    finally:
-        connection.close()
-
-    best_by_article: dict[int, dict] = {}
-    for row in rows:
-        vector = _normalize_vector(row.pop("embedding_vector"))
-        score = _cosine_similarity(query_vector, vector)
-        article_id = row["id"]
-        existing = best_by_article.get(article_id)
-        if not existing or score > existing["semantic_score"]:
-            row["semantic_score"] = score
-            best_by_article[article_id] = row
-
-    ranked = sorted(best_by_article.values(), key=lambda item: (item["semantic_score"], item["publish_time"] or datetime.min), reverse=True)
-    return ranked
-
-
-def _get_article_embedding_vectors(article_id: int) -> tuple[str | None, list[list[float]]]:
-    connection = get_db_connection()
-    try:
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            """
-            SELECT embedding_model, embedding_vector, chunk_index
-            FROM article_embeddings
-            WHERE article_id = %s
-            ORDER BY embedding_model, chunk_index
-            """,
-            (article_id,),
-        )
-        rows = cursor.fetchall()
-    finally:
-        connection.close()
-
-    if not rows:
-        return None, []
-
-    model_name = rows[0]["embedding_model"]
-    vectors = [_normalize_vector(row["embedding_vector"]) for row in rows if row["embedding_model"] == model_name]
-    return model_name, vectors
-
-
-def _similar_articles(article_id: int, limit: int = 5, candidate_limit: int = 800):
-    model_name, target_vectors = _get_article_embedding_vectors(article_id)
-    if not model_name or not target_vectors:
+    if not search_results:
         return []
 
+    # 3. Fetch full article details from Postgres based on Qdrant hits
+    article_ids = list(dict.fromkeys([res.payload["article_id"] for res in search_results]))
+    
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         cursor.execute(
             f"""
-            {_base_article_select("e.embedding_vector, e.chunk_index, e.embedding_model")}
-            JOIN article_embeddings e ON e.article_id = a.id
-            WHERE a.id <> %s
-              AND e.embedding_model = %s
-            ORDER BY a.publish_time DESC NULLS LAST, a.id DESC, e.chunk_index ASC
-            LIMIT %s
+            {_base_article_select()}
+            WHERE a.id = ANY(%s)
             """,
-            (article_id, model_name, candidate_limit),
+            (article_ids,)
         )
-        rows = cursor.fetchall()
+        db_rows = {row["id"]: row for row in cursor.fetchall()}
     finally:
         connection.close()
 
-    best_by_article: dict[int, dict] = {}
-    for row in rows:
-        candidate_vector = _normalize_vector(row.pop("embedding_vector"))
-        row.pop("embedding_model", None)
-        score = max((_cosine_similarity(target_vector, candidate_vector) for target_vector in target_vectors), default=0.0)
-        existing = best_by_article.get(row["id"])
-        if not existing or score > existing["similarity_score"]:
-            row["similarity_score"] = score
-            best_by_article[row["id"]] = row
+    # 4. Merge Semantic Score
+    final_items = []
+    seen_articles = set()
+    for res in search_results:
+        aid = res.payload["article_id"]
+        if aid in seen_articles: continue
+        if aid in db_rows:
+            item = db_rows[aid]
+            item["semantic_score"] = res.score
+            final_items.append(item)
+            seen_articles.add(aid)
 
-    return sorted(
-        best_by_article.values(),
-        key=lambda item: (item["similarity_score"], item["publish_time"] or datetime.min),
-        reverse=True,
-    )[:limit]
+    return final_items
+
+
+def _similar_articles(article_id: int, limit: int = 5):
+    """Find similar articles using Qdrant's recommendation engine or search."""
+    q_client = get_qdrant_client()
+    
+    # 1. Get a point ID for this article to use as a reference
+    # We use the first chunk (index 0) as the reference point
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"article_{article_id}_chunk_0"))
+    
+    try:
+        # 2. Use Qdrant search with the vector of the reference point
+        # First, fetch the vector for the existing article
+        points = q_client.retrieve(
+            collection_name=COLLECTION_NAME,
+            ids=[point_id],
+            with_vectors=True
+        )
+        
+        if not points:
+            return []
+            
+        reference_vector = points[0].vector
+        
+        # 3. Search for similar vectors, excluding current article
+        search_results = q_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=reference_vector,
+            query_filter=q_models.Filter(
+                must_not=[
+                    q_models.FieldCondition(key="article_id", match=q_models.MatchValue(value=article_id))
+                ]
+            ),
+            limit=limit,
+            with_payload=True
+        ).points
+        
+        if not search_results:
+            return []
+
+        article_ids = list(dict.fromkeys([res.payload["article_id"] for res in search_results]))
+        
+        connection = get_db_connection()
+        try:
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                f"{_base_article_select()} WHERE a.id = ANY(%s)",
+                (article_ids,)
+            )
+            db_rows = {row["id"]: row for row in cursor.fetchall()}
+        finally:
+            connection.close()
+
+        final_items = []
+        seen_articles = set()
+        for res in search_results:
+            aid = res.payload["article_id"]
+            if aid in seen_articles: continue
+            if aid in db_rows:
+                item = db_rows[aid]
+                item["similarity_score"] = res.score
+                final_items.append(item)
+                seen_articles.add(aid)
+        return final_items
+    except Exception as e:
+        logger.error(f"Error in similarity search for article {article_id}: {e}")
+        return []
+
+
+def _get_article_chunks(article_id: int):
+    """Fetch article chunks from Qdrant payloads."""
+    from pipeline.qdrant_utils import get_qdrant_client, COLLECTION_NAME
+    import qdrant_client.http.models as q_models
+
+    q_client = get_qdrant_client()
+    try:
+        # Scroll to get all chunks for this article
+        results = q_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=q_models.Filter(
+                must=[
+                    q_models.FieldCondition(key="article_id", match=q_models.MatchValue(value=article_id))
+                ]
+            ),
+            limit=100,
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        points = results[0]
+        chunks = []
+        for p in points:
+            payload = p.payload
+            chunks.append({
+                "chunk_index": payload.get("chunk_index"),
+                "content_text": payload.get("chunk_text") or payload.get("content_text") or "",
+                "token_count": payload.get("token_count") or len(payload.get("chunk_text", "")) // 2, # Approximation
+                "embedding_status": "completed"
+            })
+        # Sort by chunk_index to ensure order
+        chunks.sort(key=lambda x: x.get("chunk_index", 0))
+        return chunks
+    except Exception as e:
+        logger.error(f"Error fetching chunks for article {article_id}: {e}")
+        return []
 
 
 def _keyword_search_candidates(
@@ -649,7 +725,7 @@ def _keyword_search_candidates(
             params.extend(keyword_params)
             like = f"%{search_term}%"
             score_expr = _build_keyword_score_expr("a")
-            score_params = [like, like, like, like, like, like, like, like, like, like]
+            score_params = [like, like, like, like, like, like, like, like, like]
 
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -756,6 +832,14 @@ def get_filters():
         )
         row = cursor.fetchone()
         
+        try:
+            from pypinyin import lazy_pinyin
+            for key in ["categories", "countries", "companies", "provinces", "cities"]:
+                if row.get(key):
+                    row[key] = sorted(row[key], key=lambda x: [str(c).lower() for c in lazy_pinyin(x)])
+        except ImportError:
+            pass
+            
         # Only use the fixed MEGA_ORGANIZATIONS as per design
         row["organizations"] = list(MEGA_ORGANIZATIONS.keys())
         
@@ -797,9 +881,10 @@ def list_articles(
             time_range=time_range,
         )
         result = _paginate_items(items, page, page_size)
-        # 动态计算组织
+        # 动态计算组织 & 格式化时间
         for item in result["items"]:
             item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+            _format_article_response(item)
             
         result["search"] = {
             "mode": "keyword",
@@ -821,9 +906,10 @@ def list_articles(
             semantic_limit=semantic_limit,
         )
         result = _paginate_items(items, page, page_size)
-        # 动态计算组织
+        # 动态计算组织 & 格式化时间
         for item in result["items"]:
             item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+            _format_article_response(item)
 
         result["search"] = {
             "mode": "semantic",
@@ -855,11 +941,12 @@ def list_articles(
         semantic_limit=semantic_limit,
     )
 
-    ranked = _hybrid_rank_items(keyword_items, semantic_items)
-    result = _paginate_items(ranked, page, page_size)
-    # 动态计算组织
+    items = _hybrid_rank_items(keyword_items, semantic_items)
+    result = _paginate_items(items, page, page_size)
+    # 动态计算组织 & 格式化时间
     for item in result["items"]:
         item["organization"] = _get_dynamic_organizations(item.get("country_code"))
+        _format_article_response(item)
 
     result["search"] = {
         "mode": "hybrid",
@@ -870,7 +957,8 @@ def list_articles(
 
 
 @app.get("/api/v1/articles/{article_id}")
-def get_article(article_id: int):
+def get_article(article_id: int, response: Response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -880,13 +968,14 @@ def get_article(article_id: int):
                 a.id,
                 a.source_url,
                 a.title_original,
-                a.content_original,
+                a.content_plain,
+                a.content_markdown,
+                a.images,
                 a.publish_time,
                 a.author,
                 a.language,
                 a.section,
                 a.country,
-                a.organization,
                 a.company,
                 a.province,
                 a.city,
@@ -913,22 +1002,13 @@ def get_article(article_id: int):
         if not article:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        # 动态计算组织
+        # 动态计算组织 & 格式化时间
         article["organization"] = _get_dynamic_organizations(article.get("country_code"))
+        _format_article_response(article)
 
-        cursor.execute(
-            """
-            SELECT chunk_index, content_text, token_count, embedding_status
-            FROM article_chunks
-            WHERE article_id = %s
-            ORDER BY chunk_index
-            """,
-            (article_id,),
-        )
-        chunks = cursor.fetchall()
         return {
             "article": article,
-            "chunks": chunks,
+            "chunks": _get_article_chunks(article_id),
             "similar_articles": _similar_articles(article_id),
         }
     finally:
@@ -993,6 +1073,25 @@ def trigger_ingest(
         user_agent=(user_agent or "").strip() or None,
     )
     return {"task_id": task.id, "status": "queued"}
+
+
+@app.post("/api/v1/pipeline/tasks/{task_id}/revoke")
+def revoke_task(task_id: str, x_admin_token: Optional[str] = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    from pipeline.celery_app import celery_app
+    # Forcefully terminate the task
+    celery_app.control.revoke(task_id, terminate=True, signal='SIGKILL')
+    
+    # Update the local database state if it exists
+    connection = get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("UPDATE pipeline_task_runs SET status = 'revoked', updated_at = NOW() WHERE task_id = %s", (task_id,))
+        connection.commit()
+    finally:
+        connection.close()
+        
+    return {"status": "success", "message": f"Task {task_id} revoked and terminated"}
 
 
 @app.post("/api/v1/pipeline/process/global")
@@ -1351,8 +1450,41 @@ def get_periodic_schedules(x_admin_token: Optional[str] = Header(default=None)):
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
-        cursor.execute("SELECT id, name, task_path, cron_expr, params, is_enabled, last_run_at FROM pipeline_periodic_tasks ORDER BY id ASC")
-        return {"items": cursor.fetchall()}
+        cursor.execute("""
+            SELECT 
+                t.id, 
+                t.name, 
+                t.task as task_path, 
+                c.minute, c.hour, c.day_of_month, c.month_of_year, c.day_of_week,
+                t.kwargs as params, 
+                t.enabled as is_enabled, 
+                t.last_run_at,
+                t.total_run_count
+            FROM celery_periodic_task t
+            JOIN celery_crontab_schedule c ON t.crontab_id = c.id
+            ORDER BY t.id ASC
+        """)
+        items = cursor.fetchall()
+        
+        from croniter import croniter
+        from datetime import datetime
+        now = datetime.now()
+        
+        for item in items:
+            try:
+                # Reconstruct cron expr
+                cron_str = f"{item['minute']} {item['hour']} {item['day_of_month']} {item['month_of_year']} {item['day_of_week']}"
+                item['cron_expr'] = cron_str
+                if item['is_enabled']:
+                    it = croniter(cron_str, now)
+                    item['next_run_at'] = it.get_next(datetime).isoformat()
+                else:
+                    item['next_run_at'] = None
+            except Exception:
+                item['cron_expr'] = "invalid"
+                item['next_run_at'] = None
+                
+        return {"items": items}
     finally:
         connection.close()
 
@@ -1360,13 +1492,49 @@ def get_periodic_schedules(x_admin_token: Optional[str] = Header(default=None)):
 class ScheduleToggleRequest(BaseModel):
     is_enabled: bool
 
+@app.post("/api/v1/pipeline/schedules/{schedule_id}/trigger")
+def trigger_periodic_schedule(schedule_id: int, x_admin_token: Optional[str] = Header(default=None), x_admin_actor: Optional[str] = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    connection = get_db_connection()
+    try:
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT name, task, kwargs FROM celery_periodic_task WHERE id = %s", (schedule_id,))
+        sch = cursor.fetchone()
+        if not sch:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        
+        # Manually trigger the task
+        from pipeline.celery_app import celery_app
+        import json
+        kwargs = json.loads(sch['kwargs'] or '{}')
+        task = celery_app.send_task(sch['task'], kwargs=kwargs)
+        
+        # Record this manual run in pipeline_task_runs if possible
+        _record_pipeline_task(
+            task_id=task.id,
+            task_name=sch['task'],
+            task_type="manual_trigger",
+            params=kwargs,
+            requested_by=x_admin_actor
+        )
+        
+        return {"status": "success", "task_id": task.id, "message": f"Task {sch['name']} triggered manually"}
+    finally:
+        connection.close()
+
+
 @app.post("/api/v1/pipeline/schedules/{schedule_id}/toggle")
 def toggle_periodic_schedule(schedule_id: int, req: ScheduleToggleRequest, x_admin_token: Optional[str] = Header(default=None)):
     _require_admin_token(x_admin_token)
     connection = get_db_connection()
     try:
         cursor = connection.cursor()
-        cursor.execute("UPDATE pipeline_periodic_tasks SET is_enabled = %s WHERE id = %s", (req.is_enabled, schedule_id))
+        # Update the enabled status in the new table
+        cursor.execute("UPDATE celery_periodic_task SET enabled = %s WHERE id = %s", (req.is_enabled, schedule_id))
+        
+        # Signal scheduler to reload
+        cursor.execute("UPDATE celery_periodic_task_changed SET last_update = NOW() WHERE id = 1")
+        
         connection.commit()
         return {"status": "success", "is_enabled": req.is_enabled}
     finally:
@@ -1444,7 +1612,36 @@ def update_periodic_schedule(schedule_id: int, req: ScheduleUpdateRequest, x_adm
     connection = get_db_connection()
     try:
         cursor = connection.cursor()
-        cursor.execute("UPDATE pipeline_periodic_tasks SET cron_expr = %s WHERE id = %s", (req.cron_expr, schedule_id))
+        
+        # 1. Parse cron expression
+        parts = req.cron_expr.split()
+        if len(parts) != 5:
+            raise HTTPException(status_code=400, detail="Invalid cron expression. 5 parts required.")
+        minute, hour, dom, month, dow = parts
+        
+        # 2. Find or Create CrontabSchedule
+        cursor.execute("""
+            SELECT id FROM celery_crontab_schedule 
+            WHERE minute=%s AND hour=%s AND day_of_month=%s AND month_of_year=%s AND day_of_week=%s AND timezone='Asia/Shanghai'
+        """, (minute, hour, dom, month, dow))
+        res = cursor.fetchone()
+        
+        if res:
+            crontab_id = res[0]
+        else:
+            cursor.execute("""
+                INSERT INTO celery_crontab_schedule (minute, hour, day_of_month, month_of_year, day_of_week, timezone)
+                VALUES (%s, %s, %s, %s, %s, 'Asia/Shanghai')
+                RETURNING id
+            """, (minute, hour, dom, month, dow))
+            crontab_id = cursor.fetchone()[0]
+            
+        # 3. Update PeriodicTask
+        cursor.execute("UPDATE celery_periodic_task SET crontab_id = %s WHERE id = %s", (crontab_id, schedule_id))
+        
+        # 4. Signal scheduler to reload
+        cursor.execute("UPDATE celery_periodic_task_changed SET last_update = NOW() WHERE id = 1")
+        
         connection.commit()
         
         # 返回更多信息
@@ -1457,6 +1654,8 @@ def update_periodic_schedule(schedule_id: int, req: ScheduleUpdateRequest, x_adm
         # 如果croniter可用，添加下一个执行时间预览
         try:
             from croniter import croniter
+            from datetime import datetime
+            import pytz
             tz = pytz.timezone('Asia/Shanghai')
             base_time = tz.localize(datetime.now())
             cron = croniter(req.cron_expr, base_time)
