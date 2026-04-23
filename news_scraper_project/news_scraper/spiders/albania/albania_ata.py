@@ -1,39 +1,30 @@
-# 阿尔巴尼亚ata爬虫，负责抓取对应站点、机构或栏目内容。
-
 import scrapy
 import json
 import re
 from datetime import datetime
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_dynamic_cutoff
+from news_scraper.spiders.smart_spider import SmartSpider
+from pipeline.content_engine import ContentEngine
 
-class AlbaniaAtaSpider(scrapy.Spider):
+class AlbaniaAtaSpider(SmartSpider):
+    """
+    Albania ATA Spider using WP-JSON API.
+    Extracts article content directly from JSON responses,
+    avoiding 403 blocks on article HTML pages.
+    """
     name = "albania_ata"
-
+    source_timezone = 'Europe/Tirane'
+    
     country_code = 'ALB'
-
     country = '阿尔巴尼亚'
+    
     allowed_domains = ["ata.gov.al"]
-    target_table = "alb_ata"
     
     # Category 47 is 'Ekonomi'
     base_url = "https://ata.gov.al/wp-json/wp/v2/posts?categories=47&per_page=100"
     
-    def __init__(self, *args, **kwargs):
-        super(AlbaniaAtaSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(AlbaniaAtaSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
-        spider.cutoff_date = max(dynamic_cutoff, datetime(2026, 1, 1)) if dynamic_cutoff else datetime(2026, 1, 1)
-        return spider
-
-    def start_requests(self):
-        # Start from page 1
+    async def start(self):
         url = f"{self.base_url}&after={self.cutoff_date.strftime('%Y-%m-%dT%H:%M:%SZ')}&page=1"
-        yield scrapy.Request(url, callback=self.parse, meta={'page': 1})
+        yield scrapy.Request(url, callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
         try:
@@ -46,37 +37,60 @@ class AlbaniaAtaSpider(scrapy.Spider):
             self.logger.info("No more posts found.")
             return
 
+        has_valid_item_in_window = False
         for post in posts:
-            item = NewsItem()
-            item['url'] = post.get('link')
-            item['title'] = post.get('title', {}).get('rendered')
+            url = post.get('link')
             
-            # Clean HTML from title if any
-            if item['title']:
-                item['title'] = re.sub(r'<[^>]+>', '', item['title']).strip()
-                
-            # Content is rendered HTML
-            # We preserve basics but can clean if needed. 
-            # The user asked for "content", we usually keep it clean but readable.
-            raw_content = post.get('content', {}).get('rendered', '')
-            item['content'] = re.sub(r'<[^>]+>', '', raw_content).strip()
-            
-            # Publish time
-            date_str = post.get('date') # Format: 2026-03-11T09:26:20
+            # Publish time from JSON
+            date_str = post.get('date')  # Format: 2026-03-11T09:26:20
+            publish_time = None
             if date_str:
-                item['publish_time'] = datetime.fromisoformat(date_str)
+                publish_time = self.parse_to_utc(datetime.fromisoformat(date_str))
             
-            item['author'] = str(post.get('author'))
-            item['language'] = 'Albanian'
+            if not self.should_process(url, publish_time):
+                continue
             
+            has_valid_item_in_window = True
+            
+            # Extract title from JSON
+            title = post.get('title', {}).get('rendered', '').strip()
+            # Clean HTML entities from title
+            title = re.sub(r'<[^>]+>', '', title)
+            
+            # Extract content HTML from JSON
+            content_html = post.get('content', {}).get('rendered', '')
+            
+            if not content_html:
+                self.logger.warning(f"Empty content for {url}, skipping")
+                continue
+            
+            # Use ContentEngine to process the HTML content
+            content_data = ContentEngine.process(
+                raw_html=f"<html><body>{content_html}</body></html>",
+                base_url=url
+            )
+            
+            # Assemble the item directly
+            item = {
+                "url": url,
+                "title": title,
+                "raw_html": content_html,
+                "publish_time": publish_time,
+                "language": getattr(self, 'language', 'en'),
+                "section": "news",
+                "country_code": self.country_code,
+                "country": self.country,
+                **content_data
+            }
+            
+            self.logger.info(f"Extracted from JSON: {title[:60]}...")
             yield item
 
         # Pagination
-        current_page = response.meta.get('page', 1)
-        # X-WP-TotalPages header tells us how many pages there are
-        total_pages = int(response.headers.get('X-WP-TotalPages', 0))
-        
-        if current_page < total_pages:
-            next_page = current_page + 1
-            next_url = f"{self.base_url}&after={self.cutoff_date.strftime('%Y-%m-%dT%H:%M:%SZ')}&page={next_page}"
-            yield scrapy.Request(next_url, callback=self.parse, meta={'page': next_page})
+        if has_valid_item_in_window:
+            current_page = response.meta.get('page', 1)
+            total_pages = int(response.headers.get('X-WP-TotalPages', 0))
+            if current_page < total_pages:
+                next_page = current_page + 1
+                next_url = f"{self.base_url}&after={self.cutoff_date.strftime('%Y-%m-%dT%H:%M:%SZ')}&page={next_page}"
+                yield scrapy.Request(next_url, callback=self.parse, meta={'page': next_page}, dont_filter=True)

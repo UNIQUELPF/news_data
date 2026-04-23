@@ -14,7 +14,6 @@ class BahrainCbbSpider(SmartSpider):
     
     country_code = 'BHR'
     country = '巴林'
-    organization = 'Central Bank of Bahrain'
     
     allowed_domains = ["cbb.gov.bh"]
     ajax_url = "https://www.cbb.gov.bh/wp-admin/admin-ajax.php"

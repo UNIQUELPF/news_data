@@ -15,8 +15,9 @@ class PostgresPipeline:
     def from_crawler(cls, crawler):
         return cls(crawler=crawler)
 
-    def open_spider(self):
-        spider = getattr(self.crawler, "spider", None)
+    def open_spider(self, spider=None):
+        if spider is None:
+            spider = getattr(self.crawler, "spider", None)
         if spider is None:
             self.enabled = False
             return
@@ -46,8 +47,15 @@ class PostgresPipeline:
         if self.connection:
             self.connection.close()
 
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         if not self.enabled:
+            return item
+
+        if spider is None:
+            spider = getattr(self.crawler, "spider", None)
+        
+        if spider is None:
+            # Last resort log using print or just ignore if we can't find a logger
             return item
 
         try:
@@ -176,7 +184,12 @@ class PostgresPipeline:
             ),
         )
 
-    def _normalize_item(self, item, spider):
+    def _normalize_item(self, item, spider=None):
+        if spider is None:
+            spider = getattr(self.crawler, "spider", None)
+        
+        spider_name = spider.name if spider else "unknown"
+        
         url = self._sanitize_value(item.get('url'))
         title = self._sanitize_value(item.get('title'))
         
@@ -205,13 +218,10 @@ class PostgresPipeline:
         category = self._sanitize_value(item.get('category'))
         
         # Metadata logic
-        explicit_country = item.get('country') or getattr(spider, 'country', None)
-        inferred_code, inferred_name = self._infer_country_data(spider.name)
-        country_code = self._sanitize_value(item.get('country_code') or getattr(spider, 'country_code', None) or inferred_code)
+        explicit_country = item.get('country') or (getattr(spider, 'country', None) if spider else None)
+        inferred_code, inferred_name = self._infer_country_data(spider_name)
+        country_code = self._sanitize_value(item.get('country_code') or (getattr(spider, 'country_code', None) if spider else None) or inferred_code)
         country = self._sanitize_value(explicit_country or inferred_name)
-        
-        raw_org = self._sanitize_value(item.get('organization') or getattr(spider, 'organization', None))
-        organization, company = split_organization_and_company(raw_org)
         
         publish_time = item.get('publish_time')
         domain = self._sanitize_value(urlparse(url).netloc if url else None)
@@ -236,8 +246,8 @@ class PostgresPipeline:
             "category": category,
             "country_code": country_code,
             "country": country,
-            "organization": organization,
-            "company": company,
+            "organization": None,
+            "company": item.get('company'),
             "province": province,
             "city": city,
             "publish_time": publish_time,

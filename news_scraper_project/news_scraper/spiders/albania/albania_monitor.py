@@ -1,137 +1,94 @@
-# 阿尔巴尼亚monitor爬虫，负责抓取对应站点、机构或栏目内容。
-
-import re
-from datetime import datetime, timedelta
-
 import scrapy
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_dynamic_cutoff
+import dateparser
+import re
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class AlbaniaMonitorSpider(scrapy.Spider):
+class AlbaniaMonitorSpider(SmartSpider):
+    """
+    Modernized Albania Monitor Spider.
+    Inherits from SmartSpider for automated state and content handling.
+    """
     name = 'albania_monitor'
-
+    source_timezone = 'Europe/Tirane'
+    
     country_code = 'ALB'
-
     country = '阿尔巴尼亚'
+    
     allowed_domains = ['monitor.al']
-    start_urls = ['https://monitor.al/ekonomi/']
-    target_table = 'alb_monitor'
+    custom_settings = {
+        "CONCURRENT_REQUESTS": 1,
+        "DOWNLOAD_DELAY": 1,
+    }
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(AlbaniaMonitorSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
-        spider.CUTOFF_DATE = max(dynamic_cutoff, datetime(2026, 1, 1)) if dynamic_cutoff else datetime(2026, 1, 1)
-        return spider
+    use_curl_cffi = True
+
+    async def start(self):
+        for url in ['https://monitor.al/ekonomi/']:
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
+    
+    # CSS selector for the main content area
+    fallback_content_selector = ".standard-content, .jeg_main_content, article"
 
     def parse(self, response):
         """Parses the news list page."""
-        article_nodes = response.css('h3 a.d-block, h2 a.d-block')
+        # Target both hero and standard article links
+        article_nodes = response.css('h3 a.d-block, h2 a.d-block, .jeg_thumb a')
         self.logger.info(f"Found {len(article_nodes)} article links on {response.url}")
 
-        page_urls = set()
-        recent_found = False
-        unknown_date_found = False
-        old_date_found = False
+        has_valid_item_in_window = False
+        
+        # Track seen URLs in this page to avoid processing the same hero article twice
+        page_seen_urls = set()
 
         for link in article_nodes:
             href = link.attrib.get('href')
-            if not href:
+            if not href or href in page_seen_urls:
                 continue
-            full_url = response.urljoin(href)
-            if full_url in page_urls:
+            url = response.urljoin(href)
+            page_seen_urls.add(href)
+
+            # Improved date extraction with fallback for hero articles
+            card_root = link.xpath("./ancestor::*[self::article or self::div[contains(@class,'jeg_post') or contains(@class,'post')] or self::div[contains(@class,'jeg_hero')]][1]")
+            
+            # Try multiple common JNews date selectors
+            date_str = card_root.css('.jeg_meta_date::text, .jeg_post_meta .jeg_meta_date::text, .jeg_post_date::text').get()
+            
+            publish_time = None
+            if date_str:
+                # Clean suffixes like " / 13 Min Lexim"
+                date_str = re.split(r'[/\s\d]+Min Lexim', date_str)[0].strip()
+                dt_local = dateparser.parse(date_str, languages=['sq', 'en'])
+                publish_time = self.parse_to_utc(dt_local)
+
+            # Core logic: Should we process this article?
+            is_valid = self.should_process(url, publish_time)
+            
+            if not is_valid:
                 continue
-            page_urls.add(full_url)
-
-            card_root = link.xpath("./ancestor::*[self::article or self::div[contains(@class,'jeg_post') or contains(@class,'post')]][1]")
-            listing_text = " ".join(card_root.xpath(".//text()").getall()) if card_root else ""
-            listing_publish_time = self._parse_listing_datetime(listing_text)
-
-            if listing_publish_time:
-                if listing_publish_time < self.CUTOFF_DATE:
-                    old_date_found = True
-                    continue
-                recent_found = True
-            else:
-                unknown_date_found = True
-
+            
+            # CRITICAL: Only allow pagination if we have a CONFIRMED recent date
+            # This prevents infinite pagination when dates fail to parse
+            if publish_time and publish_time >= self.cutoff_date:
+                has_valid_item_in_window = True
+            elif publish_time is None and not self.is_already_scraped(url):
+                # If date is unknown but it's a new URL, we still crawl it but don't use it to trigger next page
+                pass
+            
             yield scrapy.Request(
-                url=full_url,
+                url,
                 callback=self.parse_detail,
-                meta={'listing_publish_time': listing_publish_time}
+                dont_filter=self.full_scan,
+                meta={"publish_time_hint": publish_time}
             )
 
+        # Pagination: If we found valid items or dates were unknown, try the next page
         next_page = response.css('.pagination li.next a::attr(href)').get()
-        if next_page and (recent_found or unknown_date_found):
-            yield response.follow(next_page, callback=self.parse)
-        elif old_date_found and not recent_found and not unknown_date_found:
-            self.logger.info(f"All visible Monitor items are older than cutoff on {response.url}. Stopping pagination.")
+        if next_page and has_valid_item_in_window:
+            yield response.follow(next_page, callback=self.parse, dont_filter=True)
 
     def parse_detail(self, response):
-        """Parses the news detail page and checks cutoff."""
-        date_str = response.css('meta[property="article:published_time"]::attr(content)').get()
-        publish_time = response.meta.get('listing_publish_time')
-        
-        if not publish_time and date_str:
-            try:
-                date_str = date_str.split('+')[0]
-                publish_time = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-            except Exception as e:
-                self.logger.error(f"Failed to parse date {date_str} on {response.url}: {e}")
-        
-        if publish_time and publish_time < self.CUTOFF_DATE:
-            self.logger.info(f"Reached cutoff date {self.CUTOFF_DATE} at {publish_time} on {response.url}")
-            # Note: Because Scrapy requests are asynchronous, we can't easily break the pagination loop
-            # from within the detail callback. However, CloseSpider extension handles graceful shutdown
-            # based on item counts if needed, or we just filter out old items. To truly stop the spider
-            # when reaching old items across multiple pages, a custom extension or state would be used.
-            # For now, we drop the item.
-            return
+        """
+        Standardized detail parsing using the base class helper.
+        """
+        yield self.auto_parse_item(response)
 
-        item = NewsItem()
-        item['url'] = response.url
-        
-        # Title
-        item['title'] = response.css('h1::text').get(default='').strip()
-        if not item['title']:
-            # Fallback
-            item['title'] = response.css('meta[property="og:title"]::attr(content)').get(default='')
-            
-        item['publish_time'] = publish_time
-        item['language'] = 'sq'
-        item['author'] = 'Revista Monitor'
-        item['scrape_time'] = datetime.now()
-        
-        # Content
-        content_parts = response.css('.standard-content p::text').getall()
-        item['content'] = "\n\n".join([p.strip() for p in content_parts if len(p.strip()) > 10])
-        
-        if item['content'] and item['title']:
-            yield item
-
-    def _parse_listing_datetime(self, text):
-        if not text:
-            return None
-
-        normalized = " ".join(text.split()).lower()
-        now = datetime.now().replace(second=0, microsecond=0)
-        patterns = [
-            (r'(\d+)\s+minutes?\s+m[ëe]\s+par[ëe]', 'minutes'),
-            (r'(\d+)\s+hours?\s+m[ëe]\s+par[ëe]', 'hours'),
-            (r'(\d+)\s+days?\s+m[ëe]\s+par[ëe]', 'days'),
-            (r'(\d+)\s+weeks?\s+m[ëe]\s+par[ëe]', 'weeks'),
-        ]
-        for pattern, unit in patterns:
-            match = re.search(pattern, normalized)
-            if not match:
-                continue
-            value = int(match.group(1))
-            if unit == 'minutes':
-                return now - timedelta(minutes=value)
-            if unit == 'hours':
-                return now - timedelta(hours=value)
-            if unit == 'days':
-                return now - timedelta(days=value)
-            if unit == 'weeks':
-                return now - timedelta(weeks=value)
-        return None

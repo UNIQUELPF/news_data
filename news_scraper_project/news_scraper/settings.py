@@ -59,7 +59,7 @@ DOWNLOAD_HANDLERS = {
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
 # Incremental Crawling Settings
-DEFAULT_START_DATE = "2026-01-01"
+DEFAULT_START_DATE = "2026-04-15"
 INCREMENTAL_WINDOW_DAYS = 7
 
 # --- Scrapy-Redis Distributed Settings ---

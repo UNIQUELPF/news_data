@@ -1,112 +1,71 @@
-# 阿尔巴尼亚bank爬虫，负责抓取对应站点、机构或栏目内容。
-
 import scrapy
-from datetime import datetime
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_dynamic_cutoff
-import re
+import dateparser
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class AlbaniaBankSpider(scrapy.Spider):
+class AlbaniaBankSpider(SmartSpider):
+    """
+    Modernized Bank of Albania Spider.
+    """
     name = 'albania_bank'
-
-    country_code = 'ALB'
-
-    country = '阿尔巴尼亚'
-    allowed_domains = ['bankofalbania.org']
-    start_urls = ['https://www.bankofalbania.org/Shtypi/Njoftimet_per_shtyp/']
+    source_timezone = 'Europe/Tirane'
     
-    target_table = 'alb_bank'
+    country_code = 'ALB'
+    country = '阿尔巴尼亚'
+    
+    allowed_domains = ['bankofalbania.org']
+    
+    custom_settings = {
+        "CONCURRENT_REQUESTS": 1,
+        "DOWNLOAD_DELAY": 1,
+    }
 
-    CUTOFF_DATE = None
+    use_curl_cffi = True
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(AlbaniaBankSpider, cls).from_crawler(crawler, *args, **kwargs)
-        dynamic_cutoff = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
-        # Default starting point for newest news category
-        min_cutoff = datetime(2026, 1, 1)
-        spider.CUTOFF_DATE = max(dynamic_cutoff, min_cutoff) if dynamic_cutoff else min_cutoff
-        return spider
+    async def start(self):
+        for url in ['https://www.bankofalbania.org/Shtypi/Njoftimet_per_shtyp/']:
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
+    
+    fallback_content_selector = "div.fc, article, .content"
 
     def parse(self, response):
         """Parses the press release list page."""
-        # Refined selectors from precise DOM analysis
-        # Items are in div.row (often without align-items-center in the source)
         rows = response.css('div.row')
         self.logger.info(f"Checking {len(rows)} potential rows on {response.url}")
 
-        reached_cutoff = False
-        scraped_in_page = 0
+        has_valid_item_in_window = False
+        
         for row in rows:
-            # Date is in .text-dark.pb-1
             date_str = row.css('.text-dark.pb-1::text').get()
-            # Title is in h5 a.text-dark.font-weight-bold
             title_node = row.css('h5 a.text-dark.font-weight-bold')
             
             if not date_str or not title_node:
                 continue
                 
-            date_str = date_str.strip()
-            title = title_node.xpath('string()').get().strip()
-            href = title_node.attrib.get('href')
+            url = response.urljoin(title_node.attrib.get('href'))
             
-            # Date format: "04.03.2026"
-            publish_time = self.parse_date(date_str)
+            # Parse date for early stopping
+            dt_local = dateparser.parse(date_str, languages=['sq', 'en'])
+            publish_time = self.parse_to_utc(dt_local)
             
-            if publish_time:
-                if publish_time < self.CUTOFF_DATE:
-                    reached_cutoff = True
-                    self.logger.info(f"Reached cutoff date {self.CUTOFF_DATE} at {publish_time}. Stopping.")
-                    break
+            if not self.should_process(url, publish_time):
+                continue
                 
-                scraped_in_page += 1
-                yield scrapy.Request(
-                    url=response.urljoin(href),
-                    callback=self.parse_detail,
-                    meta={'title': title, 'publish_time': publish_time}
-                )
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                dont_filter=self.full_scan,
+                meta={'publish_time_hint': publish_time}
+            )
 
-        self.logger.info(f"Scraped {scraped_in_page} items from {response.url}")
-
-        if not reached_cutoff:
-            # Pagination logic: finding the "Next" page link with Albanian title
-            next_page = response.css('a.page-link[title="Faqja pasardhëse"]::attr(href)').get()
-            if not next_page:
-                 # Fallback to general arrows or "pasardhëse" keyword
-                 next_page = response.xpath('//a[contains(@class, "page-link") and contains(@title, "pasardhëse")]/@href').get()
-                 
+        # Pagination logic
+        if has_valid_item_in_window:
+            next_page = response.css('a.page-link[title="Faqja pasardhëse"]::attr(href)').get() \
+                        or response.xpath('//a[contains(@class, "page-link") and contains(@title, "pasardhëse")]/@href').get()
             if next_page:
-                yield response.follow(next_page, callback=self.parse)
-
-    def parse_date(self, date_str):
-        """Parses dates like '04.03.2026'."""
-        try:
-            match = re.search(r'(\d{2}\.\d{2}\.\d{4})', date_str)
-            if match:
-                return datetime.strptime(match.group(1), '%d.%m.%Y')
-        except Exception as e:
-            self.logger.error(f"Error parsing date {date_str}: {e}")
-        return None
+                yield response.follow(next_page, callback=self.parse, dont_filter=True)
 
     def parse_detail(self, response):
-        """Parses the press release detail page."""
-        item = NewsItem()
-        item['url'] = response.url
-        item['title'] = response.meta['title']
-        item['publish_time'] = response.meta['publish_time']
-        item['language'] = 'sq'
-        item['author'] = 'Banka e Shqipërisë'
-        item['scrape_time'] = datetime.now()
-        
-        # Content extraction: Confirmed selector div.fc from browser research
-        content_parts = response.css('div.fc p::text, div.fc::text').getall()
-        if not content_parts:
-             content_parts = response.css('article p::text, div.content p::text').getall()
-             
-        item['content'] = "\n\n".join([p.strip() for p in content_parts if len(p.strip()) > 10])
-        
-        if not item['content']:
-            item['content'] = response.xpath('string(//div[contains(@class, "fc")])').get() or ""
-            item['content'] = item['content'].strip()
-            
-        yield item
+        """Standardized detail parsing."""
+        yield self.auto_parse_item(response)
+

@@ -47,7 +47,15 @@ class CurlCffiMiddleware:
             from curl_cffi import requests as curl_requests
             try:
                 spider.logger.debug(f"Intercepting {request.url} via curl_cffi")
-                headers = {k.decode('utf-8'): v[0].decode('utf-8') for k, v in request.headers.items()}
+                
+                # Filter out Scrapy's default headers that conflict with impersonation
+                headers = {}
+                ignore_headers = {'user-agent', 'accept', 'accept-language', 'accept-encoding'}
+                for k, v in request.headers.items():
+                    k_str = k.decode('utf-8').lower()
+                    if k_str not in ignore_headers:
+                        headers[k.decode('utf-8')] = v[0].decode('utf-8')
+                        
                 response = curl_requests.get(request.url, impersonate='chrome120', timeout=30, headers=headers)
                 spider.logger.debug(f"CurlCffi: Successfully fetched {request.url} (Status: {response.status_code})")
                 return HtmlResponse(

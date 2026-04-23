@@ -1,6 +1,7 @@
 import scrapy
 import logging
 import pytz
+import dateparser
 from datetime import datetime, timedelta
 from news_scraper.utils import _get_db_connection
 from pipeline.content_engine import ContentEngine
@@ -58,7 +59,7 @@ class SmartSpider(scrapy.Spider):
             latest_time = self._fetch_latest_publish_time(settings)
             
             if not latest_time:
-                self.cutoff_date = self.default_start_date
+                self.cutoff_date = self.earliest_date
                 logger.info(f"[{self.name}] NO HISTORY. Initializing from {self.cutoff_date}")
             else:
                 # Calculate window (Command line arg > Settings > Default 7)
@@ -210,7 +211,6 @@ class SmartSpider(scrapy.Spider):
             "publish_time": publish_time,
             "language": getattr(self, 'language', 'en'),
             "section": response.meta.get("section_hint", "news"),
-            "organization": getattr(self, 'organization', None),
             "country_code": getattr(self, 'country_code', None),
             "country": getattr(self, 'country', None),
             **content_data
