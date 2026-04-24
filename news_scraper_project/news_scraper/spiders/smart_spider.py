@@ -183,14 +183,17 @@ class SmartSpider(scrapy.Spider):
         if publish_time_xpath:
             raw_time = response.xpath(publish_time_xpath).get()
             if raw_time:
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time))
+                parser_settings = getattr(self, 'dateparser_settings', None)
+                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
         
         if not publish_time:
             # Try standard article meta
             raw_time = response.xpath("//meta[@property='article:published_time']/@content").get() or \
                        response.xpath("//meta[@name='publishdate']/@content").get()
             if raw_time:
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time))
+                # Use class-level dateparser_settings if provided
+                parser_settings = getattr(self, 'dateparser_settings', None)
+                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
         
         if not publish_time:
             # Fallback to the hint from the listing page
