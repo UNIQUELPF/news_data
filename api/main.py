@@ -589,7 +589,7 @@ def _semantic_search_candidates(
 
 def _similar_articles(article_id: int, limit: int = 5):
     """Find similar articles using Qdrant's recommendation engine or search."""
-    q_client = get_qdrant_client()
+    q_client = get_qdrant_client(timeout=2.0)
     
     # 1. Get a point ID for this article to use as a reference
     # We use the first chunk (index 0) as the reference point
@@ -659,7 +659,7 @@ def _get_article_chunks(article_id: int):
     from pipeline.qdrant_utils import get_qdrant_client, COLLECTION_NAME
     import qdrant_client.http.models as q_models
 
-    q_client = get_qdrant_client()
+    q_client = get_qdrant_client(timeout=2.0)
     try:
         # Scroll to get all chunks for this article
         results = q_client.scroll(
@@ -958,6 +958,7 @@ def list_articles(
 
 @app.get("/api/v1/articles/{article_id}")
 def get_article(article_id: int, response: Response):
+    """Returns only core article data for fast initial rendering."""
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     connection = get_db_connection()
     try:
@@ -965,35 +966,17 @@ def get_article(article_id: int, response: Response):
         cursor.execute(
             """
             SELECT
-                a.id,
-                a.source_url,
-                a.title_original,
-                a.content_plain,
-                a.content_markdown,
-                a.images,
-                a.publish_time,
-                a.author,
-                a.language,
-                a.section,
-                a.country,
-                a.company,
-                a.province,
-                a.city,
-                a.category,
-                a.country_code,
-                a.translation_status,
-                a.embedding_status,
+                a.id, a.source_url, a.title_original, a.content_plain,
+                a.content_markdown, a.images, a.publish_time, a.author,
+                a.language, a.section, a.country, a.company,
+                a.province, a.city, a.category, a.country_code,
+                a.translation_status, a.embedding_status,
                 s.display_name AS source_name,
-                t.target_language,
-                t.title_translated,
-                t.summary_translated,
-                t.content_translated,
-                t.status AS translation_record_status
+                t.title_translated, t.summary_translated, t.content_translated
             FROM articles a
             JOIN sources s ON s.id = a.source_id
             LEFT JOIN article_translations t
-                ON t.article_id = a.id
-               AND t.target_language = 'zh-CN'
+                ON t.article_id = a.id AND t.target_language = 'zh-CN'
             WHERE a.id = %s
             """,
             (article_id,),
@@ -1002,17 +985,33 @@ def get_article(article_id: int, response: Response):
         if not article:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        # 动态计算组织 & 格式化时间
         article["organization"] = _get_dynamic_organizations(article.get("country_code"))
         _format_article_response(article)
-
-        return {
-            "article": article,
-            "chunks": _get_article_chunks(article_id),
-            "similar_articles": _similar_articles(article_id),
-        }
+        
+        return {"article": article}
     finally:
         connection.close()
+
+
+@app.get("/api/v1/articles/{article_id}/recommendations")
+def get_article_recommendations(article_id: int):
+    """Lazy-loaded recommendations and chunks from Qdrant."""
+    chunks = []
+    try:
+        chunks = _get_article_chunks(article_id)
+    except Exception as e:
+        logger.warning(f"Chunks failed for {article_id}: {e}")
+
+    similar = []
+    try:
+        similar = _similar_articles(article_id)
+    except Exception as e:
+        logger.warning(f"Similar articles failed for {article_id}: {e}")
+
+    return {
+        "chunks": chunks,
+        "similar_articles": similar
+    }
 
 
 @app.get("/api/v1/pipeline/summary")

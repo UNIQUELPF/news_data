@@ -6,8 +6,8 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 COLLECTION_NAME = "news_articles"
 
-def get_qdrant_client():
-    return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+def get_qdrant_client(timeout=10.0):
+    return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=timeout)
 
 def init_qdrant_schema(vector_size: int = None):
     if vector_size is None:

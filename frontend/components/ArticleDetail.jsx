@@ -9,10 +9,24 @@ export default function ArticleDetail({ articleData, loading, onOpenArticle }) {
 
   return (
     <div className="detail-card article-detail-container">
-      {loading ? <div className="empty">正在加载文章详情...</div> : null}
-      <ArticleOverview article={article} />
-      <ArticleChunkList chunks={chunks} />
-      <SimilarArticlesList items={similarArticles} onOpenArticle={onOpenArticle} />
+      {loading ? (
+        <div className="empty">正在加载文章详情...</div>
+      ) : (
+        <>
+          <ArticleOverview article={article} />
+          
+          <div className="recommendations-section">
+            {!chunks && !similarArticles ? (
+              <div className="loading-sub">正在寻找相关内容和知识切片...</div>
+            ) : (
+              <>
+                <ArticleChunkList chunks={chunks} />
+                <SimilarArticlesList items={similarArticles} onOpenArticle={onOpenArticle} />
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
