@@ -25,7 +25,7 @@ class LaosLsbSpider(LaosBaseSpider):
 
         for post in posts:
             url = post.get("link")
-            if not url or url in self.seen_urls:
+            if not url:
                 continue
 
             publish_time = self._parse_datetime(post.get("date"), languages=["en"])
