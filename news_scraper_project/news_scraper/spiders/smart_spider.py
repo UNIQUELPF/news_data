@@ -218,6 +218,20 @@ class SmartSpider(scrapy.Spider):
             "country": getattr(self, 'country', None),
             **content_data
         }
+
+        # 5. Intelligent Image Deduplication (Scheme A)
+        # Prevent showing the same image twice if it's already in the body text
+        if item.get('images') and item.get('content'):
+            clean_images = []
+            body_text = str(item.get('content', '')) + str(item.get('title', ''))
+            for img_url in item['images']:
+                # Check if the URL (or its main part) is already in the body
+                if img_url not in body_text:
+                    clean_images.append(img_url)
+                else:
+                    self.logger.debug(f"Deduplicated image (already in body): {img_url}")
+            item['images'] = clean_images
+
         return item
 
     def extract_content(self, response):

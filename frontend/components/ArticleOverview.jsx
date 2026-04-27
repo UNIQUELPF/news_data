@@ -35,6 +35,23 @@ export default function ArticleOverview({ article }) {
 
       <hr className="article-divider" />
 
+      {heroImage && (
+        <div className="article-main-image-container" style={{ marginBottom: '24px', textAlign: 'center' }}>
+          <img 
+            src={heroImage} 
+            alt={displayTitle} 
+            className="article-featured-image"
+            style={{ 
+              maxWidth: '100%', 
+              maxHeight: '500px', 
+              borderRadius: '12px', 
+              boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+              objectFit: 'cover'
+            }} 
+          />
+        </div>
+      )}
+
       <div className="article-content-body markdown-content">
           {article.summary_translated && (
             <div className="article-summary-box">
