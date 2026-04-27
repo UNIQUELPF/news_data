@@ -11,18 +11,15 @@ class LaosKplSpider(LaosBaseSpider):
 
     country_code = 'LAO'
 
-    country = '老挝'
     allowed_domains = ["kpl.gov.la", "www.kpl.gov.la"]
-    target_table = "lao_kpl"
     start_urls = ["https://kpl.gov.la/En/"]
 
     def parse(self, response):
         emitted = 0
         for href in response.css("a[href*='detail.aspx']::attr(href)").getall():
             url = response.urljoin(href)
-            if "/En/" not in url or url in self.seen_urls:
+            if "/En/" not in url or not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 15:
@@ -40,7 +37,7 @@ class LaosKplSpider(LaosBaseSpider):
         page_text = self._clean_text(" ".join(response.css("body *::text").getall()))
         match = re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, [".content", ".detail", "article", "main", "body"])

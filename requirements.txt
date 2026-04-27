@@ -15,6 +15,7 @@ sqlalchemy==1.4.52
 trafilatura
 markdownify
 lxml
+lxml_html_clean
 qdrant-client
 pypdf
 requests

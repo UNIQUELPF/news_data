@@ -11,9 +11,7 @@ class QatarQnaSpider(QatarBaseSpider):
 
     country_code = 'QAT'
 
-    country = '卡塔尔'
     allowed_domains = []
-    target_table = "qat_qna"
     start_urls = ["https://qna.org.qa/en/economy"]
 
     def parse(self, response):
@@ -22,9 +20,8 @@ class QatarQnaSpider(QatarBaseSpider):
             url = response.urljoin(href)
             if "/en/news/news-details" not in url and "/en/News-Area/News/" not in url:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:
@@ -42,7 +39,7 @@ class QatarQnaSpider(QatarBaseSpider):
         page_text = self._clean_text(" ".join(response.css(".news-details *::text").getall()))
         match = re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, [".news-details", "main"])

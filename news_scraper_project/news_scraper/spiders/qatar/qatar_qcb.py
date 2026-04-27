@@ -9,17 +9,14 @@ class QatarQcbSpider(QatarBaseSpider):
 
     country_code = 'QAT'
 
-    country = '卡塔尔'
     allowed_domains = []
-    target_table = "qat_qcb"
     start_urls = ["https://www.qcb.gov.qa/en/News/Pages/default.aspx"]
 
     def start_requests(self):
         for suffix in ["10apr2.aspx", "september4.aspx", "6jan1.aspx", "16march1.aspx", "january2.aspx", "11july1.aspx"]:
             url = f"https://www.qcb.gov.qa/en/News/Pages/{suffix}"
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
 
     def parse_detail(self, response):
@@ -38,7 +35,7 @@ class QatarQcbSpider(QatarBaseSpider):
             or response.css("title::text").get()
         )
         publish_time = self._parse_datetime(raw_date, languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._clean_text(" ".join(response.css("title::text, h1::text, .news-details *::text").getall()))

@@ -11,18 +11,15 @@ class KuwaitCitraSpider(KuwaitBaseSpider):
 
     country_code = 'KWT'
 
-    country = '科威特'
     allowed_domains = []
-    target_table = "kwt_citra"
     start_urls = ["https://www.citra.gov.kw/sites/en/Pages/NewsEvents.aspx"]
 
     def parse(self, response):
         emitted = 0
         for href in response.css("a[href*='NewsDetails.aspx?NewsID=']::attr(href)").getall():
             url = response.urljoin(href)
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:
@@ -43,7 +40,7 @@ class KuwaitCitraSpider(KuwaitBaseSpider):
         page_text = self._clean_text(" ".join(response.css(".news-details *::text").getall()))
         match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         yield self._build_item(response, title, content, publish_time, "CITRA", "en", "regulator")

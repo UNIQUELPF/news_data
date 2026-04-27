@@ -12,9 +12,7 @@ class KuwaitCbkSpider(KuwaitBaseSpider):
 
     country_code = 'KWT'
 
-    country = '科威特'
     allowed_domains = []
-    target_table = "kwt_cbk"
     start_urls = ["https://www.cbk.gov.kw/en/"]
 
     def parse(self, response):
@@ -25,9 +23,8 @@ class KuwaitCbkSpider(KuwaitBaseSpider):
                 continue
             if "/202" not in url:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:
@@ -57,7 +54,7 @@ class KuwaitCbkSpider(KuwaitBaseSpider):
             except ValueError:
                 publish_time = None
 
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, ["article", ".page-content", "main"])

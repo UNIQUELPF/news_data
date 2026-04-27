@@ -12,17 +12,14 @@ class KuwaitMociSpider(KuwaitBaseSpider):
 
     country_code = 'KWT'
 
-    country = '科威特'
     allowed_domains = []
-    target_table = "kwt_moci"
     start_urls = ["https://www.moci.gov.kw/en/media/economic-newsletter/"]
 
     def parse(self, response):
         for href in response.css("a[href*='/en/media/economic-newsletter/economic-']::attr(href)").getall():
             url = response.urljoin(href)
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_year)
 
     def parse_year(self, response):
@@ -31,9 +28,8 @@ class KuwaitMociSpider(KuwaitBaseSpider):
 
         for href in response.css("a[href$='.pdf']::attr(href), a[href*='.pdf?']::attr(href)").getall():
             url = response.urljoin(href)
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_pdf, cb_kwargs={"year": year})
 
     def parse_pdf(self, response, year=None):
@@ -43,7 +39,7 @@ class KuwaitMociSpider(KuwaitBaseSpider):
             return
 
         publish_time = datetime(year, 1, 1) if year else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         yield self._build_item(

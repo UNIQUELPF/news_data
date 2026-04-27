@@ -10,9 +10,7 @@ class LaosLsbSpider(LaosBaseSpider):
 
     country_code = 'LAO'
 
-    country = '老挝'
     allowed_domains = ["www.lsb.gov.la", "lsb.gov.la"]
-    target_table = "lao_lsb"
     api_url = "https://www.lsb.gov.la/index.php?rest_route=/wp/v2/posts&per_page=12"
 
     def start_requests(self):
@@ -31,10 +29,9 @@ class LaosLsbSpider(LaosBaseSpider):
                 continue
 
             publish_time = self._parse_datetime(post.get("date"), languages=["en"])
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if not self.should_process(url, publish_time):
                 continue
 
-            self.seen_urls.add(url)
             title = self._clean_html(post.get("title", {}).get("rendered"))
             content = self._clean_html(post.get("content", {}).get("rendered"))
             excerpt = self._clean_html(post.get("excerpt", {}).get("rendered"))

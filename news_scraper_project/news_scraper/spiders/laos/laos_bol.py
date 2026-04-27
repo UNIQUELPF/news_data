@@ -11,9 +11,7 @@ class LaosBolSpider(LaosBaseSpider):
 
     country_code = 'LAO'
 
-    country = '老挝'
     allowed_domains = ["bol.gov.la", "www.bol.gov.la"]
-    target_table = "lao_bol"
     start_urls = [
         "https://bol.gov.la/en/fileupload/28-01-2026_1769571479.pdf",
         "https://www.bol.gov.la/en/fileupload/19-08-2025_1755594350.pdf",
@@ -23,9 +21,8 @@ class LaosBolSpider(LaosBaseSpider):
 
     def start_requests(self):
         for url in self.start_urls:
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             pdf_bytes = self._fetch_pdf(url)
             if not pdf_bytes:
                 continue
@@ -65,7 +62,7 @@ class LaosBolSpider(LaosBaseSpider):
         publish_time = None
         if match:
             publish_time = datetime.strptime(match.group(0), "%d-%m-%Y")
-            if not self.full_scan and publish_time < self.cutoff_date:
+            if not self.should_process(url, publish_time):
                 return None
 
         response = self._make_response(url, "")

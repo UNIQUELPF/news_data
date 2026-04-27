@@ -12,18 +12,15 @@ class LaosLaotianTimesSpider(LaosBaseSpider):
 
     country_code = 'LAO'
 
-    country = '老挝'
     allowed_domains = ["laotiantimes.com", "www.laotiantimes.com"]
-    target_table = "lao_laotiantimes"
     start_urls = ["https://laotiantimes.com/category/business/"]
 
     def parse(self, response):
         html = self._fetch_html(self.start_urls[0])
         urls = sorted(set(re.findall(r"https://laotiantimes\.com/\d{4}/\d{2}/\d{2}/[a-z0-9\-]+/?", html)))
         for url in urls[:15]:
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
 
     def parse_detail(self, response):
@@ -41,7 +38,7 @@ class LaosLaotianTimesSpider(LaosBaseSpider):
             or response.css("time::attr(datetime), time::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._clean_text((schema or {}).get("articleBody")) or self._extract_content(

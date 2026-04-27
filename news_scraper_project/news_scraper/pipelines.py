@@ -222,6 +222,8 @@ class PostgresPipeline:
         inferred_code, inferred_name = self._infer_country_data(spider_name)
         country_code = self._sanitize_value(item.get('country_code') or (getattr(spider, 'country_code', None) if spider else None) or inferred_code)
         country = self._sanitize_value(explicit_country or inferred_name)
+        raw_org = self._sanitize_value(item.get('organization') or (getattr(spider, 'organization', None) if spider else None))
+        organization, company = split_organization_and_company(raw_org)
         
         publish_time = item.get('publish_time')
         domain = self._sanitize_value(urlparse(url).netloc if url else None)
@@ -246,8 +248,8 @@ class PostgresPipeline:
             "category": category,
             "country_code": country_code,
             "country": country,
-            "organization": None,
-            "company": item.get('company'),
+            "organization": organization,
+            "company": item.get('company') or company,
             "province": province,
             "city": city,
             "publish_time": publish_time,

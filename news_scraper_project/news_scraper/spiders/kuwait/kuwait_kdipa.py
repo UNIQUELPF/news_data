@@ -11,9 +11,7 @@ class KuwaitKdipaSpider(KuwaitBaseSpider):
 
     country_code = 'KWT'
 
-    country = '科威特'
     allowed_domains = []
-    target_table = "kwt_kdipa"
     start_urls = ["https://kdipa.gov.kw/media-center/news/"]
 
     def parse(self, response):
@@ -35,9 +33,8 @@ class KuwaitKdipaSpider(KuwaitBaseSpider):
                 continue
             if "kdipa.gov.kw/" not in url:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:
@@ -55,7 +52,7 @@ class KuwaitKdipaSpider(KuwaitBaseSpider):
         page_text = self._clean_text(" ".join(response.css("article *::text").getall()))
         match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, ["article", "main"])

@@ -11,9 +11,7 @@ class QatarGulfTimesSpider(QatarBaseSpider):
 
     country_code = 'QAT'
 
-    country = '卡塔尔'
     allowed_domains = []
-    target_table = "qat_gulf_times"
     start_urls = ["https://www.gulf-times.com/business"]
 
     def parse(self, response):
@@ -24,9 +22,8 @@ class QatarGulfTimesSpider(QatarBaseSpider):
                 continue
             if "/business/" not in url and "/qatar/" not in url:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:
@@ -44,7 +41,7 @@ class QatarGulfTimesSpider(QatarBaseSpider):
         page_text = self._clean_text(" ".join(response.css("main *::text").getall()))
         match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, ["main", "article", ".article-container"])
