@@ -3,11 +3,10 @@
 from datetime import datetime
 
 import dateparser
-import psycopg2
 import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
 
 # 阿尔及利亚经济类来源
 # 站点：Dzair Tube
@@ -15,7 +14,7 @@ from news_scraper.utils import get_incremental_state
 # 语言：阿拉伯语
 
 
-class AlgeriaDzairTubeSpider(scrapy.Spider):
+class AlgeriaDzairTubeSpider(SmartSpider):
     """阿尔及利亚 Dzair Tube 爬虫。
 
     抓取站点：https://www.dzair-tube.dz
@@ -27,13 +26,15 @@ class AlgeriaDzairTubeSpider(scrapy.Spider):
     name = "algeria_dzair_tube"
 
 
-    country_code = 'DZA'
+    country_code = "DZA"
 
 
-    country = '阿尔及利亚'
+    country = "阿尔及利亚"
+    language = "en"
+    source_timezone = "Africa/Algiers"
+    start_date = "2026-01-01"
     allowed_domains = ["dzair-tube.dz"]
     # 当前 spider 对应的数据库表名。
-    target_table = "dza_dzair_tube"
 
     # 从经济栏目入口页开始抓取。
     start_urls = [
@@ -41,74 +42,15 @@ class AlgeriaDzairTubeSpider(scrapy.Spider):
     ]
 
     # 首次抓取的默认时间边界；后续优先按数据库里最新时间做增量。
-    default_cutoff = datetime(2026, 1, 1)
 
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self.default_cutoff
-        self.seen_urls = set()
-        self.reached_cutoff = False
 
     @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super().from_crawler(crawler, *args, **kwargs)
-        spider.cutoff_date = spider._init_db_and_get_cutoff()
-        return spider
 
-    def _init_db_and_get_cutoff(self):
-        # 初始化目标表，并读取当前表里的最大发布时间作为增量抓取边界。
-        settings = self.settings.get("POSTGRES_SETTINGS", {})
-        if not settings:
-            return self.default_cutoff
-
-        try:
-            conn = psycopg2.connect(
-                dbname=settings["dbname"],
-                user=settings["user"],
-                password=settings["password"],
-                host=settings["host"],
-                port=settings["port"],
-            )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    title TEXT,
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-
-            cur.close()
-            conn.close()
-
-            if self.full_scan:
-                return self.default_cutoff
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as exc:
-            self.logger.error(f"DB init failed for {self.target_table}: {exc}")
-            return self.default_cutoff
 
     def start_requests(self):
         for url in self.start_urls:
@@ -121,9 +63,8 @@ class AlgeriaDzairTubeSpider(scrapy.Spider):
         unique_links = []
         for href in article_links:
             full_url = response.urljoin(href)
-            if "/economie/page/" in full_url or full_url in self.seen_urls:
+            if "/economie/page/" in full_url or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             unique_links.append(full_url)
 
         for article_url in unique_links:

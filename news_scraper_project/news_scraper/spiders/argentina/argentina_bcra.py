@@ -3,11 +3,10 @@
 from datetime import datetime
 
 import dateparser
-import psycopg2
 import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
 
 # 阿根廷政府/监管类来源
 # 站点：BCRA
@@ -15,7 +14,7 @@ from news_scraper.utils import get_incremental_state
 # 语言：西班牙语
 
 
-class ArgentinaBcraSpider(scrapy.Spider):
+class ArgentinaBcraSpider(SmartSpider):
     """阿根廷中央银行 BCRA 爬虫。
 
     抓取站点：https://www.bcra.gob.ar
@@ -27,82 +26,27 @@ class ArgentinaBcraSpider(scrapy.Spider):
     name = "argentina_bcra"
 
 
-    country_code = 'ARG'
+    country_code = "ARG"
 
 
-    country = '阿根廷'
+    country = "阿根廷"
+    language = "en"
+    source_timezone = "America/Argentina/Buenos_Aires"
+    start_date = "2026-01-01"
     allowed_domains = ["bcra.gob.ar"]
-    target_table = "arg_bcra"
 
     start_urls = [
         "https://www.bcra.gob.ar/noticias/",
     ]
-
-    default_cutoff = datetime(2026, 1, 1)
 
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self.default_cutoff
-        self.seen_urls = set()
 
     @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super().from_crawler(crawler, *args, **kwargs)
-        spider.cutoff_date = spider._init_db_and_get_cutoff()
-        return spider
 
-    def _init_db_and_get_cutoff(self):
-        settings = self.settings.get("POSTGRES_SETTINGS", {})
-        if not settings:
-            return self.default_cutoff
-
-        try:
-            conn = psycopg2.connect(
-                dbname=settings["dbname"],
-                user=settings["user"],
-                password=settings["password"],
-                host=settings["host"],
-                port=settings["port"],
-            )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    title TEXT,
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            if self.full_scan:
-                return self.default_cutoff
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as exc:
-            self.logger.error(f"DB init failed for {self.target_table}: {exc}")
-            return self.default_cutoff
 
     def start_requests(self):
         for url in self.start_urls:
@@ -115,9 +59,8 @@ class ArgentinaBcraSpider(scrapy.Spider):
             full_url = response.urljoin(href)
             if full_url.rstrip("/") == "https://www.bcra.gob.ar/noticias":
                 continue
-            if ("/noticia/" not in full_url and "/noticias/" not in full_url) or full_url in self.seen_urls:
+            if ("/noticia/" not in full_url and "/noticias/" not in full_url) or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         next_page = response.css("a.next::attr(href), a[rel='next']::attr(href)").get()

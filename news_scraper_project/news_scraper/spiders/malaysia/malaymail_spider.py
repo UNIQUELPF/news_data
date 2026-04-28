@@ -1,22 +1,22 @@
 import re
 from datetime import datetime
 
-import psycopg2
 import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
 
 
-class MalayMailSpider(scrapy.Spider):
+class MalayMailSpider(SmartSpider):
     name = "malaysia_malaymail"
 
-    country_code = 'MYS'
+    country_code = "MYS"
 
-    country = '马来西亚'
+    country = "马来西亚"
+    language = "en"
+    source_timezone = "Asia/Kuala_Lumpur"
+    start_date = "2026-01-01"
     allowed_domains = ["malaymail.com"]
-    target_table = "malaysia_malaymail_news"
     
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
@@ -30,47 +30,8 @@ class MalayMailSpider(scrapy.Spider):
     # Money section
     BASE_URL = "https://www.malaymail.com/morearticles/money?page={page}"
 
-    def __init__(self, start_date=None, *args, **kwargs):
-        super(MalayMailSpider, self).__init__(*args, **kwargs)
-        if start_date:
-            self.cutoff_date = datetime.strptime(start_date, "%Y-%m-%d")
-        else:
-            self.cutoff_date = self.get_latest_db_date()
-        self.logger.info(f"Using cutoff: {self.cutoff_date}")
-        self.init_db()
 
-    def get_latest_db_date(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '{self.target_table}')")
-            if not cur.fetchone()[0]:
-                return datetime(2026, 1, 1)
 
-            cur.close()
-            conn.close()
-            state = get_incremental_state(
-                getattr(self, "settings", None),
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as e:
-            self.logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
-        return datetime(2026, 1, 1)
-
-    def init_db(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {self.target_table} (url TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT, publish_time TIMESTAMP NOT NULL, author VARCHAR(255), language VARCHAR(50), section VARCHAR(100), scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP);")
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            self.logger.error(f"Failed to init table: {e}")
 
     def iter_start_requests(self):
         yield scrapy.Request(self.BASE_URL.format(page=1), callback=self.parse_list, meta={'page': 1})

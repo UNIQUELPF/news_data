@@ -4,11 +4,10 @@ import io
 from datetime import datetime
 
 import dateparser
-import psycopg2
 import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 from bs4 import BeautifulSoup
 from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
 from pypdf import PdfReader
 
 # 阿尔及利亚政府/监管类来源
@@ -17,7 +16,7 @@ from pypdf import PdfReader
 # 语言：法语
 
 
-class AlgeriaCosobSpider(scrapy.Spider):
+class AlgeriaCosobSpider(SmartSpider):
     """阿尔及利亚证券监管机构 COSOB 爬虫。 政府/官方监管机构
 
     抓取站点：https://cosob.dz
@@ -29,83 +28,27 @@ class AlgeriaCosobSpider(scrapy.Spider):
     name = "algeria_cosob"
 
 
-    country_code = 'DZA'
+    country_code = "DZA"
 
 
-    country = '阿尔及利亚'
+    country = "阿尔及利亚"
+    language = "en"
+    source_timezone = "Africa/Algiers"
+    start_date = "2026-01-01"
     allowed_domains = ["cosob.dz"]
-    target_table = "dza_cosob"
 
     start_urls = [
         "https://cosob.dz/category/actualites/",
     ]
-
-    default_cutoff = datetime(2026, 1, 1)
 
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self.default_cutoff
-        self.seen_urls = set()
-        self.reached_cutoff = False
 
     @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super().from_crawler(crawler, *args, **kwargs)
-        spider.cutoff_date = spider._init_db_and_get_cutoff()
-        return spider
 
-    def _init_db_and_get_cutoff(self):
-        settings = self.settings.get("POSTGRES_SETTINGS", {})
-        if not settings:
-            return self.default_cutoff
-
-        try:
-            conn = psycopg2.connect(
-                dbname=settings["dbname"],
-                user=settings["user"],
-                password=settings["password"],
-                host=settings["host"],
-                port=settings["port"],
-            )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    title TEXT,
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            if self.full_scan:
-                return self.default_cutoff
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as exc:
-            self.logger.error(f"DB init failed for {self.target_table}: {exc}")
-            return self.default_cutoff
 
     def start_requests(self):
         for url in self.start_urls:
@@ -121,12 +64,11 @@ class AlgeriaCosobSpider(scrapy.Spider):
             full_url = response.urljoin(href)
             title = self._clean_text(link.xpath("normalize-space()").get()) or full_url.rsplit("/", 1)[-1]
             if (
-                full_url in self.seen_urls
+                not self.should_process(full_url)
                 or "/category/" in full_url
                 or "/author/" in full_url
             ):
                 continue
-            self.seen_urls.add(full_url)
             if full_url.lower().endswith(".pdf"):
                 yield scrapy.Request(full_url, callback=self.parse_pdf, cb_kwargs={"title": title})
                 continue

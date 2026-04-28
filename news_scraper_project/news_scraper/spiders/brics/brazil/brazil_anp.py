@@ -4,37 +4,21 @@ import json
 from datetime import datetime
 
 import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
 
 
-class BrazilANPSpider(scrapy.Spider):
+class BrazilANPSpider(SmartSpider):
     name = "brazil_anp"
 
-    country_code = 'BRA'
+    country_code = "BRA"
 
-    country = '巴西'
+    country = "巴西"
+    language = "en"
+    source_timezone = "America/Sao_Paulo"
+    start_date = "2026-01-01"
     allowed_domains = ["gov.br"]
-    target_table = "bra_anp"
 
-    def __init__(self, *args, **kwargs):
-        super(BrazilANPSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.start_index = 0
-        self.base_url = "https://www.gov.br/anp/pt-br/canais_atendimento/imprensa/noticias-comunicados?b_start:int={}"
-        
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
-            self.logger.info(f"Using cutoff date: {self.cutoff_date}")
-        except Exception as e:
-            self.logger.warning(f"Error fetching max date from DB: {e}")
 
     def start_requests(self):
         yield scrapy.Request(url=self.base_url.format(self.start_index), callback=self.parse_list)

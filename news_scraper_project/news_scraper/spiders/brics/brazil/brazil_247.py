@@ -3,18 +3,19 @@
 from datetime import datetime
 
 from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
 from scrapy.spiders import SitemapSpider
 
 
 class Brazil247Spider(SitemapSpider):
     name = "brazil_247"
 
-    country_code = 'BRA'
+    country_code = "BRA"
 
-    country = '巴西'
+    country = "巴西"
+    language = "en"
+    source_timezone = "America/Sao_Paulo"
+    start_date = "2026-01-01"
     allowed_domains = ["brasil247.com"]
-    target_table = "bra_247"
     
     sitemap_urls = ['https://www.brasil247.com/sitemaps/sitemap.xml']
     sitemap_rules = [
@@ -22,22 +23,6 @@ class Brazil247Spider(SitemapSpider):
         (r'https://www.brasil247.com/(?!sitemaps|author|video|tv|blog|cultura|esportes)[a-z0-9-]+/.+', 'parse_detail'),
     ]
 
-    def __init__(self, *args, **kwargs):
-        super(Brazil247Spider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
-            self.logger.info(f"Using cutoff date: {self.cutoff_date}")
-        except Exception as e:
-            self.logger.error(f"Error fetching max date from DB: {e}")
 
     def sitemap_filter(self, entries):
         """
