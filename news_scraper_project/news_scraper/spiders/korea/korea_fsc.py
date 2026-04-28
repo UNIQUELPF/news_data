@@ -12,7 +12,6 @@ class KoreaFscSpider(KoreaBaseSpider):
 
     country = '韩国'
     allowed_domains = ["www.fsc.go.kr", "fsc.go.kr"]
-    target_table = "kor_fsc"
     start_urls = [
         "https://www.fsc.go.kr/eng/pr010101?curPage=1&srchBeginDt=&srchCtgry=5&srchEndDt=&srchKey=&srchText="
     ]
@@ -28,9 +27,8 @@ class KoreaFscSpider(KoreaBaseSpider):
             url = response.urljoin(href.split("#")[0])
             if "/eng/pr010101/" not in url or url == self.start_urls[0]:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
 
     def parse_detail(self, response):

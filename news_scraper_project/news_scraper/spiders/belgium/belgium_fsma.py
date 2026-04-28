@@ -14,7 +14,6 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
 
     country = '比利时'
     allowed_domains = ["fsma.be", "www.fsma.be"]
-    target_table = "bel_fsma"
     start_urls = ["https://www.fsma.be/en/news-articles"]
 
     def start_requests(self):
@@ -24,9 +23,8 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
     def parse_listing(self, response):
         for href in response.css("a[href^='/en/news/']::attr(href)").getall():
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

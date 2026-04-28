@@ -20,7 +20,6 @@ class AustriaBmawSpider(AustriaBaseSpider):
 
     country = '奥地利'
     allowed_domains = ["bmaw.gv.at", "www.bmaw.gv.at", "bmwet.gv.at", "www.bmwet.gv.at"]
-    target_table = "aut_bmaw"
     start_urls = [
         "https://www.bmaw.gv.at/Presse/AktuellePressemeldungen.html",
     ]
@@ -33,29 +32,26 @@ class AustriaBmawSpider(AustriaBaseSpider):
         links = response.css('a[href*="/Presse/AktuellePressemeldungen/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url.endswith("AktuellePressemeldungen.html") or full_url in self.seen_urls:
+            if full_url.endswith("AktuellePressemeldungen.html") or not self.should_process(full_url):
                 continue
             if not full_url.endswith(".html"):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         archive_links = response.css('a[href*="/Presse/Archiv/"]::attr(href)').getall()
         for href in archive_links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_archive)
 
     def parse_archive(self, response):
         links = response.css('a[href*="/Presse/AktuellePressemeldungen/"]::attr(href), a[href*="/Presse/Archiv/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if not full_url.endswith(".html") or full_url in self.seen_urls:
+            if not full_url.endswith(".html") or not self.should_process(full_url):
                 continue
             if "/Presse/AktuellePressemeldungen/" in full_url:
-                self.seen_urls.add(full_url)
                 yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

@@ -18,7 +18,6 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
 
     country = '丹麦'
     allowed_domains = ["finanstilsynet.dk", "www.finanstilsynet.dk"]
-    target_table = "dnk_finanstilsynet"
     start_urls = ["https://www.finanstilsynet.dk/nyheder-og-presse/nyheder-og-pressemeddelelser"]
 
     def start_requests(self):
@@ -63,7 +62,7 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             if not link:
                 continue
             full_url = link.get("href")
-            if not full_url or full_url in self.seen_urls:
+            if not full_url or not self.should_process(full_url):
                 continue
             publish_time = None
             date_node = card.select_one("[data-date]")
@@ -71,7 +70,6 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
                 publish_time = self._parse_datetime(date_node.get("data-date"), languages=["da", "en"])
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

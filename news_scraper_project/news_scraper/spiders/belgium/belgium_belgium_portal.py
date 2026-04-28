@@ -14,7 +14,6 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
 
     country = '比利时'
     allowed_domains = ["belgium.be", "www.belgium.be"]
-    target_table = "bel_belgium_portal"
     start_urls = ["https://www.belgium.be/en/News/overview?f%5B0%5D=theme%3A56"]
     def start_requests(self):
         for url in self.start_urls:
@@ -28,9 +27,8 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
             if not href or "/en/news/" not in href or href.endswith("/overview"):
                 continue
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls or full_url.endswith("/overview"):
+            if not self.should_process(full_url) or full_url.endswith("/overview"):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

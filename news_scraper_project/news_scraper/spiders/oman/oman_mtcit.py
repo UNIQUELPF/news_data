@@ -31,7 +31,6 @@ class OmanMtcitSpider(OmanBaseSpider):
 
     country = '阿曼'
     allowed_domains = ["mtcit.gov.om", "www.mtcit.gov.om"]
-    target_table = "omn_mtcit"
     start_urls = [
         "https://www.mtcit.gov.om/media-4/news-announcements-11/news-85",
     ]
@@ -44,9 +43,8 @@ class OmanMtcitSpider(OmanBaseSpider):
         links = response.css("a::attr(href)").getall()
         for href in links:
             full_url = response.urljoin(href)
-            if "/media-4/news-announcements-11/news-85/" not in full_url or full_url in self.seen_urls:
+            if "/media-4/news-announcements-11/news-85/" not in full_url or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
 
     def parse_detail(self, response):

@@ -14,7 +14,6 @@ class DenmarkNationalbankSpider(DenmarkBaseSpider):
 
     country = '丹麦'
     allowed_domains = ["nationalbanken.dk", "www.nationalbanken.dk"]
-    target_table = "dnk_nationalbank"
     start_urls = ["https://www.nationalbanken.dk/en/news-and-knowledge/publications-and-speeches/"]
 
     def start_requests(self):
@@ -31,9 +30,8 @@ class DenmarkNationalbankSpider(DenmarkBaseSpider):
             if any(part in href for part in ("/archive-speeches/", "/podcasts")):
                 continue
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

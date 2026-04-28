@@ -22,7 +22,6 @@ class AustriaDiePresseSpider(AustriaBaseSpider):
 
     country = '奥地利'
     allowed_domains = ["diepresse.com", "www.diepresse.com"]
-    target_table = "aut_diepresse"
     start_urls = [
         "https://www.diepresse.com/wirtschaft",
     ]
@@ -35,13 +34,12 @@ class AustriaDiePresseSpider(AustriaBaseSpider):
         links = response.css('a[href*="diepresse.com/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if not full_url.startswith("https://www.diepresse.com/"):
                 continue
             if not re.search(r"https://www\.diepresse\.com/\d+/", full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

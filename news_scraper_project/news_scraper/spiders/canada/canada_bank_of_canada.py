@@ -12,7 +12,6 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
 
     country = '加拿大'
     allowed_domains = []
-    target_table = "can_bank_of_canada"
     start_urls = ["data:,canada_bank_of_canada_start"]
     list_url = "https://www.bankofcanada.ca/press/announcements/"
 
@@ -33,9 +32,8 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
                 continue
             if not url.startswith("https://www.bankofcanada.ca/20"):
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             detail_html = self._fetch_html(url)
             item_obj = next(
                 self.parse_detail(

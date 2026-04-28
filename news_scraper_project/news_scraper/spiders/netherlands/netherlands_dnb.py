@@ -14,7 +14,6 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
 
     country = '荷兰'
     allowed_domains = []
-    target_table = "nld_dnb"
     start_urls = ["data:,netherlands_dnb_start"]
     feed_url = "https://www.dnb.nl/en/rss/16451/6882"
 
@@ -30,9 +29,8 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
             full_url = self._clean_text((node.link.text if node.link else "")).split("?")[0]
             if "/en/" not in full_url:
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

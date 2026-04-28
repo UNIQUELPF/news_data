@@ -16,7 +16,6 @@ class FranceFinanceGovSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["presse.economie.gouv.fr", "economie.gouv.fr"]
-    target_table = "fra_finance_gov"
     start_urls = ["https://presse.economie.gouv.fr/"]
 
     def start_requests(self):
@@ -38,9 +37,8 @@ class FranceFinanceGovSpider(FranceBaseSpider):
                 continue
             if any(path.startswith(prefix) for prefix in ("/agendas", "/medias", "/selection", "/le-ministere")):
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

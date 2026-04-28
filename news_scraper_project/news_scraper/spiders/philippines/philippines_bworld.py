@@ -17,7 +17,6 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
 
     country = '菲律宾'
     allowed_domains = ["bworldonline.com", "www.bworldonline.com"]
-    target_table = "phl_bworld"
     start_urls = ["https://www.bworldonline.com/economy/"]
 
     def start_requests(self):
@@ -35,9 +34,8 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
             )
         )
         for full_url in urls:
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

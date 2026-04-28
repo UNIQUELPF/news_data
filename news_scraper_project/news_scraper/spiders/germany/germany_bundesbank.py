@@ -17,7 +17,6 @@ class GermanyBundesbankSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["bundesbank.de", "www.bundesbank.de"]
-    target_table = "deu_bundesbank"
     start_urls = ["https://www.bundesbank.de/en/press/press-releases"]
 
     def start_requests(self):
@@ -38,9 +37,8 @@ class GermanyBundesbankSpider(GermanyBaseSpider):
             slug = parsed.path.rstrip("/").split("/")[-1]
             if not re.search(r"-\d+$", slug):
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

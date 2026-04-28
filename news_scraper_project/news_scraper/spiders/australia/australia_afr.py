@@ -17,7 +17,6 @@ class AustraliaAfrSpider(AustraliaBaseSpider):
 
     country = '澳大利亚'
     allowed_domains = ["afr.com", "www.afr.com"]
-    target_table = "aus_afr"
     start_urls = [
         "https://www.afr.com/",
     ]
@@ -29,13 +28,12 @@ class AustraliaAfrSpider(AustraliaBaseSpider):
     def parse_listing(self, response):
         for href in response.css("a::attr(href)").getall():
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if "/companies/" not in full_url and "/policy/" not in full_url and "/markets/" not in full_url:
                 continue
             if not self._looks_like_article(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

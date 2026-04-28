@@ -16,7 +16,6 @@ class FranceBanqueFranceSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["banque-france.fr", "www.banque-france.fr"]
-    target_table = "fra_banque_france"
     start_urls = ["https://www.banque-france.fr/fr/actualites"]
 
     def start_requests(self):
@@ -27,9 +26,8 @@ class FranceBanqueFranceSpider(FranceBaseSpider):
         html = self._fetch_html(self.start_urls[0])
         for href in sorted(set(re.findall(r'/fr/actualites/[a-z0-9\-]+', html))):
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

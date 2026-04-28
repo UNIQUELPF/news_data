@@ -29,7 +29,6 @@ class OmanDailySpider(OmanBaseSpider):
 
     country = '阿曼'
     allowed_domains = ["omandaily.om", "www.omandaily.om"]
-    target_table = "omn_oman_daily"
     start_urls = [
         "https://www.omandaily.om/morearticles/%D8%A7%D9%84%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF%D9%8A%D8%A9",
     ]
@@ -44,9 +43,8 @@ class OmanDailySpider(OmanBaseSpider):
             full_url = response.urljoin(href)
             if "/%D8%A7%D9%84%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF%D9%8A%D8%A9/na/" not in full_url and "/الاقتصادية/na/" not in full_url:
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
 
     def parse_detail(self, response):

@@ -14,7 +14,6 @@ class BelgiumEconomieGovSpider(BelgiumBaseSpider):
 
     country = '比利时'
     allowed_domains = ["economie.fgov.be"]
-    target_table = "bel_economie_gov"
     start_urls = ["https://economie.fgov.be/en/news"]
 
     def start_requests(self):
@@ -24,9 +23,8 @@ class BelgiumEconomieGovSpider(BelgiumBaseSpider):
     def parse_listing(self, response):
         for href in response.css("a[href^='/en/news/']::attr(href)").getall():
             full_url = response.urljoin(href)
-            if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or full_url in self.seen_urls:
+            if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

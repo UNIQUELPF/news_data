@@ -24,7 +24,6 @@ class IrelandCentralBankSpider(IrelandBaseSpider):
     country = '爱尔兰'
     allowed_domains = ["centralbank.ie", "www.centralbank.ie"]
     # 政府/监管类：中央银行官方新闻与监管信息表
-    target_table = "irl_centralbank"
     start_urls = [
         "https://www.centralbank.ie/news-media/press-releases",
     ]
@@ -38,17 +37,15 @@ class IrelandCentralBankSpider(IrelandBaseSpider):
         links = response.css('a[href*="/news/article/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         next_page = response.css('a[aria-label="Next page"]::attr(href), a[href*="/news-media/press-releases/"]::attr(href)').getall()
         for href in next_page:
             full_url = response.urljoin(href)
-            if "/news-media/press-releases/" not in full_url or full_url in self.seen_urls:
+            if "/news-media/press-releases/" not in full_url or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_listing)
 
     def parse_detail(self, response):

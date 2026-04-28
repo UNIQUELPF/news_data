@@ -29,7 +29,6 @@ class OmanObserverSpider(OmanBaseSpider):
 
     country = '阿曼'
     allowed_domains = ["omanobserver.om", "www.omanobserver.om"]
-    target_table = "omn_oman_observer"
     start_urls = [
         "https://www.omanobserver.om/morearticles/business/economy",
     ]
@@ -42,9 +41,8 @@ class OmanObserverSpider(OmanBaseSpider):
         links = response.css('a[href*="/article/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if "/business/economy/" not in full_url or full_url in self.seen_urls:
+            if "/business/economy/" not in full_url or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
 
         next_page = response.css("a[rel='next']::attr(href)").get()

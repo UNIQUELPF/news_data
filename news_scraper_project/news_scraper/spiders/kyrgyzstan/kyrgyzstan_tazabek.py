@@ -14,7 +14,6 @@ class KyrgyzstanTazabekSpider(KyrgyzstanBaseSpider):
 
     country = '吉尔吉斯斯坦'
     allowed_domains = []
-    target_table = "kgz_tazabek"
     start_urls = ["data:,kyrgyzstan_tazabek_start"]
     source_url = "https://www.tazabek.kg/"
 
@@ -27,9 +26,8 @@ class KyrgyzstanTazabekSpider(KyrgyzstanBaseSpider):
         emitted = 0
         for href in re.findall(r'href="(/news:\d+[^"]*)"', html):
             full_url = "https://www.tazabek.kg" + href.split("?")[0]
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

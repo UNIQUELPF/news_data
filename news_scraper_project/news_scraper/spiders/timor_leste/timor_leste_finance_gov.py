@@ -14,7 +14,6 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
 
     country = '东帝汶'
     allowed_domains = ["mof.gov.tl", "mofwebadmin.mof.gov.tl"]
-    target_table = "tls_finance_gov"
     verify_ssl = False
     api_url = "https://mofwebadmin.mof.gov.tl/api/publications"
     base_domain = "https://mofwebadmin.mof.gov.tl"
@@ -45,9 +44,8 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 continue
             for href in links:
                 full_url = href if href.startswith("http") else f"{self.base_domain}{href}"
-                if full_url in self.seen_urls:
+                if not self.should_process(full_url):
                     continue
-                self.seen_urls.add(full_url)
                 yield scrapy.Request(
                     full_url,
                     callback=self.parse_pdf,

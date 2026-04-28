@@ -12,7 +12,6 @@ class CambodiaNisSpider(CambodiaBaseSpider):
 
     country = '柬埔寨'
     allowed_domains = []
-    target_table = "khm_nis"
     start_urls = ["data:,cambodia_nis_start"]
     feed_url = "https://www.nis.gov.kh/en/feed/"
 
@@ -36,9 +35,8 @@ class CambodiaNisSpider(CambodiaBaseSpider):
                 continue
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             detail_html = self._fetch_html(url)
             item = next(
                 self.parse_detail(

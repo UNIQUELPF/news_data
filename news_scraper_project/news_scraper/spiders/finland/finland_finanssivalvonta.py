@@ -14,7 +14,6 @@ class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
 
     country = '芬兰'
     allowed_domains = ["finanssivalvonta.fi", "www.finanssivalvonta.fi"]
-    target_table = "fin_finanssivalvonta"
     start_urls = [
         "https://www.finanssivalvonta.fi/en/publications-and-press-releases/news-releases/2025/",
         "https://www.finanssivalvonta.fi/en/publications-and-press-releases/news-releases/2026/",
@@ -38,9 +37,8 @@ class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
             full_url = response.urljoin(href.split("?")[0].rstrip("/") + "/")
             if full_url.rstrip("/") == response.url.rstrip("/"):
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

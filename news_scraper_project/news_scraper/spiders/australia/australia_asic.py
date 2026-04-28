@@ -17,7 +17,6 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
 
     country = '澳大利亚'
     allowed_domains = ["asic.gov.au", "www.asic.gov.au"]
-    target_table = "aus_asic"
     start_urls = [
         "https://www.asic.gov.au/_data/mr2023/",
     ]
@@ -48,7 +47,7 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
                 continue
             if full_url.startswith("/"):
                 full_url = response.urljoin(full_url)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             meta_type = self._clean_text(entry.get("metaType")).lower()
             if meta_type and meta_type != "media release":
@@ -58,7 +57,6 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
             publish_time = self._extract_listing_publish_time(entry)
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

@@ -16,7 +16,6 @@ class KoreaKrxSpider(KoreaBaseSpider):
 
     country = '韩国'
     allowed_domains = ["global.krx.co.kr"]
-    target_table = "kor_krx"
     board_id = "GLB0501070000"
     start_urls = ["http://global.krx.co.kr/board/GLB0501070000/bbs"]
 
@@ -53,9 +52,8 @@ class KoreaKrxSpider(KoreaBaseSpider):
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
             url = f"http://global.krx.co.kr/board/{self.board_id}/view?bbsSeq={seq}"
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(
                 url,
                 callback=self.parse_detail,

@@ -14,7 +14,6 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
 
     country = '荷兰'
     allowed_domains = []
-    target_table = "nld_cbs"
     start_urls = ["data:,netherlands_cbs_start"]
     feed_url = "https://www.cbs.nl/en-gb/rss-feeds/economie"
 
@@ -29,9 +28,8 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
             full_url = self._clean_text((node.link.text if node.link else "")).split("?")[0]
             if "/en-gb/news/" not in full_url:
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

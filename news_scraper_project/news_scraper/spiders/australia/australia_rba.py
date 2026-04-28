@@ -16,7 +16,6 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
 
     country = '澳大利亚'
     allowed_domains = ["rba.gov.au", "www.rba.gov.au"]
-    target_table = "aus_rba"
     start_urls = [
         "https://www.rba.gov.au/media-releases/",
         "https://www.rba.gov.au/speeches/",
@@ -29,7 +28,7 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
     def parse_listing(self, response):
         for href in response.css("a::attr(href)").getall():
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if "/media-releases/" not in full_url and "/speeches/" not in full_url:
                 continue
@@ -37,7 +36,6 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
                 continue
             if not self._should_fetch_url(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

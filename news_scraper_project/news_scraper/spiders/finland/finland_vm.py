@@ -14,7 +14,6 @@ class FinlandVmSpider(FinlandBaseSpider):
 
     country = '芬兰'
     allowed_domains = ["vm.fi", "www.vm.fi"]
-    target_table = "fin_vm"
     start_urls = ["https://vm.fi/en/press-releases"]
 
     def start_requests(self):
@@ -29,9 +28,8 @@ class FinlandVmSpider(FinlandBaseSpider):
             if "/en/-/" not in href:
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

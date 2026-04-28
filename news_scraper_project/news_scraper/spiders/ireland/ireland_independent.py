@@ -24,7 +24,6 @@ class IrelandIndependentSpider(IrelandBaseSpider):
     country = '爱尔兰'
     allowed_domains = ["independent.ie", "www.independent.ie"]
     # 经济类：商业新闻媒体表
-    target_table = "irl_independent"
     start_urls = [
         "https://www.independent.ie/business",
     ]
@@ -38,9 +37,8 @@ class IrelandIndependentSpider(IrelandBaseSpider):
         links = response.css('a[href*="/business/"][href$=".html"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if "/business/" not in full_url or full_url in self.seen_urls:
+            if "/business/" not in full_url or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

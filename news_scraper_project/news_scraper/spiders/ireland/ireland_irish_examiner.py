@@ -24,7 +24,6 @@ class IrelandIrishExaminerSpider(IrelandBaseSpider):
     country = '爱尔兰'
     allowed_domains = ["irishexaminer.com", "www.irishexaminer.com"]
     # 经济类：商业新闻媒体表
-    target_table = "irl_irish_examiner"
     start_urls = [
         "https://www.irishexaminer.com/business/",
     ]
@@ -38,9 +37,8 @@ class IrelandIrishExaminerSpider(IrelandBaseSpider):
         links = response.css('a[href*="/business/"][href*="/arid-"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

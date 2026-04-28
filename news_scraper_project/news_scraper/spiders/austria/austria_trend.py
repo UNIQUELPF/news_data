@@ -20,7 +20,6 @@ class AustriaTrendSpider(AustriaBaseSpider):
 
     country = '奥地利'
     allowed_domains = ["trend.at", "www.trend.at"]
-    target_table = "aut_trend"
     start_urls = [
         "https://www.trend.at/unternehmen",
     ]
@@ -33,11 +32,10 @@ class AustriaTrendSpider(AustriaBaseSpider):
         links = response.css('a[href*="trend.at/unternehmen/"]::attr(href), a[href*="trend.at/finanzen/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if "/unternehmen/" not in full_url and "/finanzen/" not in full_url:
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         next_page = response.css("a[rel='next']::attr(href)").get()

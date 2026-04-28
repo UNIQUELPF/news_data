@@ -14,7 +14,6 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
 
     country = '荷兰'
     allowed_domains = ["afm.nl", "www.afm.nl"]
-    target_table = "nld_afm"
     start_urls = ["https://www.afm.nl/en/sector/actueel"]
 
     def start_requests(self):
@@ -31,9 +30,8 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
             if href.rstrip("/") == "/en/sector/actueel":
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

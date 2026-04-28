@@ -16,7 +16,6 @@ class TimorLesteGovPortalSpider(TimorLesteBaseSpider):
 
     country = '东帝汶'
     allowed_domains = ["timor-leste.gov.tl"]
-    target_table = "tls_gov_portal"
     start_urls = ["https://timor-leste.gov.tl/"]
 
     def start_requests(self):
@@ -28,9 +27,8 @@ class TimorLesteGovPortalSpider(TimorLesteBaseSpider):
         urls = sorted(set(re.findall(r"https://timor-leste\.gov\.tl/\?p=\d+(?:&amp;n=1)?", html)))
         for full_url in urls:
             full_url = full_url.replace("&amp;", "&")
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

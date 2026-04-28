@@ -16,7 +16,6 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
 
     country = '菲律宾'
     allowed_domains = ["dof.gov.ph", "www.dof.gov.ph"]
-    target_table = "phl_dof"
     start_urls = ["https://www.dof.gov.ph/news/"]
 
     def start_requests(self):
@@ -63,9 +62,8 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
 
-            if href in self.seen_urls:
+            if not self.should_process(href):
                 continue
-            self.seen_urls.add(href)
             yield scrapy.Request(href, callback=self.parse_detail)
 
     def parse_detail(self, response):

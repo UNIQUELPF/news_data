@@ -14,7 +14,6 @@ class KoreaMoefSpider(KoreaBaseSpider):
 
     country = '韩国'
     allowed_domains = ["english.moef.go.kr"]
-    target_table = "kor_moef"
     rss_url = "http://english.moef.go.kr/pc/engmosfrss.do?boardCd=N0001"
     start_urls = [rss_url]
 
@@ -52,9 +51,8 @@ class KoreaMoefSpider(KoreaBaseSpider):
                 continue
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield self._build_item(
                 response=response.replace(url=url),
                 title=title,

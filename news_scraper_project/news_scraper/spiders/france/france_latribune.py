@@ -16,7 +16,6 @@ class FranceLaTribuneSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["latribune.fr", "www.latribune.fr"]
-    target_table = "fra_latribune"
     start_urls = ["https://www.latribune.fr/economie-2/"]
 
     def start_requests(self):
@@ -28,9 +27,8 @@ class FranceLaTribuneSpider(FranceBaseSpider):
         urls = sorted(set(re.findall(r'/article/economie(?:/[a-z0-9\-]+)*/\d+/[a-z0-9\-]+', html)))
         for href in urls:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

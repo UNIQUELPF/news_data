@@ -15,7 +15,6 @@ class KoreaBokSpider(KoreaBaseSpider):
 
     country = '韩国'
     allowed_domains = ["www.bok.or.kr", "bok.or.kr"]
-    target_table = "kor_bok"
     list_url = "https://www.bok.or.kr/eng/singl/newsDataEng/listCont.do"
     start_urls = ["https://www.bok.or.kr/eng/singl/newsDataEng/list.do?menuNo=400423"]
 
@@ -61,9 +60,8 @@ class KoreaBokSpider(KoreaBaseSpider):
 
                 page_has_new = True
                 url = urljoin("https://www.bok.or.kr", href)
-                if url in self.seen_urls:
+                if not self.should_process(url):
                     continue
-                self.seen_urls.add(url)
                 content = self._fetch_detail_content(url)
                 if not content:
                     continue

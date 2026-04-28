@@ -16,7 +16,6 @@ class FranceInseeSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["insee.fr", "www.insee.fr"]
-    target_table = "fra_insee"
     start_urls = ["https://www.insee.fr/fr/accueil"]
 
     def start_requests(self):
@@ -28,13 +27,12 @@ class FranceInseeSpider(FranceBaseSpider):
         urls = sorted(set(re.findall(r'https://www\.insee\.fr/fr/statistiques/\d+|/fr/statistiques/\d+', html)))
         for href in urls:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if not self.full_scan:
                 article_id = re.search(r"/(\d+)$", full_url)
                 if article_id and int(article_id.group(1)) < 8000000:
                     continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

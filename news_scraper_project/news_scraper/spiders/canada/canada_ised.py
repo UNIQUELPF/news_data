@@ -11,7 +11,6 @@ class CanadaIsedSpider(CanadaBaseSpider):
 
     country = '加拿大'
     allowed_domains = []
-    target_table = "can_ised"
     start_urls = ["data:,canada_ised_start"]
     api_url = (
         "https://api.io.canada.ca/io-server/gc/news/en/v2"

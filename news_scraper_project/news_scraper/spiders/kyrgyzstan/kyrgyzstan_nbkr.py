@@ -16,7 +16,6 @@ class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
 
     country = '吉尔吉斯斯坦'
     allowed_domains = []
-    target_table = "kgz_nbkr"
     start_urls = ["data:,kyrgyzstan_nbkr_start"]
     source_urls = [
         "https://www.nbkr.kg/index1.jsp?item=2546&lang=ENG",
@@ -40,9 +39,8 @@ class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
                 if not title or not href:
                     continue
                 full_url = urljoin(source_url, href.replace("&amp;", "&"))
-                if full_url in self.seen_urls:
+                if not self.should_process(full_url):
                     continue
-                self.seen_urls.add(full_url)
                 item = next(self.parse_detail(scrapy.Request(url=full_url), fallback_title=title), None)
                 if item:
                     yield item

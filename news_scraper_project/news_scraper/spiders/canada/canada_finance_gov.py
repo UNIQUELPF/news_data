@@ -11,7 +11,6 @@ class CanadaFinanceGovSpider(CanadaBaseSpider):
 
     country = '加拿大'
     allowed_domains = []
-    target_table = "can_finance_gov"
     start_urls = ["data:,canada_finance_gov_start"]
     api_url = (
         "https://api.io.canada.ca/io-server/gc/news/en/v2"

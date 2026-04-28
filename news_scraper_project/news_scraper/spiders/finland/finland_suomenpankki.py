@@ -14,7 +14,6 @@ class FinlandSuomenpankkiSpider(FinlandBaseSpider):
 
     country = '芬兰'
     allowed_domains = ["suomenpankki.fi", "www.suomenpankki.fi"]
-    target_table = "fin_suomenpankki"
     start_urls = ["https://www.suomenpankki.fi/en/news-and-topical/press-releases-and-news/"]
 
     def start_requests(self):
@@ -33,9 +32,8 @@ class FinlandSuomenpankkiSpider(FinlandBaseSpider):
             if href.endswith("/releases/") or href.endswith("/news/"):
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

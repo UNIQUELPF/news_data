@@ -14,7 +14,6 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
 
     country = '菲律宾'
     allowed_domains = ["bsp.gov.ph", "www.bsp.gov.ph"]
-    target_table = "phl_bsp"
     api_base = "https://www.bsp.gov.ph/_api/web/lists/getbytitle('Media Releases and Advisories')/items"
     start_urls = [f"{api_base}?$select=ID,Title,PDate&$orderby=PDate desc&$top=20"]
 
@@ -45,9 +44,8 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
                 f"{self.api_base}({item_id})"
                 "?$select=Title,PDate,Content"
             )
-            if detail_url in self.seen_urls:
+            if not self.should_process(detail_url):
                 continue
-            self.seen_urls.add(detail_url)
             yield scrapy.Request(
                 api_url,
                 callback=self.parse_detail,

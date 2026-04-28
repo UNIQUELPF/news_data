@@ -16,7 +16,6 @@ class FranceAmfSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["amf-france.org", "www.amf-france.org"]
-    target_table = "fra_amf"
     start_urls = [
         "https://www.amf-france.org/fr/actualites-publications/communiques/communiques-de-lamf",
         "https://www.amf-france.org/fr/actualites-publications/actualites",
@@ -49,9 +48,8 @@ class FranceAmfSpider(FranceBaseSpider):
             if href.count("/") < 5:
                 continue
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

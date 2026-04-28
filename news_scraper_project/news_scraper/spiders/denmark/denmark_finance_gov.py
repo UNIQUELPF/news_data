@@ -16,7 +16,6 @@ class DenmarkFinanceGovSpider(DenmarkBaseSpider):
 
     country = '丹麦'
     allowed_domains = ["en.fm.dk", "fm.dk"]
-    target_table = "dnk_finance_gov"
     start_urls = ["https://en.fm.dk/news/news/"]
 
     def start_requests(self):
@@ -31,9 +30,8 @@ class DenmarkFinanceGovSpider(DenmarkBaseSpider):
             if not href or "/news/news/" not in href or href.rstrip("/") == "/news/news":
                 continue
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

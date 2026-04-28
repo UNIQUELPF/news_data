@@ -16,7 +16,6 @@ class FinlandStatSpider(FinlandBaseSpider):
 
     country = '芬兰'
     allowed_domains = ["stat.fi", "www.stat.fi"]
-    target_table = "fin_stat"
     start_urls = ["https://stat.fi/en"]
 
     def start_requests(self):
@@ -31,9 +30,8 @@ class FinlandStatSpider(FinlandBaseSpider):
             if not (href.startswith("/en/publication/") or href.startswith("/en/news/")):
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

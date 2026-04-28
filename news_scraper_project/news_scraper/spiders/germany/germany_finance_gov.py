@@ -16,7 +16,6 @@ class GermanyFinanceGovSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["bundesfinanzministerium.de", "www.bundesfinanzministerium.de"]
-    target_table = "deu_finance_gov"
     start_urls = ["https://www.bundesfinanzministerium.de/Web/EN/Press/Press_releases/press_releases.html"]
     base_domain = "https://www.bundesfinanzministerium.de"
 
@@ -32,12 +31,11 @@ class GermanyFinanceGovSpider(GermanyBaseSpider):
             if "Content/EN/Pressemitteilungen/" not in href:
                 continue
             full_url = self.base_domain + href.split(";")[0].split("?")[0] if href.startswith("/") else f"{self.base_domain}/{href.split(';')[0].split('?')[0].lstrip('/')}"
-            if not full_url.endswith(".html") or full_url in self.seen_urls:
+            if not full_url.endswith(".html") or not self.should_process(full_url):
                 continue
             year_match = re.search(r"/(20\d{2})/", full_url)
             if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

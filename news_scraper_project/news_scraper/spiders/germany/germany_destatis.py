@@ -16,7 +16,6 @@ class GermanyDestatisSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["destatis.de", "www.destatis.de"]
-    target_table = "deu_destatis"
     start_urls = ["https://www.destatis.de/EN/Press/press_node.html"]
 
     def start_requests(self):
@@ -31,13 +30,12 @@ class GermanyDestatisSpider(GermanyBaseSpider):
             if not link:
                 continue
             full_url = response.urljoin(link.get("href").split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             date_text = self._clean_text(card.select_one(".c-result__date").get_text(" ", strip=True) if card.select_one(".c-result__date") else "")
             publish_time = self._parse_datetime(date_text, languages=["en"])
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

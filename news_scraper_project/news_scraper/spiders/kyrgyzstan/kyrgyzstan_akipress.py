@@ -16,7 +16,6 @@ class KyrgyzstanAkipressSpider(KyrgyzstanBaseSpider):
 
     country = '吉尔吉斯斯坦'
     allowed_domains = []
-    target_table = "kgz_akipress"
     start_urls = ["data:,kyrgyzstan_akipress_start"]
     source_urls = [
         "https://akipress.com/cat:14/",
@@ -39,9 +38,8 @@ class KyrgyzstanAkipressSpider(KyrgyzstanBaseSpider):
                 if not href or not title:
                     continue
                 full_url = urljoin(source_url, href.split("?")[0])
-                if full_url in self.seen_urls:
+                if not self.should_process(full_url):
                     continue
-                self.seen_urls.add(full_url)
                 try:
                     detail_html = self._fetch_html(full_url)
                 except Exception:

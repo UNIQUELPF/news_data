@@ -14,7 +14,6 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
 
     country = '比利时'
     allowed_domains = ["finance.belgium.be", "financien.belgium.be"]
-    target_table = "bel_finance_gov"
     start_urls = ["https://finance.belgium.be/en/news"]
 
     def start_requests(self):
@@ -29,9 +28,8 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
             if not href or "/en/news/" not in href:
                 continue
             full_url = response.urljoin(href)
-            if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or full_url in self.seen_urls:
+            if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

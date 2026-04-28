@@ -16,7 +16,6 @@ class GermanyBafinSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["bafin.de", "www.bafin.de"]
-    target_table = "deu_bafin"
     start_urls = ["https://www.bafin.de/EN/DieBaFin/Presse/03_Pressemitteilungen/liste_pressemitteilungen_node_en.html"]
 
     def start_requests(self):
@@ -31,12 +30,11 @@ class GermanyBafinSpider(GermanyBaseSpider):
             if "SharedDocs/Veroeffentlichungen/EN/Pressemitteilung/" not in href:
                 continue
             full_url = response.urljoin(href.split(";")[0].split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             year_match = re.search(r"/(20\d{2})/", full_url)
             if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

@@ -16,7 +16,6 @@ class PhilippinesManilaTimesSpider(PhilippinesBaseSpider):
 
     country = '菲律宾'
     allowed_domains = ["manilatimes.net", "www.manilatimes.net"]
-    target_table = "phl_manila_times"
     start_urls = ["https://www.manilatimes.net/business"]
 
     def start_requests(self):
@@ -34,9 +33,8 @@ class PhilippinesManilaTimesSpider(PhilippinesBaseSpider):
             )
         )
         for full_url in urls:
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

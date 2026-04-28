@@ -16,7 +16,6 @@ class TimorLesteInetlSpider(TimorLesteBaseSpider):
 
     country = '东帝汶'
     allowed_domains = ["inetl-ip.gov.tl"]
-    target_table = "tls_inetl"
     start_urls = ["https://inetl-ip.gov.tl/"]
 
     def start_requests(self):
@@ -28,12 +27,11 @@ class TimorLesteInetlSpider(TimorLesteBaseSpider):
         urls = sorted(set(re.findall(r"https://inetl-ip\.gov\.tl/\d{4}/\d{2}/\d{2}/[^\"' ]+", html)))
         for full_url in urls:
             full_url = full_url.rstrip("/")
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             year_match = re.search(r"/(20\d{2})/", full_url)
             if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

@@ -24,7 +24,6 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
     country = '爱尔兰'
     allowed_domains = ["gov.ie", "www.gov.ie"]
     # 政府类：财政部官方新闻/公告表
-    target_table = "irl_finance_gov"
     start_urls = [
         "https://www.gov.ie/en/department-of-finance/",
     ]
@@ -42,9 +41,8 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
                 continue
             if "/press-releases/" not in full_url and "/publications/" not in full_url:
                 continue
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

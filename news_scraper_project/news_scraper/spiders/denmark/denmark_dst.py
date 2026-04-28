@@ -16,7 +16,6 @@ class DenmarkDstSpider(DenmarkBaseSpider):
 
     country = '丹麦'
     allowed_domains = ["dst.dk", "www.dst.dk"]
-    target_table = "dnk_dst"
     start_urls = ["https://www.dst.dk/en/Statistik/udgivelser"]
 
     def start_requests(self):
@@ -34,9 +33,8 @@ class DenmarkDstSpider(DenmarkBaseSpider):
             if not href:
                 continue
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             rel_text = self._clean_text(" ".join(row.select_one(".rel-type-date").stripped_strings)) if row.select_one(".rel-type-date") else ""
             publish_time = self._extract_publish_time(rel_text)
             if publish_time and not self.full_scan and publish_time < self.cutoff_date:

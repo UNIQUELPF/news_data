@@ -14,7 +14,6 @@ class KyrgyzstanGovSpider(KyrgyzstanBaseSpider):
 
     country = '吉尔吉斯斯坦'
     allowed_domains = []
-    target_table = "kgz_gov"
     start_urls = ["data:,kyrgyzstan_gov_start"]
     source_urls = [
         "https://www.gov.kg/en/post/all",
@@ -31,9 +30,8 @@ class KyrgyzstanGovSpider(KyrgyzstanBaseSpider):
             html = self._fetch_html(source_url)
             for href in re.findall(r'https://www\.gov\.kg/en/post/s/[^"\']+', html):
                 full_url = href.split("?")[0]
-                if full_url in self.seen_urls:
+                if not self.should_process(full_url):
                     continue
-                self.seen_urls.add(full_url)
                 try:
                     detail_html = self._fetch_html(full_url)
                 except Exception:

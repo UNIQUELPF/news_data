@@ -16,7 +16,6 @@ class GermanyBundesregierungSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["bundesregierung.de", "www.bundesregierung.de"]
-    target_table = "deu_bundesregierung"
     start_urls = ["https://www.bundesregierung.de/breg-en/news"]
 
     def start_requests(self):
@@ -27,9 +26,8 @@ class GermanyBundesregierungSpider(GermanyBaseSpider):
         html = self._fetch_html(self.start_urls[0])
         for href in sorted(set(re.findall(r"/breg-en/news/[A-Za-z0-9-]+-\d+", html))):
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

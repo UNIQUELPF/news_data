@@ -13,16 +13,14 @@ class CambodiaTaxSpider(CambodiaBaseSpider):
 
     country = '柬埔寨'
     allowed_domains = []
-    target_table = "khm_tax"
     start_urls = ["https://www.tax.gov.kh/en"]
 
     def parse(self, response):
         emitted = 0
         for href in response.css("a[href*='/en/article?key=']::attr(href)").getall():
             url = response.urljoin(href)
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:

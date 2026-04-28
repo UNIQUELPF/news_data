@@ -26,7 +26,6 @@ class IrelandIrishTimesSpider(IrelandBaseSpider):
     country = '爱尔兰'
     allowed_domains = ["irishtimes.com", "www.irishtimes.com"]
     # 经济类：商业新闻媒体表
-    target_table = "irl_irish_times"
     start_urls = [
         "https://www.irishtimes.com/business/",
     ]
@@ -40,11 +39,10 @@ class IrelandIrishTimesSpider(IrelandBaseSpider):
         links = response.css('a[href*="/business/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if "/business/" not in full_url or full_url in self.seen_urls:
+            if "/business/" not in full_url or not self.should_process(full_url):
                 continue
             if not re.search(r"/business/\d{4}/\d{2}/\d{2}/", full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

@@ -22,7 +22,6 @@ class AustriaBmfSpider(AustriaBaseSpider):
 
     country = '奥地利'
     allowed_domains = ["bmf.gv.at", "www.bmf.gv.at"]
-    target_table = "aut_bmf"
     start_urls = [
         "https://www.bmf.gv.at/presse/pressemeldungen/2026.html",
     ]
@@ -35,15 +34,13 @@ class AustriaBmfSpider(AustriaBaseSpider):
         links = response.css('a[href*="/presse/pressemeldungen/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if not full_url.endswith(".html"):
                 continue
             if full_url.endswith("/2026.html") or "/2026/" not in full_url:
-                self.seen_urls.add(full_url)
                 yield scrapy.Request(full_url, callback=self.parse_listing)
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

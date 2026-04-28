@@ -14,7 +14,6 @@ class NetherlandsRvoSpider(NetherlandsBaseSpider):
 
     country = '荷兰'
     allowed_domains = ["english.rvo.nl", "rvo.nl", "www.rvo.nl"]
-    target_table = "nld_rvo"
     start_urls = ["https://english.rvo.nl/en/news"]
 
     def start_requests(self):
@@ -29,9 +28,8 @@ class NetherlandsRvoSpider(NetherlandsBaseSpider):
             if "/en/news/" not in href:
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:

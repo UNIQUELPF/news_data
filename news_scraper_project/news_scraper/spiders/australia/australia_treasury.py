@@ -16,7 +16,6 @@ class AustraliaTreasurySpider(AustraliaBaseSpider):
 
     country = '澳大利亚'
     allowed_domains = ["treasury.gov.au", "www.treasury.gov.au"]
-    target_table = "aus_treasury"
     start_urls = [
         "https://treasury.gov.au/publication",
     ]
@@ -28,11 +27,10 @@ class AustraliaTreasurySpider(AustraliaBaseSpider):
     def parse_listing(self, response):
         for href in response.css('a[href*="/publication/"]::attr(href)').getall():
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             if not self._should_fetch_url(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):

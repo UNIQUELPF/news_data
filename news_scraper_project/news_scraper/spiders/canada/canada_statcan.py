@@ -11,16 +11,14 @@ class CanadaStatcanSpider(CanadaBaseSpider):
 
     country = '加拿大'
     allowed_domains = []
-    target_table = "can_statcan"
     start_urls = ["https://www150.statcan.gc.ca/n1/dai-quo/index-eng.htm"]
 
     def parse(self, response):
         emitted = 0
         for href in response.css('a[href*="/daily-quotidien/"]::attr(href)').getall():
             url = response.urljoin(href)
-            if url in self.seen_urls:
+            if not self.should_process(url):
                 continue
-            self.seen_urls.add(url)
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
             if emitted >= 12:

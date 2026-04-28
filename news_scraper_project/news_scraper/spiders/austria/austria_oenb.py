@@ -20,7 +20,6 @@ class AustriaOenbSpider(AustriaBaseSpider):
 
     country = '奥地利'
     allowed_domains = ["oenb.at", "www.oenb.at"]
-    target_table = "aut_oenb"
     start_urls = [
         "https://www.oenb.at/Presse.html",
     ]
@@ -33,25 +32,22 @@ class AustriaOenbSpider(AustriaBaseSpider):
         links = response.css('a[href*="/Presse/Pressearchiv/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if not full_url.endswith(".html") or full_url in self.seen_urls:
+            if not full_url.endswith(".html") or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         archive_page = response.css('a[href*="/Presse/Pressearchiv.html"]::attr(href)').get()
         if archive_page:
             full_archive = response.urljoin(archive_page)
-            if full_archive not in self.seen_urls:
-                self.seen_urls.add(full_archive)
+            if self.should_process(full_archive):
                 yield scrapy.Request(full_archive, callback=self.parse_archive)
 
     def parse_archive(self, response):
         links = response.css('a[href*="/Presse/Pressearchiv/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if not full_url.endswith(".html") or full_url in self.seen_urls:
+            if not full_url.endswith(".html") or not self.should_process(full_url):
                 continue
-            self.seen_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
