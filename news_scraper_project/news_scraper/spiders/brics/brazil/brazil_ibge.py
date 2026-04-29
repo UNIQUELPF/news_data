@@ -1,42 +1,26 @@
-# 巴西ibge爬虫，负责抓取对应站点、机构或栏目内容。
-
-from datetime import datetime
-
 import scrapy
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class BrazilIBGESpider(scrapy.Spider):
+class BrazilIBGESpider(SmartSpider):
     name = "brazil_ibge"
-
     country_code = 'BRA'
-
     country = '巴西'
     allowed_domains = ["agenciadenoticias.ibge.gov.br"]
     target_table = "bra_ibge"
 
-    def __init__(self, *args, **kwargs):
-        super(BrazilIBGESpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.start_index = 0
-        self.base_url = "https://agenciadenoticias.ibge.gov.br/agencia-noticias.html?start={}"
-        
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
-            self.logger.info(f"Using cutoff date: {self.cutoff_date}")
-        except Exception as e:
-            self.logger.warning(f"Error fetching max date from DB: {e}")
+    # SmartSpider Settings
+    use_curl_cffi = False
+    playwright = True
+    custom_settings = {
+        "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    }
+    language = 'pt'
+    source_timezone = 'America/Sao_Paulo'
+    fallback_content_selector = "article.item-page" # Generic article wrapper
 
     def start_requests(self):
-        yield scrapy.Request(url=self.base_url.format(self.start_index), callback=self.parse_list)
+        url = "https://agenciadenoticias.ibge.gov.br/agencia-noticias.html?start=0"
+        yield scrapy.Request(url=url, callback=self.parse_list, dont_filter=True, meta={'start_index': 0})
 
     def parse_list(self, response):
         items = response.css('.lista-noticias__texto')
@@ -44,66 +28,64 @@ class BrazilIBGESpider(scrapy.Spider):
             self.logger.info("No more items found on list page.")
             return
 
-        stop_crawling = False
-        parsed_any = False
-        
+        has_valid_item_in_window = False
+
         for item in items:
             link = item.css('a::attr(href)').get()
-            if link:
-                url = response.urljoin(link)
-                # date extraction on list page to check cutoff
-                date_str = item.css('.lista-noticias__data::text').get()
-                if date_str:
-                    try:
-                        pub_date = datetime.strptime(date_str.strip(), "%d/%m/%Y")
-                        if pub_date < self.cutoff_date:
-                            self.logger.info(f"Reached cutoff date on list page: {pub_date}")
-                            stop_crawling = True
-                            continue # Skip yielding request for this old item
-                    except Exception as e:
-                        self.logger.error(f"Failed to parse list date {date_str}: {e}")
+            if not link:
+                continue
+                
+            url = response.urljoin(link)
+            
+            raw_time = item.css('.lista-noticias__data::text').get()
+            if not raw_time:
+                self.logger.warning(f"Missing date in listing for {url}")
+                continue
+                
+            # Date format: 28/04/2026
+            import dateparser
+            parsed_date = dateparser.parse(raw_time.strip(), settings={'DATE_ORDER': 'DMY'})
+            if not parsed_date:
+                self.logger.error(f"STRICT STOP: Could not parse date {raw_time}. Breaking to avoid backfill.")
+                break
+                
+            publish_time = self.parse_to_utc(parsed_date)
+            
+            if self.should_process(url, publish_time):
+                has_valid_item_in_window = True
+                meta_dict = {'publish_time_hint': publish_time}
+                if getattr(self, 'playwright', False):
+                    meta_dict['playwright'] = True
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
 
-                parsed_any = True
-                yield scrapy.Request(url, callback=self.parse_detail)
-
-        # Increment pagination if we didn't hit cutoff and parsed at least one item
-        if not stop_crawling and parsed_any:
-            self.start_index += 20
-            yield scrapy.Request(url=self.base_url.format(self.start_index), callback=self.parse_list)
+        if has_valid_item_in_window:
+            start_index = response.meta.get('start_index', 0) + 20
+            next_url = f"https://agenciadenoticias.ibge.gov.br/agencia-noticias.html?start={start_index}"
+            yield scrapy.Request(url=next_url, callback=self.parse_list, dont_filter=True, meta={'start_index': start_index})
 
     def parse_detail(self, response):
-        item = NewsItem()
-        item['url'] = response.url
-        item['language'] = 'Portuguese'
-        
-        raw_title = (response.css('meta[property="og:title"]::attr(content)').get() or response.css('h2::text').get() or "").strip()
-        item['title'] = raw_title.replace(" | Agência de Notícias", "").strip()
-        
-        date_str = response.css('meta[property="article:published_time"]::attr(content)').get()
-        if date_str:
-            try:
-                pub_time = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                item['publish_time'] = pub_time
-                if pub_time < self.cutoff_date:
-                    return
-            except ValueError:
-                item['publish_time'] = None
-        else:
-            item['publish_time'] = None
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="//meta[@property='article:published_time']/@content"
+        )
+        if not item:
+            return
 
-        paragraphs = response.css('.texto--single p::text').getall()
-        if not paragraphs:
-            paragraphs = response.css('.mod-articles-category-introtext::text').getall()
-            
-        item['content'] = "\n".join([p.strip() for p in paragraphs if p.strip()])
-        
+        # Ensure correct og:image extraction
+        featured_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if featured_image:
+            current_images = item.get('images') or []
+            if featured_image not in current_images:
+                item['images'] = [featured_image] + current_images
+            elif current_images[0] != featured_image:
+                current_images.remove(featured_image)
+                item['images'] = [featured_image] + current_images
+
+        # Author refinement
         author_text = response.css('.metadados--single b::text').get()
         if author_text:
             item['author'] = author_text.replace('|', '').strip()
         else:
-            item['author'] = ""
-
-        if not item['title'] or not item['content']:
-            return
+            item['author'] = item.get('author') or "IBGE"
 
         yield item
