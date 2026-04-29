@@ -1,202 +1,89 @@
-# 埃塞俄比亚addischamber爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-import dateparser
-import psycopg2
-import scrapy
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
-
-
-class EthiopiaAddisChamberSpider(scrapy.Spider):
+class EthiopiaAddisChamberSpider(SmartSpider):
     name = "ethiopia_addischamber"
-
     country_code = 'ETH'
-
     country = '埃塞俄比亚'
     allowed_domains = ["addischamber.com"]
     target_table = "ethi_addischamber"
     
+    language = 'en'
+    source_timezone = 'Africa/Cairo' # Ethiopia is UTC+3
+    fallback_content_selector = ".entry-content, article, .elementor-widget-theme-post-content, #main"
+
     custom_settings = {
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        }
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, *args, **kwargs):
-        super(EthiopiaAddisChamberSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = self._init_db()
-        self.logger.info(f"Spider initialized. Cutoff date set to: {self.cutoff_date}")
-        self.scraped_urls = set()
-
-    def _init_db(self):
-        try:
-            db_settings = POSTGRES_SETTINGS.copy()
-            if 'database' in db_settings:
-                db_settings['dbname'] = db_settings.pop('database')
-            elif 'db' in db_settings:
-                db_settings['dbname'] = db_settings.pop('db')
-                
-            conn = psycopg2.connect(**db_settings)
-            cur = conn.cursor()
-            
-            cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(500),
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    content TEXT,
-                    url VARCHAR(500) UNIQUE,
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-            
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as e:
-            self.logger.error(f"Database init error: {e}")
-            return datetime(2026, 1, 1)
-
     def start_requests(self):
-        base_url = "https://addischamber.com/news/"
-        yield scrapy.Request(
-            url=base_url,
-            callback=self.parse_list,
-            meta={'page': 1, 'base_url': base_url}
-        )
+        url = "https://addischamber.com/news/"
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
+
+    def _extract_date(self, text):
+        if not text:
+            return None
+        # Match "Jan 1, 2024" or "January 1, 2024"
+        match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', text)
+        if match:
+            import dateparser
+            return dateparser.parse(match.group(), settings={'TIMEZONE': 'UTC'})
+        return None
 
     def parse_list(self, response):
-        page = response.meta['page']
-        has_older_articles = False
-        new_items_found = 0
-        
         blocks = response.css('div.ultp-block-item')
         if not blocks:
-            # Fallback wrapper
-            blocks = response.css('article')
-            
+            self.logger.warning(f"No blocks found on {response.url}")
+            return
+
+        has_valid_item_in_window = False
         for block in blocks:
-            # Try getting title block first or any A tag
             a_tag = block.css('h3 a, .ultp-block-title a, h2 a')
             if not a_tag:
-                a_tag = block.css('a')
-                
-            if not a_tag:
                 continue
                 
-            url_fragment = a_tag.attrib.get('href')
-            if not url_fragment:
+            href = a_tag.attrib.get('href', '')
+            if not href or '/category/' in href or '/news/' == href.strip('/') or href.endswith('/news/'):
                 continue
-                
-            full_url = response.urljoin(url_fragment)
-            if full_url in self.scraped_urls:
-                continue
-            self.scraped_urls.add(full_url)
+
+            url = response.urljoin(href)
             
-            # Get date
-            date_str = None
-            text_content = block.xpath('.//text()').getall()
-            for txt in text_content:
-                txt = txt.strip()
-                if re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', txt):
-                    date_str = txt
-                    break
-            
-            pub_time = None
-            if date_str:
-                parsed = dateparser.parse(date_str, settings={'TIMEZONE': 'UTC'})
-                if parsed:
-                    pub_time = parsed
-                    
-            if pub_time and pub_time.replace(tzinfo=None) < self.cutoff_date.replace(tzinfo=None):
-                self.logger.debug(f"Article older than cutoff: {full_url}")
-                has_older_articles = True
-                continue
-                
-            new_items_found += 1
-            yield scrapy.Request(
-                url=full_url,
-                callback=self.parse_article,
-                meta={'pub_time': pub_time}
-            )
+            # Extract date from block text
+            date_text = "".join(block.xpath('.//text()').getall())
+            publish_time = self._extract_date(date_text)
+            publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
 
-        # Pagination
-        if not has_older_articles and new_items_found > 0:
-            next_page = page + 1
-            next_url = f"https://addischamber.com/news/page/{next_page}/"
-            yield scrapy.Request(
-                url=next_url,
-                callback=self.parse_list,
-                meta={'page': next_page}
-            )
-        else:
-            self.logger.info("Cutoff reached or no new items found. Stop pagination.")
+            if self.should_process(url, publish_time_utc):
+                has_valid_item_in_window = True
+                meta_dict = {'publish_time_hint': publish_time_utc}
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
 
-    def parse_article(self, response):
-        title = response.css('h1::text, h1.entry-title::text, .elementor-heading-title::text').get()
-        if not title:
-            # try finding h1 anyway with soup inside scrapy logic or any title block
-            title = response.css('title::text').get()
-            if title:
-                title = title.split('|')[0].strip()
-        if not title:
-            self.logger.warning(f"No title found for {response.url}")
-            return
-        title = title.strip()
+        if has_valid_item_in_window:
+            page = response.meta.get('page', 1)
+            if page < 50: # safety limit
+                next_page = page + 1
+                next_url = f"https://addischamber.com/news/page/{next_page}/"
+                yield scrapy.Request(next_url, callback=self.parse_list, meta={'page': next_page})
 
-        pub_time = response.meta.get('pub_time')
-        if not pub_time:
-            # Fallback english date on page
-            content_texts = response.xpath('//text()').getall()
-            for txt in content_texts:
-                match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', txt.strip())
-                if match:
-                    parsed = dateparser.parse(match.group(), settings={'TIMEZONE': 'UTC'})
-                    if parsed:
-                        pub_time = parsed
-                        break
-            if not pub_time:
-                pub_time = datetime.now()
-                
-        if pub_time.replace(tzinfo=None) < self.cutoff_date.replace(tzinfo=None):
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[contains(@class, 'entry-title')]/text() | //h1/text()",
+            publish_time_xpath=None # Handled by hint or auto
+        )
+        
+        if not item['publish_time']:
+            # Try extracting from detail page text if hint missing
+            all_text = "".join(response.xpath("//body//text()").getall()[:2000])
+            item['publish_time'] = self.parse_to_utc(self._extract_date(all_text))
+
+        # Stop processing if older than cutoff (unless full_scan)
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
             return
 
-        # Extract content
-        pars = response.css('.entry-content p::text, article p::text, .elementor-widget-theme-post-content p::text').getall()
-        if not pars:
-            # Just default to all paragraph tags but avoid footers
-            pars = response.xpath('//p[not(ancestor::footer)]//text()').getall()
-            
-        content = " ".join([p.strip() for p in pars if p.strip()])
-        if not content:
-            self.logger.warning(f"No content found for {response.url}")
-            return
-
-        author = "Addis Chamber"
-        yield {
-            'title': title,
-            'publish_time': pub_time.replace(tzinfo=None),
-            'author': author,
-            'content': content,
-            'url': response.url,
-            'language': 'en',
-            'section': 'News'
-        }
+        item['author'] = "Addis Chamber"
+        yield item

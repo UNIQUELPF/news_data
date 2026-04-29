@@ -1,211 +1,163 @@
-# 埃塞俄比亚ebc爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-import dateparser
-import psycopg2
-import scrapy
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
-
-
-class EthiopiaEBCSpider(scrapy.Spider):
+class EthiopiaEBCSpider(SmartSpider):
     name = "ethiopia_ebc"
-
     country_code = 'ETH'
-
     country = '埃塞俄比亚'
     allowed_domains = ["ebc.et"]
     target_table = "ethi_ebc"
     
+    language = 'am' # Amharic
+    source_timezone = 'Africa/Cairo' # Ethiopia is UTC+3
+    fallback_content_selector = ".post-content, .article-content, .description, #main-content"
+
     custom_settings = {
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        }
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, *args, **kwargs):
-        super(EthiopiaEBCSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = self._init_db()
-        self.logger.info(f"Spider initialized. Cutoff date set to: {self.cutoff_date}")
-        self.scraped_urls = set()
-
-    def _init_db(self):
-        try:
-            db_settings = POSTGRES_SETTINGS.copy()
-            if 'database' in db_settings:
-                db_settings['dbname'] = db_settings.pop('database')
-            elif 'db' in db_settings:
-                db_settings['dbname'] = db_settings.pop('db')
-                
-            conn = psycopg2.connect(**db_settings)
-            cur = conn.cursor()
-            
-            cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(500),
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    content TEXT,
-                    url VARCHAR(500) UNIQUE,
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-            
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as e:
-            self.logger.error(f"Database init error: {e}")
-            return datetime(2026, 1, 1)
-
     def start_requests(self):
-        base_cat_url = "https://www.ebc.et/Home/CategorialNews?CatId=3"
-        yield scrapy.Request(
-            url=base_cat_url,
-            callback=self.parse_list,
-            meta={'page': 1, 'base_url': base_cat_url}
-        )
+        # CatId=3 is usually News
+        url = "https://www.ebc.et/Home/CategorialNews?CatId=3"
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
+
+    def _extract_date(self, text):
+        if not text:
+            return None
+            
+        # Amharic month mapping (Ethiopian Calendar)
+        # 1: መስከረም, 2: ጥቅምት, 3: ኅዳር, 4: ታኅሣሥ, 5: ጥር, 6: የካቲት, 7: መጋቢት, 8: ሚያዝያ, 9: ግንቦት, 10: ሰኔ, 11: ሐምሌ, 12: ነሐሴ
+        amharic_months = {
+            'መስከረም': 9, 'ጥቅምት': 10, 'ኅዳር': 11, 'ታኅሣሥ': 12, 'ጥር': 1, 'የካቲት': 2, 'መጋቢት': 3, 'ሚያዝያ': 4, 'ግንቦት': 5, 'ሰኔ': 6, 'ሐምሌ': 7, 'ነሐሴ': 8
+        }
+        
+        # Strategy 1: Check for Amharic months and Ethiopian year
+        for am_month, m_num in amharic_months.items():
+            if am_month in text:
+                year_match = re.search(r'(20\d{2})', text)
+                day_match = re.search(r'\b(\d{1,2})\b', text)
+                if year_match and day_match:
+                    try:
+                        eyear = int(year_match.group(1))
+                        eday = int(day_match.group(1))
+                        # Ethiopian to Gregorian approximation: Add 8 years and 4 months
+                        # This is accurate enough for ordering and Panic Break
+                        return datetime(eyear + 8, m_num, eday)
+                    except:
+                        pass
+
+        # Strategy 2: Look for image path date pattern /2026/4/29/
+        # LIMIT this to specific strings, not the whole body text
+        img_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', text)
+        if img_match:
+            try:
+                return datetime(int(img_match.group(1)), int(img_match.group(2)), int(img_match.group(3)))
+            except:
+                pass
+
+        # Strategy 3: Match standard English format (fallback)
+        match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', text)
+        if match:
+            import dateparser
+            return dateparser.parse(match.group(), settings={'TIMEZONE': 'UTC'})
+        return None
 
     def parse_list(self, response):
-        page = response.meta['page']
-        base_cat_url = response.meta['base_url']
-        
-        has_older_articles = False
-        new_items_found = 0
-        
-        # In EBC list, links are like <a href="/Home/NewsDetails?NewsId=...">
-        # They are usually contained inside some div. We will extract all unique hrefs and try to guess their date
-        links = response.css('a[href*="NewsDetails?NewsId="]')
-        
-        # We group by href
-        for link in links:
-            url_fragment = link.attrib.get('href')
-            if not url_fragment:
-                continue
-                
-            full_url = response.urljoin(url_fragment)
-            
-            if full_url in self.scraped_urls:
-                continue
-                
-            # Find the closest parent block to scrape date text from
-            parent_block = link.xpath('ancestor::div[contains(@class, "type-post") or contains(@class, "post") or contains(@class, "card") or contains(@class, "row") or contains(@class, "item")]')[0] if link.xpath('ancestor::div[contains(@class, "type-post") or contains(@class, "post") or contains(@class, "card") or contains(@class, "row") or contains(@class, "item")]') else None
-            
-            date_str = None
-            if parent_block:
-                text_content = parent_block.xpath('.//text()').getall()
-                for txt in text_content:
-                    txt = txt.strip()
-                    # Example: Mar 18, 2026 or 18 Mar 2026
-                    if re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', txt):
-                        date_str = txt
-                        break
-            
-            pub_time = None
-            if date_str:
-                parsed = dateparser.parse(date_str, settings={'TIMEZONE': 'UTC'})
-                if parsed:
-                    pub_time = parsed
-                    
-            if pub_time and pub_time.replace(tzinfo=None) < self.cutoff_date.replace(tzinfo=None):
-                self.logger.debug(f"Article {full_url} older than cutoff {self.cutoff_date}")
-                self.scraped_urls.add(full_url)
-                has_older_articles = True
-                continue
-                
-            self.scraped_urls.add(full_url)
-            new_items_found += 1
-            
-            title_text = " ".join([txt.strip() for txt in link.xpath('.//text()').getall() if txt.strip()])
-            
-            yield scrapy.Request(
-                url=full_url,
-                callback=self.parse_article,
-                meta={'pub_time': pub_time, 'title': title_text}
-            )
-            
-        # Check if there's a next page link
-        next_page = response.css(f'a.page-link[href*="page={page+1}"]::attr(href)').get()
-        if not next_page:
-           next_page = f"/Home/CategorialNews?CatId=3&page={page+1}"
+        posts = response.css('article.post')
+        if not posts:
+            self.logger.warning(f"No news posts found on {response.url}")
+            return
 
-        if not has_older_articles and new_items_found > 0:
-            next_url = response.urljoin(next_page)
-            yield scrapy.Request(
-                url=next_url,
-                callback=self.parse_list,
-                meta={'page': page + 1, 'base_url': base_cat_url}
-            )
+        seen_urls = response.meta.get('seen_urls', set())
+        new_urls_on_this_page = 0
+        has_valid_item_in_window = False
+        
+        for post in posts:
+            link_el = post.css('a[href*="NewsDetails?NewsId="]')
+            if not link_el:
+                continue
+                
+            href = link_el.attrib.get('href')
+            url = response.urljoin(href)
+            
+            if url not in seen_urls:
+                new_urls_on_this_page += 1
+                seen_urls.add(url)
+            
+            # Extract date from image src WITHIN this post card
+            img_src = post.css('img::attr(src)').get() or ""
+            # Also check text just in case
+            date_text = "".join(post.xpath('.//text()').getall())
+            
+            publish_time = self._extract_date(img_src) or self._extract_date(date_text)
+            publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
+
+            if self.should_process(url, publish_time_utc):
+                has_valid_item_in_window = True
+                meta_dict = {'publish_time_hint': publish_time_utc}
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
+
+        if has_valid_item_in_window and new_urls_on_this_page > 0:
+            page = response.meta.get('page', 1)
+            if page < 100: # Safety limit
+                next_page = page + 1
+                next_url = f"https://www.ebc.et/Home/CategorialNews?CatId=3&page={next_page}"
+                yield scrapy.Request(
+                    next_url, 
+                    callback=self.parse_list, 
+                    meta={'page': next_page, 'seen_urls': seen_urls}
+                )
         else:
-            self.logger.info("Cutoff reached or no new items found. Stop pagination.")
+            if new_urls_on_this_page == 0:
+                self.logger.info(f"Duplicate page detected at page {response.meta.get('page', 1)}. Stopping pagination.")
+            else:
+                self.logger.info(f"No more valid items in window. Stopping pagination.")
 
-    def parse_article(self, response):
-        title = response.meta.get('title')
-        if not title:
-            title_elems = response.css('.post-title::text, h1.post-title::text').getall()
-            title = " ".join([t.strip() for t in title_elems if t.strip()])
-            if not title:
-                title = response.css('h1::text').get()
-        if not title:
-            return
-        title = title.strip()
-
-        pub_time = response.meta.get('pub_time')
-        if not pub_time:
-            # Maybe the list page date extraction failed.
-            # Try parsing any english date on the detail page as fallback.
-            content_texts = response.xpath('//text()').getall()
-            for txt in content_texts:
-                if "202" in txt:
-                    match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, 20\d\d', txt.strip())
-                    if match:
-                        parsed = dateparser.parse(match.group(), settings={'TIMEZONE': 'UTC'})
-                        if parsed:
-                            pub_time = parsed
-                            break
-            # if still no pub_time, try extracting amharic date? EBC uses ethiopian calendar so ignore and fallback to now.
-            if not pub_time:
-                pub_time = datetime.now()
-                
-        if pub_time.replace(tzinfo=None) < self.cutoff_date.replace(tzinfo=None):
-            return
-
-        pars = response.css('.post-content p::text, .article-content p::text, .description p::text').getall()
-        if not pars:
-            pars = response.xpath('//div[contains(@class, "post-content")]//text()').getall()
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//meta[@property='og:title']/@content",
+        )
+        
+        # Ensure the main image is captured
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if not item.get('images'):
+                item['images'] = []
+            if og_image not in item['images']:
+                item['images'].insert(0, og_image)
+        
+        # Secondary date check on detail page if list missed it
+        if not item['publish_time']:
+            # ONLY check the featured image and main content for date, 
+            # to avoid picking up dates from sidebars
+            og_image = response.xpath("//meta[@property='og:image']/@content").get()
+            featured_img = response.css('.featured-image img::attr(src), .post-content img::attr(src)').get()
+            all_text = "".join(response.xpath("//body//text()").getall()[:2000])
             
-        content = " ".join([p.strip() for p in pars if p.strip()])
-        if not content:
+            # Priority: Featured Image URL > Content Text
+            item['publish_time'] = self.parse_to_utc(
+                self._extract_date(og_image) or 
+                self._extract_date(featured_img) or 
+                self._extract_date(all_text)
+            )
+
+        # Determine language based on content (Amharic vs English)
+        text_for_lang = (item.get('title') or '') + (item.get('content_plain') or '')
+        if re.search(r"[\u1200-\u137F]", text_for_lang):
+            item['language'] = 'am'
+        else:
+            item['language'] = 'en'
+
+        # Stop processing if older than cutoff (unless full_scan)
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
             return
 
-        author = "EBC"
-        author_elem = response.css('.author::text, .writer::text').get()
-        if author_elem:
-           author = author_elem.strip()
-
-        yield {
-            'title': title,
-            'publish_time': pub_time.replace(tzinfo=None),
-            'author': author,
-            'content': content,
-            'url': response.url,
-            'language': 'am',  # the site is in Amharic
-            'section': 'News'
-        }
+        item['author'] = response.css('.author::text, .writer::text').get() or "EBC"
+        item['country_code'] = self.country_code
+        item['country'] = self.country
+        yield item

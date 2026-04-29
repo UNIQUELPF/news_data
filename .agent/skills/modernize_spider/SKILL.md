@@ -1,29 +1,29 @@
-# Skill: News Spider V2 Modernization
+# Skill: 新闻爬虫 V2 现代化改造指南 (News Spider V2 Modernization)
 
-## Description
-This skill is used to refactor legacy news scraping spiders into the modernized SmartSpider V2 architecture. It automates the migration from old-style Scrapy spiders to a unified, intelligent, and incremental framework.
+## 描述 (Description)
+此技能用于将传统的旧版新闻爬虫重构为现代化的 `SmartSpider` V2 架构。它实现了从老式 Scrapy 爬虫向统一、智能、增量式框架的自动化迁移。
 
-## Goal
-To ensure all news spiders follow the standardized V2 architecture, including proper UTC time handling, TLS impersonation (curl-cffi), and automatic content extraction while preserving existing validated selectors.
+## 目标 (Goal)
+确保所有新闻爬虫遵循标准化的 V2 架构，包括：正确的 UTC 时间处理、TLS 指纹模拟 (curl-cffi)、以及在保留原有验证选择器的基础上实现自动正文提取。
 
-## Instructions
+## 核心指令 (Instructions)
 
-### 1. Class Foundation
-- **Inherit**: `news_scraper.spiders.smart_spider.SmartSpider`.
-- **Metadata**: Define the following class attributes:
-  - `source_timezone`: (e.g., 'Europe/Sarajevo')
-  - `country_code`: 3-letter ISO code.
-  - `country`: Chinese name of the country.
-  - `language`: 2-letter language code.
-- **TLS Protection**: Always set `use_curl_cffi = True`.
+### 1. 类定义基础 (Class Foundation)
+- **继承**: `news_scraper.spiders.smart_spider.SmartSpider`。
+- **元数据**: 必须定义以下类属性：
+  - `source_timezone`: (例如 'Europe/Sarajevo' 或 'Africa/Cairo')
+  - `country_code`: 3位 ISO 国家代码。
+  - `country`: 国家的中文名称。
+  - `language`: 2位语言代码。
+- **TLS 防护**: 始终设置 `use_curl_cffi = True`。
 
-### 2. Request Handling
-- **Async Start**: Use `async def start(self)` instead of `start_urls`.
+### 2. 请求处理 (Request Handling)
+- **异步启动**: 使用 `async def start(self)` 代替 `start_urls`。
   ```python
   async def start(self):
       yield scrapy.Request(url, callback=self.parse, dont_filter=True)
   ```
-- **Custom Settings**: Standardize to include (unless site needs specific tuning):
+- **自定义设置**: 除非站点有特殊需求，否则统一包含以下配置：
   ```python
   custom_settings = {
       "CONCURRENT_REQUESTS": 2, 
@@ -32,61 +32,45 @@ To ensure all news spiders follow the standardized V2 architecture, including pr
   }
   ```
 
-### 3. Efficient Research Rules
-- **CURL First**: Always use `curl` (with `-H "User-Agent: ..."` and `-L`) to inspect HTML. Do NOT waste time with browser subagents unless strictly necessary for JS-heavy sites.
-- **Human Intervention**: If `curl` returns empty/403 despite basic header spoofing, **STOP** and ask the USER for HTML source or manual inspection. Do not guess.
-- **Preserve Existing Success**: If the original spider has accurate listing selectors, **DO NOT change them**. Only wrap them with the new date/panic logic.
+### 3. 高效调研规则 (Efficient Research Rules)
+- **CURL 优先**: 始终先使用 `curl`（配合 `-H "User-Agent: ..."` 和 `-L`）检查 HTML 源码。**除非** 站点高度依赖 JS 渲染，否则不要浪费时间使用浏览器代理。
+- **人工干预**: 如果简单的 Header 伪装后 `curl` 仍返回空或 403，请**停止**盲目尝试，直接向用户索要 HTML 源码或手动检查。禁止胡乱猜测。
+- **保留成功经验**: 如果原爬虫的列表页选择器是准确的，**严禁随意更改**。只需在其基础上封装新的日期/熔断逻辑即可。
 
-### 4. Standard Verification Checklist (The 7-Points)
-Before finishing a spider, verify these points and output them in the final report:
-1.  **Listing Container**: Is the listing area precisely restricted (e.g. `.news-list`) to avoid sidebar noise?
-2.  **Date Selector (Listing)**: Does it successfully extract dates for all listing items?
-3.  **Date Order (DMY/MDY)**: Is `DATE_ORDER` correctly set for the target country (e.g. 'DMY' for Europe)?
-4.  **Panic Break**: Does the spider use `return` (not `break`) to terminate the entire pagination chain on date failure?
-5.  **Pagination Reliability**: Is `dont_filter=True` applied to the initial and all pagination requests?
-6.  **Incremental Window**: Does the pagination correctly stop when hitting the historical floor?
-7.  **Detail Selector**: Is the article body extraction precise and free of sidebar/footer clutter?
+### 4. 标准验证清单 (7点检查法)
+在完成一个爬虫前，必须验证以下 7 点：
+1.  **列表容器**: 列表区域是否被精确锁定（例如 `.news-list`），以排除侧边栏干扰？
+2.  **日期选择器 (列表页)**: 是否能成功提取所有列表项的日期？
+3.  **日期格式 (DMY/MDY)**: `DATE_ORDER` 是否根据目标国家正确设置（例如欧洲通常为 'DMY'）？
+4.  **熔断机制 (Panic Break)**: 当日期提取失败时，爬虫是否使用 `return`（而非 `break`）来终止整个翻页链？
+5.  **翻页可靠性**: 初始请求和所有分页请求是否都设置了 `dont_filter=True`？
+6.  **增量窗口**: 翻页是否在触达历史截止时间（Cutoff）后正确停止？
+7.  **详情页选择器**: 文章正文提取是否精确，是否剔除了侧边栏和页脚杂质？
 
-### 5. Listing Page Logic (Incremental)
-- **Request Reliability**:
-  - **Always set `dont_filter=True`** for the initial `start_urls` request and all subsequent pagination (`page=N`) requests. This ensures the spider always checks for new content even if the index URL was seen in a previous run.
-- **Date Extraction Strategy**:
-  - **Machine-Readable First**: If a `<time>` tag exists, prioritize the `datetime` attribute (ISO format) over visible text.
-  - **XPath Case-Sensitivity Warning**: Modern JS frameworks (React/Next.js) often render standard HTML5 attributes in camelCase (e.g., `dateTime` instead of `datetime`). Scrapy's XPath via LXML is strictly case-sensitive. Always check raw `curl` HTML output and use defensive XPaths like `//@dateTime | //@datetime`.
-  - **Preserve Existing Success**: If the original spider already has accurate listing selectors or link extraction logic, **DO NOT change them arbitrarily**. Only wrap them with the new date-parsing and "Panic Break" logic. Avoid re-debugging what was already working.
-  - **Precise Listing Container**: Never search for `article` tags globally on a listing page. 
-  - **Mandatory for Listing**: Date extraction on the listing page is **mandatory** to enable early-stopping. If missing, log a `self.logger.warning`.
-- **Time Parsing**: 
-  - **IMPORTANT**: If the existing spider has a working XPath/CSS selector or a custom parsing function (e.g., `parse_az_date`) for the publication date, **preserve it**.
-  - **Dateparser ISO Conflict**: `dateparser` has a powerful internal auto-detect mechanism. Avoid explicitly passing `languages` or `settings={'DATE_ORDER': '...'}` unless strictly necessary for highly ambiguous formats. Forcing these settings will break standard ISO string parsing (e.g., `2026-04-27` fails under `DMY`).
-  - Convert source-specific date strings to UTC using `self.parse_to_utc()`.
-- **Filtering**: Use `if not self.should_process(url, publish_time): continue`.
-- **Pagination Control**: 
-  - **Incremental Safety**: Only proceed to the next page if `has_valid_item_in_window` is True.
-  - **Panic Break (Strict Gate)**: If `publish_time` cannot be extracted on the listing page, use `break` to stop the loop and prevent pagination. This is a safety measure against accidental full-site backfills if selectors fail.
-  - **Filtering**: Use `if not self.should_process(url, publish_time): continue`.
-- **Metadata Passing**: Pass the parsed time as `publish_time_hint` in the request meta.
-  ```python
-  yield scrapy.Request(url, callback=self.parse_detail, meta={'publish_time_hint': publish_time})
-  ```
+### 5. 列表页逻辑 (增量抓取)
+- **请求可靠性**:
+  - **初始请求和翻页请求必须设置 `dont_filter=True`**。这确保了即便索引 URL 在之前的任务中见过，爬虫依然会检查新内容。
+- **日期提取策略**:
+  - **机器码优先**: 如果存在 `<time>` 标签，优先提取 `datetime` 属性（ISO 格式）而非可见文本。
+  - **XPath 大小写敏感警告**: 现代 JS 框架（React/Next.js）常将标准 HTML5 属性渲染为驼峰式（如 `dateTime`）。Scrapy 的 XPath 极其敏感，请查看 `curl` 源码并使用防御性 XPath 如 `//@dateTime | //@datetime`。
+  - **列表页日期是强制要求**: 列表页日期提取是实现“早停”的关键。如果缺失，必须记录 `self.logger.warning`。
+- **时间解析**:
+  - **重要**: 如果原爬虫已有验证过的 XPath/CSS 选择器或自定义解析函数（如 `parse_az_date`），**请保留**。
+  - **Dateparser ISO 冲突**: `dateparser` 有强大的自动检测功能。除非格式极度模糊，否则避免显式传递 `languages` 或 `DATE_ORDER`。强制设置这些参数会导致标准 ISO 字符串解析失败（例如 `2026-04-27` 在 `DMY` 设置下会报错）。
+  - 使用 `self.parse_to_utc()` 将日期转为 UTC。
+- **翻页控制**:
+  - **Panic Break (严格准入)**: 如果列表页提取不到 `publish_time`，请使用 `break` 停止循环。这是防止在选择器失效时意外全站重爬的保护措施。
 
-### 6. Precise Content Extraction (Detail Page)
-- **The "Surgical" Selector Strategy**:
-  - **Avoid Fuzzy Selectors**: Do not use generic tags like `article` or `div.content` alone.
-  - **The "Master Wrapper"**: Identify the **smallest unique container** that wraps the title, the featured image, and the body text (e.g., `.main-content.s-post-contain`).
-  - **Single Selector Preference**: Set `fallback_content_selector` to this precise container. Avoid using comma-separated lists (OR logic) unless necessary for different page layouts, as it can lead to noisy extraction.
-- **Featured Image Integrity**: 
-  - Ensure the chosen selector covers the header/featured image area (often `.post-header`, `.featured-area`, or `.post-thumb`).
-  - **og:image Priority**: Automated engines like Trafilatura easily mistake side-panel ads (e.g., "Dinheiro 3D") as the main image. Always explicitly extract `//meta[@property='og:image']/@content` and **prepend** it to the `item['images']` list so it is strictly treated as the primary image. Do not merely use it as a fallback.
-  - **Frontend `[object Object]` Rendering Prevention**: Ensure that `item['images']` resolves to a list of plain strings (`['http...']`). If it's left as a dictionary (`[{'url': '...'}]`), it will render as `[object Object]` in the React frontend.
-- **Clutter Cleaning**: 
-  - Define `clutter_selectors` to remove "Read More", "Related Posts", and social share bars (e.g., `['.post-related', '.wa-post-read-next', 'aside']`).
+### 6. 精确内容提取 (详情页)
+- **“手术刀式”选择器策略**:
+  - **避免模糊选择**: 不要单独使用 `article` 或 `div.content` 等通用标签。
+  - **核心容器**: 锁定包裹标题、头图和正文的**最小唯一容器**（例如 `.main-content.s-post-contain`）。
+- **图片完整性**:
+  - **og:image 优先**: 自动提取引擎容易把侧边栏广告误认为头图。必须显式提取 `//meta[@property='og:image']/@content` 并将其**插入**到 `item['images']` 列表的最前面，确保其被视为首要封面图。
+  - **防止前端 `[object Object]` 错误**: 确保 `item['images']` 最终是一个纯字符串列表（`['http...']`）。如果留下了字典（`[{'url': '...'}]`），React 前端会渲染报错。
+- **去噪清洗**:
+  - 定义 `clutter_selectors` 来剔除“阅读更多”、“相关文章”和社交分享栏。
 
-### 7. Metadata & Detail Parsing
-- **Fidelity**: Detail parsing must use `self.auto_parse_item(response)`.
-- **Manual Overrides**: If `ContentEngine` misses metadata, manually set `item['author']`, `item['section']`, etc., in `parse_detail`.
-- **UTC Enforcement**: All timestamps must be converted to UTC ISO format with the `Z` suffix.
-
-### 8. Verification
-- **Log Monitoring**: Verify that pagination stops correctly when reaching the date window.
-- **Content Check**: Verify that `content_markdown` contains the main image and no sidebar clutter.
+### 7. 验证
+- **日志监控**: 验证翻页是否在触达日期窗口后正确停止。
+- **内容检查**: 验证 `content_markdown` 是否包含主图，且无侧边栏杂质。

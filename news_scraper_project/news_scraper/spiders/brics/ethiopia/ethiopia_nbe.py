@@ -1,217 +1,97 @@
-# 埃塞俄比亚nbe爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-import psycopg2
-import scrapy
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
-
-
-class EthiopiaNBESpider(scrapy.Spider):
+class EthiopiaNBESpider(SmartSpider):
     name = "ethiopia_nbe"
-
     country_code = 'ETH'
-
     country = '埃塞俄比亚'
     allowed_domains = ["nbe.gov.et"]
     target_table = "ethi_nbe"
+    
+    source_timezone = 'Africa/Cairo' # Ethiopia is UTC+3
+    fallback_content_selector = ".elementor-widget-theme-post-content, .entry-content, article, main"
 
     custom_settings = {
-        "ROBOTSTXT_OBEY": False,
+        "CONCURRENT_REQUESTS": 2,
         "DOWNLOAD_DELAY": 1.0,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
-        "DEFAULT_REQUEST_HEADERS": {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        },
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, *args, **kwargs):
-        super(EthiopiaNBESpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = self._init_db()
-        self.seen_urls = set()
-        self.visited_list_pages = set()
-        self.logger.info(
-            f"Spider initialized. Cutoff date set to: {self.cutoff_date}"
-        )
-
-    def _init_db(self):
-        try:
-            db_settings = POSTGRES_SETTINGS.copy()
-            if "database" in db_settings:
-                db_settings["dbname"] = db_settings.pop("database")
-            elif "db" in db_settings:
-                db_settings["dbname"] = db_settings.pop("db")
-
-            conn = psycopg2.connect(**db_settings)
-            cur = conn.cursor()
-
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(500),
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    content TEXT,
-                    url VARCHAR(500) UNIQUE,
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            if state["source"] in ("unified", "legacy"):
-                now = datetime.now()
-                return datetime(now.year, now.month, now.day)
-
-            return datetime(2026, 1, 1)
-        except Exception as exc:
-            self.logger.error(f"Database init error: {exc}")
-            return datetime(2026, 1, 1)
-
     def start_requests(self):
-        start_url = "https://nbe.gov.et/all-news/"
-        self.visited_list_pages.add(start_url)
-        yield scrapy.Request(
-            url=start_url,
-            callback=self.parse_list,
-        )
+        url = "https://nbe.gov.et/all-news/"
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
 
     def parse_list(self, response):
-        links = response.css('a[href*="/nbe_news/"]::attr(href)').getall()
-        detail_urls = []
-        for link in links:
-            full_url = response.urljoin(link)
-            if full_url in self.seen_urls:
+        # Elementor typically uses these classes for posts
+        cards = response.css('article, .elementor-post')
+        if not cards:
+            # Fallback to simple links
+            links = response.css('a[href*="/nbe_news/"]::attr(href)').getall()
+            for link in list(dict.fromkeys(links)):
+                url = response.urljoin(link)
+                if self.should_process(url, None):
+                    yield scrapy.Request(url, callback=self.parse_detail)
+            return
+
+        has_valid_item_in_window = False
+        for card in cards:
+            link_el = card.css('a[href*="/nbe_news/"]::attr(href)').get()
+            if not link_el:
                 continue
-            if full_url not in detail_urls:
-                detail_urls.append(full_url)
+                
+            url = response.urljoin(link_el)
+            
+            # Try to extract date from the card
+            date_text = card.css('.elementor-post-date::text, .elementor-post-info__item--type-date::text, time::attr(datetime)').get()
+            
+            publish_time = None
+            if date_text:
+                import dateparser
+                publish_time = dateparser.parse(date_text, settings={'TIMEZONE': 'UTC'})
+            
+            publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
 
-        for detail_url in detail_urls:
-            yield scrapy.Request(
-                url=detail_url,
-                callback=self.parse_article,
-            )
+            if self.should_process(url, publish_time_utc):
+                has_valid_item_in_window = True
+                meta_dict = {'publish_time_hint': publish_time_utc}
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
 
-        pagination_links = response.css('a.page-numbers::attr(href)').getall()
-        for next_link in pagination_links:
-            next_url = response.urljoin(next_link)
-            if "/all-news/" not in next_url:
-                continue
-            if next_url in self.visited_list_pages:
-                continue
-            self.visited_list_pages.add(next_url)
-            yield scrapy.Request(next_url, callback=self.parse_list)
+        if has_valid_item_in_window:
+            pagination = response.css('a.page-numbers::attr(href)').getall()
+            for p_url in pagination:
+                if "/all-news/" in p_url:
+                    yield scrapy.Request(response.urljoin(p_url), callback=self.parse_list)
 
-    def parse_article(self, response):
-        title = response.css("h1::text, .elementor-heading-title::text").get()
-        if not title:
-            return
-        title = title.strip()
-
-        publish_time = self._extract_publish_time(response)
-        if not publish_time:
-            return
-
-        if publish_time < self.cutoff_date:
-            return
-
-        content_parts = response.css(
-            ".elementor-widget-theme-post-content p::text, "
-            ".entry-content p::text, "
-            "main p::text"
-        ).getall()
-        if not content_parts:
-            content_parts = response.xpath(
-                '//article//p//text() | //main//p//text()'
-            ).getall()
-
-        clean_parts = [part.strip() for part in content_parts if part and part.strip()]
-        content = "\n".join(clean_parts)
-        if not content:
-            return
-
-        language = "am" if self._contains_amharic(title + content) else "en"
-
-        yield {
-            "title": title,
-            "publish_time": publish_time,
-            "author": "National Bank of Ethiopia",
-            "content": content,
-            "url": response.url,
-            "language": language,
-            "section": "all-news",
-        }
-
-    def _extract_publish_time(self, response):
-        meta_date = response.css(
-            'meta[property="article:published_time"]::attr(content), '
-            'meta[property="og:updated_time"]::attr(content), '
-            'time::attr(datetime)'
-        ).get()
-        if meta_date:
-            parsed = self._parse_date_text(meta_date)
-            if parsed:
-                return parsed.replace(tzinfo=None)
-
-        text_blob = " ".join(
-            [text.strip() for text in response.xpath("//text()").getall() if text.strip()]
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//meta[@property='og:title']/@content | //h1/text()",
+            publish_time_xpath="//span[contains(@class, 'elementor-post-info__item--type-date')]//time/text() | //time/text()",
         )
+        
+        # Ensure the main image is captured
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if not item.get('images'):
+                item['images'] = []
+            if og_image not in item['images']:
+                item['images'].insert(0, og_image)
 
-        patterns = [
-            r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s*20\d{2}\b",
-            r"\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text_blob, re.IGNORECASE)
-            if not match:
-                continue
-            parsed = self._parse_date_text(match.group(0))
-            if parsed:
-                return parsed.replace(tzinfo=None)
-        return None
+        # Determine language based on content
+        text_for_lang = (item.get('title') or '') + (item.get('content_plain') or '')
+        if re.search(r"[\u1200-\u137F]", text_for_lang):
+            item['language'] = 'am'
+        else:
+            item['language'] = 'en'
 
-    @staticmethod
-    def _parse_date_text(date_text):
-        if not date_text:
-            return None
+        # Stop processing if older than cutoff (unless full_scan)
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
+            self.logger.info(f"Skipping old article: {response.url} (Date: {item['publish_time']})")
+            return
 
-        normalized = date_text.strip().replace("Z", "+00:00")
-        try:
-            return datetime.fromisoformat(normalized)
-        except ValueError:
-            pass
-
-        cleaned = re.sub(r"\s+\|.*$", "", normalized).strip()
-        formats = [
-            "%B %d, %Y",
-            "%b %d, %Y",
-            "%d %B %Y",
-            "%d %b %Y",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d",
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(cleaned, fmt)
-            except ValueError:
-                continue
-        return None
-
-    @staticmethod
-    def _contains_amharic(text):
-        return bool(re.search(r"[\u1200-\u137F]", text))
+        item['author'] = "National Bank of Ethiopia"
+        item['country_code'] = self.country_code
+        item['country'] = self.country
+        yield item
