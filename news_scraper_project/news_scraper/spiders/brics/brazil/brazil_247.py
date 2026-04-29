@@ -1,94 +1,92 @@
-# 巴西247爬虫，负责抓取对应站点、机构或栏目内容。
-
+# 巴西247爬虫，使用 V2 现代化架构 (Sitemap + Smart Extraction)
+import scrapy
 from datetime import datetime
-
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
+import pytz
+from news_scraper.spiders.smart_spider import SmartSpider
 from scrapy.spiders import SitemapSpider
 
-
-class Brazil247Spider(SitemapSpider):
+class Brazil247Spider(SitemapSpider, SmartSpider):
     name = "brazil_247"
-
     country_code = 'BRA'
-
     country = '巴西'
     allowed_domains = ["brasil247.com"]
     target_table = "bra_247"
     
+    # Using Sitemap for high-fidelity discovery
     sitemap_urls = ['https://www.brasil247.com/sitemaps/sitemap.xml']
     sitemap_rules = [
-        # Catch typical article paths, excluding irrelevant sections
-        (r'https://www.brasil247.com/(?!sitemaps|author|video|tv|blog|cultura|esportes)[a-z0-9-]+/.+', 'parse_detail'),
+        (r'/(?!sitemaps|author|video|tv|blog|cultura|esportes)[a-z0-9-]+/.+', 'parse_detail'),
     ]
 
+    # SmartSpider settings
+    use_curl_cffi = True
+    fallback_content_selector = "article.article__full"
+    language = 'pt'
+    source_timezone = 'America/Sao_Paulo'
+    
     def __init__(self, *args, **kwargs):
+        # Initialize both parents
         super(Brazil247Spider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
         
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
-            self.logger.info(f"Using cutoff date: {self.cutoff_date}")
-        except Exception as e:
-            self.logger.error(f"Error fetching max date from DB: {e}")
-
+    def start_requests(self):
+        """Ensure sitemap requests are never filtered by Redis."""
+        for url in self.sitemap_urls:
+            yield scrapy.Request(url, self._parse_sitemap, dont_filter=True)
+        
     def sitemap_filter(self, entries):
         """
-        Intercepts sitemap entries and skips any that are older than our cutoff.
-        This prevents Scrapy from blindly sending millions of HTTP GETs for 10-year-old articles.
+        Ultra-Fast Pre-filtering: 
+        Uses string comparison for ISO dates to avoid the massive overhead of dateparser
+        when processing 100k+ sitemap entries.
         """
-        cutoff_iso = self.cutoff_date.isoformat()
+        # Pre-format cutoff as string for lightning-fast comparison
+        cutoff_str = None
+        if hasattr(self, 'cutoff_date') and self.cutoff_date:
+            cutoff_str = self.cutoff_date.isoformat()
+
         for entry in entries:
             lastmod = entry.get('lastmod')
-            if lastmod:
-                # String comparison is highly efficient and works perfectly for ISO-8601
-                if lastmod >= cutoff_iso:
-                    yield entry
-            else:
-                yield entry
+            if lastmod and cutoff_str:
+                # ISO date strings (YYYY-MM-DD...) can be compared directly
+                if lastmod < cutoff_str:
+                    continue
+            yield entry
 
     def parse_detail(self, response):
-        item = NewsItem()
-        item['url'] = response.url
-        item['title'] = (response.css("h1.article__headline::text").get() or "").strip()
+        """
+        Parses the article detail page using standardized SmartSpider extraction.
+        """
+        # 1. Surgical extraction using Master Wrapper
+        item = self.auto_parse_item(
+            response, 
+            publish_time_xpath="//time[contains(@class, 'article__time')]/@dateTime | //time[contains(@class, 'article__time')]/@datetime | //time[contains(@class, 'article__time')]/text()"
+        )
         
-        paragraphs = response.css("article.article__full p::text").getall()
-        # Fallback if structure changes
-        if not paragraphs:
-            paragraphs = response.css("div.article__content p::text").getall()
+        if not item:
+            return
 
-        item['content'] = "\n".join([p.strip() for p in paragraphs if p.strip()])
-        
-        item['author'] = ""
-        item['language'] = 'Portuguese'
-        
-        # More reliable extraction from meta tag
-        date_str = response.xpath('//meta[@property="article:published_time"]/@content').get()
-        if date_str:
-            try:
-                # e.g. 2026-03-11T21:32:11Z
-                pub_time = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                item['publish_time'] = pub_time
-                if pub_time < self.cutoff_date:
-                    return
-            except ValueError:
-                item['publish_time'] = None
-        else:
-            item['publish_time'] = None
+        # 2. Manual Image Recovery & Prioritization (for og:image)
+        # ContentEngine sometimes picks up ads/logos (e.g. Dinheiro 3D).
+        # We must ensure the og:image is ALWAYS the primary (first) image.
+        featured_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if featured_image:
+            current_images = item.get('images') or []
+            if featured_image not in current_images:
+                item['images'] = [featured_image] + current_images
+            elif current_images[0] != featured_image:
+                # Move it to the front
+                current_images.remove(featured_image)
+                item['images'] = [featured_image] + current_images
 
-        author_tag = response.css("div.article__meta strong::text").get()
-        if author_tag:
-            item['author'] = author_tag.strip()
+        # 3. Metadata refinement
+        item['country'] = self.country
+        item['country_code'] = self.country_code
+        item['author'] = item.get('author') or "Brasil 247"
         
-        # Validate critical fields
-        if not item['title'] or not item['content']:
+        # 3. Incremental check (Sliding Window)
+        # For SitemapSpider, we check inside parse_detail
+        if not self.should_process(response.url, item.get('publish_time')):
+            self.logger.info(f"Skipping old article: {response.url}")
             return
 
         yield item

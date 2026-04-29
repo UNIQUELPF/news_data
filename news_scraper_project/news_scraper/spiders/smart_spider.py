@@ -219,18 +219,24 @@ class SmartSpider(scrapy.Spider):
             **content_data
         }
 
-        # 5. Intelligent Image Deduplication (Scheme A)
+        # 5. Intelligent Image Deduplication & Normalization
         # Prevent showing the same image twice if it's already in the body text
-        if item.get('images') and item.get('content'):
-            clean_images = []
-            body_text = str(item.get('content', '')) + str(item.get('title', ''))
-            for img_url in item['images']:
-                # Check if the URL (or its main part) is already in the body
-                if img_url not in body_text:
-                    clean_images.append(img_url)
-                else:
-                    self.logger.debug(f"Deduplicated image (already in body): {img_url}")
-            item['images'] = clean_images
+        # Also ensure 'images' is a list of URL strings, not dicts
+        raw_images = item.get('images') or []
+        body_text = str(item.get('content_plain', '')) + str(item.get('title', ''))
+        
+        clean_images = []
+        for img_item in raw_images:
+            img_url = img_item.get('url') if isinstance(img_item, dict) else img_item
+            if not img_url:
+                continue
+            # Check if the URL (or its main part) is already in the body
+            if img_url not in body_text:
+                clean_images.append(img_url)
+            else:
+                self.logger.debug(f"Deduplicated image (already in body): {img_url}")
+        
+        item['images'] = clean_images
 
         return item
 
