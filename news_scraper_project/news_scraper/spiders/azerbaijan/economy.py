@@ -12,7 +12,19 @@ class EconomySpider(SmartSpider):
     language = 'az'
     
     allowed_domains = ['economy.gov.az']
-    start_urls = ['https://www.economy.gov.az/az/page/media/news']
+    
+    custom_settings = {
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
+    }
+
+    use_curl_cffi = True
+
+    async def start(self):
+        """Initial requests entry point."""
+        for url in ['https://www.economy.gov.az/az/page/media/news']:
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
     
     # Azerbaijani month mapping
     AZ_MONTHS = {
@@ -20,6 +32,8 @@ class EconomySpider(SmartSpider):
         'May': 5, 'İyun': 6, 'İyul': 7, 'Avqust': 8,
         'Sentyabr': 9, 'Oktyabr': 10, 'Noyabr': 11, 'Dekabr': 12
     }
+
+    fallback_content_selector = ".content-block__text, article, .body-text"
 
     def parse(self, response):
         """Parses the news list page."""
@@ -35,7 +49,7 @@ class EconomySpider(SmartSpider):
             date_node = item.css('.news-section__date')
             
             if title_node and date_node:
-                title = title_node.xpath('string()').get().strip()
+                # title = title_node.xpath('string()').get().strip()
                 href = title_node.css('::attr(href)').get()
                 date_str = date_node.xpath('string()').get().strip()
                 
@@ -53,8 +67,8 @@ class EconomySpider(SmartSpider):
                 yield scrapy.Request(
                     url=article_url,
                     callback=self.parse_detail,
-                    meta={'title': title, 'publish_time': publish_time},
-                    dont_filter=True
+                    meta={'publish_time_hint': publish_time},
+                    dont_filter=self.full_scan
                 )
 
         # Pagination logic - continue if we found valid items in the current window
@@ -93,16 +107,9 @@ class EconomySpider(SmartSpider):
 
     def parse_detail(self, response):
         """Parses the article detail page using standardized SmartSpider extraction."""
-        item = self.auto_parse_item(
-            response,
-            title_xpath=None,
-            publish_time_xpath=None
-        )
+        item = self.auto_parse_item(response)
         
         # Override/Set specific fields
-        item['title'] = response.meta.get('title') or item.get('title')
-        item['publish_time'] = response.meta.get('publish_time') or item.get('publish_time')
         item['author'] = 'Ministry of Economy of the Republic of Azerbaijan'
         
         yield item
-

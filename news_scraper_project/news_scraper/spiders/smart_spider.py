@@ -183,14 +183,17 @@ class SmartSpider(scrapy.Spider):
         if publish_time_xpath:
             raw_time = response.xpath(publish_time_xpath).get()
             if raw_time:
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time))
+                parser_settings = getattr(self, 'dateparser_settings', None)
+                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
         
         if not publish_time:
             # Try standard article meta
             raw_time = response.xpath("//meta[@property='article:published_time']/@content").get() or \
                        response.xpath("//meta[@name='publishdate']/@content").get()
             if raw_time:
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time))
+                # Use class-level dateparser_settings if provided
+                parser_settings = getattr(self, 'dateparser_settings', None)
+                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
         
         if not publish_time:
             # Fallback to the hint from the listing page
@@ -215,6 +218,26 @@ class SmartSpider(scrapy.Spider):
             "country": getattr(self, 'country', None),
             **content_data
         }
+
+        # 5. Intelligent Image Deduplication & Normalization
+        # Prevent showing the same image twice if it's already in the body text
+        # Also ensure 'images' is a list of URL strings, not dicts
+        raw_images = item.get('images') or []
+        body_text = str(item.get('content_plain', '')) + str(item.get('title', ''))
+        
+        clean_images = []
+        for img_item in raw_images:
+            img_url = img_item.get('url') if isinstance(img_item, dict) else img_item
+            if not img_url:
+                continue
+            # Check if the URL (or its main part) is already in the body
+            if img_url not in body_text:
+                clean_images.append(img_url)
+            else:
+                self.logger.debug(f"Deduplicated image (already in body): {img_url}")
+        
+        item['images'] = clean_images
+
         return item
 
     def extract_content(self, response):

@@ -1,79 +1,69 @@
-# 巴西247爬虫，负责抓取对应站点、机构或栏目内容。
-
-from datetime import datetime
-
-from news_scraper.items import NewsItem
+# 巴西247爬虫，使用 V2 现代化架构 (Sitemap + Smart Extraction)
+import scrapy
 from scrapy.spiders import SitemapSpider
 
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class Brazil247Spider(SitemapSpider):
+
+class Brazil247Spider(SitemapSpider, SmartSpider):
     name = "brazil_247"
-
     country_code = "BRA"
-
     country = "巴西"
-    language = "en"
+    language = "pt"
     source_timezone = "America/Sao_Paulo"
     start_date = "2026-01-01"
     allowed_domains = ["brasil247.com"]
-    
-    sitemap_urls = ['https://www.brasil247.com/sitemaps/sitemap.xml']
+
+    use_curl_cffi = True
+    fallback_content_selector = "article.article__full"
+
+    sitemap_urls = ["https://www.brasil247.com/sitemaps/sitemap.xml"]
     sitemap_rules = [
-        # Catch typical article paths, excluding irrelevant sections
-        (r'https://www.brasil247.com/(?!sitemaps|author|video|tv|blog|cultura|esportes)[a-z0-9-]+/.+', 'parse_detail'),
+        (r"/(?!sitemaps|author|video|tv|blog|cultura|esportes)[a-z0-9-]+/.+", "parse_detail"),
     ]
 
+    def __init__(self, *args, **kwargs):
+        super(Brazil247Spider, self).__init__(*args, **kwargs)
+
+    def start_requests(self):
+        for url in self.sitemap_urls:
+            yield scrapy.Request(url, self._parse_sitemap, dont_filter=True)
 
     def sitemap_filter(self, entries):
-        """
-        Intercepts sitemap entries and skips any that are older than our cutoff.
-        This prevents Scrapy from blindly sending millions of HTTP GETs for 10-year-old articles.
-        """
-        cutoff_iso = self.cutoff_date.isoformat()
+        cutoff_str = self.cutoff_date.isoformat() if getattr(self, "cutoff_date", None) else None
         for entry in entries:
-            lastmod = entry.get('lastmod')
-            if lastmod:
-                # String comparison is highly efficient and works perfectly for ISO-8601
-                if lastmod >= cutoff_iso:
-                    yield entry
-            else:
-                yield entry
+            lastmod = entry.get("lastmod")
+            if lastmod and cutoff_str and lastmod < cutoff_str:
+                continue
+            yield entry
 
     def parse_detail(self, response):
-        item = NewsItem()
-        item['url'] = response.url
-        item['title'] = (response.css("h1.article__headline::text").get() or "").strip()
-        
-        paragraphs = response.css("article.article__full p::text").getall()
-        # Fallback if structure changes
-        if not paragraphs:
-            paragraphs = response.css("div.article__content p::text").getall()
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath=(
+                "//time[contains(@class, 'article__time')]/@dateTime | "
+                "//time[contains(@class, 'article__time')]/@datetime | "
+                "//time[contains(@class, 'article__time')]/text()"
+            ),
+        )
+        if not item:
+            return
 
-        item['content'] = "\n".join([p.strip() for p in paragraphs if p.strip()])
-        
-        item['author'] = ""
-        item['language'] = 'Portuguese'
-        
-        # More reliable extraction from meta tag
-        date_str = response.xpath('//meta[@property="article:published_time"]/@content').get()
-        if date_str:
-            try:
-                # e.g. 2026-03-11T21:32:11Z
-                pub_time = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                item['publish_time'] = pub_time
-                if pub_time < self.cutoff_date:
-                    return
-            except ValueError:
-                item['publish_time'] = None
-        else:
-            item['publish_time'] = None
+        featured_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if featured_image:
+            current_images = item.get("images") or []
+            if featured_image not in current_images:
+                item["images"] = [featured_image] + current_images
+            elif current_images[0] != featured_image:
+                current_images.remove(featured_image)
+                item["images"] = [featured_image] + current_images
 
-        author_tag = response.css("div.article__meta strong::text").get()
-        if author_tag:
-            item['author'] = author_tag.strip()
-        
-        # Validate critical fields
-        if not item['title'] or not item['content']:
+        item["country"] = self.country
+        item["country_code"] = self.country_code
+        item["author"] = item.get("author") or "Brasil 247"
+
+        if not self.should_process(response.url, item.get("publish_time")):
+            self.logger.info(f"Skipping old article: {response.url}")
             return
 
         yield item

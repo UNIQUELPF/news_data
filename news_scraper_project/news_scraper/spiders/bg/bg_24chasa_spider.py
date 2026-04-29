@@ -1,58 +1,84 @@
 import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class Bg24chasaSpider(BaseNewsSpider):
+class Bg24chasaSpider(SmartSpider):
     name = "bg_24chasa"
-
+    source_timezone = 'Europe/Sofia'
+    
     country_code = 'BGR'
-
     country = '保加利亚'
+    language = 'bg'
+    
+    # European date format: Day.Month.Year
+    dateparser_settings = {'DATE_ORDER': 'DMY'}
+    
     allowed_domains = ["www.24chasa.bg"]
-    # Category 11764989 belongs to Business/Economy
-    start_urls = ["https://www.24chasa.bg/biznes/11764989?page=1"]
-    target_table = "bg_24chasa_news"
 
     custom_settings = {
-        "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
-        },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 4, # Reduced for Playwright stability
-        "DOWNLOAD_DELAY": 0.8
+        "CONCURRENT_REQUESTS": 2, 
+        "DOWNLOAD_DELAY": 1,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
     use_curl_cffi = True
+    
+    # Precise selector: strictly locked to the article container including featured images
+    fallback_content_selector = "article.entry-content"
+
+    async def start(self):
+        """Initial requests entry point."""
+        # Category 11764989 belongs to Business/Economy
+        yield scrapy.Request("https://www.24chasa.bg/biznes/11764989?page=1", callback=self.parse, dont_filter=True)
 
     def parse(self, response):
         """
         Parse listing page: https://www.24chasa.bg/biznes/11764989?page=1
         """
-        # Select all unique business article links
-        links = response.css('a[href*="/biznes/article/"]::attr(href)').getall()
-        # Deduplicate on the fly
-        unique_links = list(set(links))
+        # Use precise XPath directly (CSS :has() is not supported by Scrapy's engine)
+        articles = response.xpath('//section[contains(@class, "sub-category-archive")]//article[descendant::a[contains(@href, "/article/")]]')
         
-        found_any = False
-        for link in unique_links:
+        if not articles:
+             self.logger.warning(f"No valid article blocks found in {response.url} main area.")
+        
+        has_valid_item_in_window = False
+        
+        for art in articles:
+            link = art.css('a::attr(href)').get()
+            if not link:
+                continue
             if not link.startswith('http'):
-                link = "https://www.24chasa.bg" + link
+                link = response.urljoin(link)
+                
+            # Date extraction from listing page: prioritize .date, fallback to .time
+            publish_time_str = art.css('time.date::text, time.time::text').get()
+            publish_time = None
+            if publish_time_str:
+                try:
+                    import dateparser
+                    dt_obj = dateparser.parse(publish_time_str.strip(), settings={'DATE_ORDER': 'DMY'})
+                    publish_time = self.parse_to_utc(dt_obj)
+                except Exception as e:
+                    self.logger.warning(f"Date parse error for {link}: {e}")
 
-            # Persistent memory fingerprint check
-            if link in self.scraped_urls:
+            # Panic Break: If it's a clear article block but we can't find a date, 
+            # STOP EVERYTHING to avoid misinterpreting the sliding window.
+            if not publish_time:
+                self.logger.error(f"STRICT STOP: No date found for {link}. Terminating spider.")
+                return # CRITICAL: use return, not break, to kill pagination logic
+
+            if not self.should_process(link, publish_time):
                 continue
             
-            found_any = True
+            has_valid_item_in_window = True
             yield scrapy.Request(
                 link, 
-                callback=self.parse_article,
-                # Enable Playwright for detailed content rendering as it's a heavy portal
-                meta={"playwright": True} 
+                callback=self.parse_detail,
+                meta={"publish_time_hint": publish_time}
             )
 
-        # Pagination
-        if found_any:
+        # Pagination logic
+        if has_valid_item_in_window:
             current_page = 1
             if 'page=' in response.url:
                 try:
@@ -64,42 +90,17 @@ class Bg24chasaSpider(BaseNewsSpider):
                 next_page_url = f"https://www.24chasa.bg/biznes/11764989?page={current_page + 1}"
                 yield scrapy.Request(next_page_url, callback=self.parse)
 
-    def parse_article(self, response):
-        # Title extraction from rendered DOM
-        title = response.css('h1::text').get()
-        if not title:
-            title = response.css('title::text').get()
+    def parse_detail(self, response):
+        """Parses the article detail page using standardized SmartSpider extraction."""
+        # Preserve existing date selector logic: time.date::text
+        # Strict date extraction: limited to the master wrapper to avoid sidebar interference
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath=".//article[contains(@class, 'entry-content')]//time[contains(@class, 'date') or contains(@class, 'time')]/text()"
+        )
         
-        # Date processing (Bulgarian: 02.04.2026 12:08)
-        # Using specific time.date selector identified in audit
-        date_str = response.css('time.date::text').get()
-        pub_date = None
-        if date_str:
-            try:
-                # DD.MM.YYYY HH:MM
-                pub_date = datetime.strptime(date_str.strip(), "%d.%m.%Y %H:%M")
-            except Exception as e:
-                self.logger.warning(f"Could not parse Bulgarian date '{date_str}': {e}")
-
-        # Date filtering (default 2026-01-01)
-        if pub_date and not self.filter_date(pub_date):
-            return
-
-        # Content extraction from .article-content wrapper
-        content_nodes = response.css('.article-content p::text, .article-content li::text').getall()
-        content = "\n".join([c.strip() for c in content_nodes if c.strip()])
-
-        if not content:
-             content_nodes = response.css('article p::text').getall()
-             content = "\n".join([c.strip() for c in content_nodes if c.strip()])
-
-        if title and content:
-            yield {
-                "url": response.url,
-                "title": title.strip(),
-                "content": content,
-                "publish_time": pub_date,
-                "author": "24 Chasa Bulgaria",
-                "language": "bg",
-                "section": "Business"
-            }
+        # Override/Set specific fields
+        item['author'] = "24 Chasa Bulgaria"
+        item['section'] = "Business"
+        
+        yield item

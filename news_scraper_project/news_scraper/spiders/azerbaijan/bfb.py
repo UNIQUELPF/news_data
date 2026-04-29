@@ -12,11 +12,19 @@ class BfbSpider(SmartSpider):
     language = 'az'
     
     allowed_domains = ['bfb.az']
-    start_urls = ['https://www.bfb.az/press-relizler']
     
     custom_settings = {
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
+
+    use_curl_cffi = True
+
+    async def start(self):
+        """Initial requests entry point."""
+        for url in ['https://www.bfb.az/press-relizler']:
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
     
     # Azerbaijani month mapping (lowercase for matching)
     AZ_MONTHS = {
@@ -24,6 +32,8 @@ class BfbSpider(SmartSpider):
         'may': 5, 'iyun': 6, 'iyul': 7, 'avqust': 8,
         'sentyabr': 9, 'oktyabr': 10, 'noyabr': 11, 'dekabr': 12
     }
+
+    fallback_content_selector = ".main_press_container, .post_content, article"
 
     def parse(self, response):
         """Parses the press release list page."""
@@ -43,7 +53,7 @@ class BfbSpider(SmartSpider):
             date_node = item.css('.card-body .date')
             
             if title_node and date_node:
-                title = title_node.xpath('string()').get().strip()
+                # title = title_node.xpath('string()').get().strip()
                 href = title_node.css('::attr(href)').get()
                 date_str = date_node.xpath('string()').get().strip()
                 
@@ -61,8 +71,8 @@ class BfbSpider(SmartSpider):
                 yield scrapy.Request(
                     url=article_url,
                     callback=self.parse_detail,
-                    meta={'title': title, 'publish_time': publish_time},
-                    dont_filter=True
+                    meta={'publish_time_hint': publish_time},
+                    dont_filter=self.full_scan
                 )
 
         # Pagination logic - continue if we found valid items in the current window
@@ -98,16 +108,9 @@ class BfbSpider(SmartSpider):
 
     def parse_detail(self, response):
         """Parses the article detail page using standardized SmartSpider extraction."""
-        item = self.auto_parse_item(
-            response,
-            title_xpath=None,
-            publish_time_xpath=None
-        )
+        item = self.auto_parse_item(response)
         
         # Override/Set specific fields
-        item['title'] = response.meta.get('title') or item.get('title')
-        item['publish_time'] = response.meta.get('publish_time') or item.get('publish_time')
         item['author'] = 'Baku Stock Exchange (BFB)'
         
         yield item
-

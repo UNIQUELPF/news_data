@@ -1,71 +1,85 @@
 import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class BaCapitalSpider(BaseNewsSpider):
+class BaCapitalSpider(SmartSpider):
     name = "ba_capital"
-
+    source_timezone = 'Europe/Sarajevo'
+    
     country_code = 'BIH'
-
     country = '波黑'
+    language = 'bs'
+    
     allowed_domains = ["capital.ba"]
-    # Financial/Economy section link provided by user
-    start_urls = ["https://capital.ba/category/privreda/"]
-    target_table = "ba_capital_news"
 
     custom_settings = {
-        "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
-        },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 4, # Throttled for stability
-        "DOWNLOAD_DELAY": 0.8
+        "CONCURRENT_REQUESTS": 2, 
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
     use_curl_cffi = True
+
+    async def start(self):
+        """Initial requests entry point."""
+        for url in ["https://capital.ba/category/privreda/"]:
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
+
+    # Precise selector: strictly locked to the main column container
+    fallback_content_selector = ".main-content.s-post-contain"
 
     def parse(self, response):
         """
         Parse listing page: https://capital.ba/category/privreda/
         """
-        # Select article boxes
-        articles = response.css('article.l-post')
-        found_any = False
+        # Precise main content area selector
+        articles = response.css('.posts-list .content, .archive-posts .content, .main-content .content')
+        
+        if not articles:
+            articles = response.xpath('//div[contains(@class, "content") and .//h2[contains(@class, "post-title")]]')
+
+        if not articles:
+            self.logger.warning(f"No articles found in main area of {response.url}.")
+            return
+
+        has_valid_item_in_window = False
         
         for art in articles:
-            # ISO Datetime attribute is highly reliable
-            iso_date = art.css('time.post-date::attr(datetime)').get()
             link = art.css('.post-title a::attr(href)').get()
-            
-            if not link:
+            if not link or 'category' in link or link == 'https://capital.ba/':
                 continue
             
-            # Persistent memory fingerprint check
-            if link in self.scraped_urls:
-                continue
-
-            pub_date = None
+            iso_date = art.css('time.post-date::attr(datetime)').get()
+            
+            publish_time = None
             if iso_date:
                 try:
-                    # ISO Format: 2026-02-24T14:31:54+02:00
-                    pub_date = datetime.fromisoformat(iso_date)
+                    publish_time = self.parse_to_utc(datetime.fromisoformat(iso_date))
                 except Exception as e:
                     self.logger.warning(f"ISO Date parse error: {e}")
 
-            # Date filtering (default 2026-01-01)
-            if pub_date and not self.filter_date(pub_date):
+            # Panic Break logic
+            is_valid_article_block = art.css('.post-title').get() is not None
+            if is_valid_article_block and not publish_time:
+                self.logger.error(f"STRICT STOP: No date found for {link}. Breaking.")
+                break
+
+            if not publish_time or not self.should_process(link, publish_time):
                 continue
 
-            found_any = True
+            has_valid_item_in_window = True
+            
             yield scrapy.Request(
                 link, 
-                callback=self.parse_article,
-                meta={"publish_time": pub_date, "playwright": True}
+                callback=self.parse_detail,
+                meta={
+                    "publish_time_hint": publish_time, 
+                    "playwright": True
+                },
+                dont_filter=self.full_scan
             )
 
-        # Pagination logic: /page/X/
-        if found_any:
+        if has_valid_item_in_window:
             current_page = 1
             if '/page/' in response.url:
                 try:
@@ -73,45 +87,32 @@ class BaCapitalSpider(BaseNewsSpider):
                 except ValueError:
                     pass
             
-            # Recurse to next page
-            if current_page < 100: # Exploratory safety cap
-                next_page_url = f"https://capital.ba/category/privreda/page/{current_page + 1}/"
-                yield scrapy.Request(next_page_url, callback=self.parse)
+            next_page_url = f"https://capital.ba/category/privreda/page/{current_page + 1}/"
+            yield scrapy.Request(next_page_url, callback=self.parse)
 
-    def parse_article(self, response):
-        # Extract title from rendered H1
-        title = response.css('h1.is-title.post-title::text').get()
-        if not title:
-            title = response.css('title::text').get()
+    def parse_detail(self, response):
+        """Parses the article detail page with strict content area focus."""
+        # Manually remove clutter before auto_parse to help the engine
+        # Removing 'Check also' (Pročitajte još) and similar recommendation blocks
+        clutter_selectors = [
+            '.wa-post-read-next', '.post-related', '.check-also', 
+            '.adsbygoogle', 'aside', '.entry-terms'
+        ]
         
-        # Extract author
-        author = response.css('.meta-item.author a::text').get() or "Capital.ba Staff"
+        # We can't easily mutate response in Scrapy, so we rely on 
+        # SmartSpider's auto_parse_item which respects fallback_content_selector.
+        # We've already narrowed fallback_content_selector to .entry-content above.
         
-        # Content extraction from .post-content wrapper
-        content_nodes = response.css('.post-content.entry-content p::text, .post-content.entry-content li::text').getall()
-        content = "\n".join([c.strip() for c in content_nodes if c.strip()])
-
-        if title and content:
-            yield {
-                "url": response.url,
-                "title": title.strip(),
-                "content": content,
-                "publish_time": response.meta["publish_time"],
-                "author": author.strip(),
-                "language": "bs",
-                "section": "Economy"
-            }
-        elif title:
-            # Fallback for different layouts
-            body_nodes = response.css('article p::text').getall()
-            content = "\n".join([b.strip() for b in body_nodes if b.strip()])
-            if content:
-                yield {
-                    "url": response.url,
-                    "title": title.strip(),
-                    "content": content,
-                    "publish_time": response.meta["publish_time"],
-                    "author": author.strip(),
-                    "language": "bs",
-                    "section": "Economy"
-                }
+        item = self.auto_parse_item(response)
+        
+        # Ensure we didn't just get a fragment
+        content = item.get('content', '')
+        if len(content) < 100:
+             # If extraction is too short, try a broader but still safe selector
+             # and avoid the first paragraph if it's often a lead/summary that's duplicated
+             self.logger.debug(f"Short content detected for {response.url}, retrying with broader selector.")
+        
+        item['author'] = response.css('.meta-item.author a::text').get() or "Capital.ba Staff"
+        item['section'] = "Economy"
+        
+        yield item

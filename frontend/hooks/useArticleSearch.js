@@ -43,10 +43,26 @@ export function useArticleSearch({ fixedCountry, fixedCountryCode } = {}) {
 
   async function openArticle(id) {
     setSelectedArticleLoading(true);
+    setSelectedArticle(null);
     try {
+      // Stage 1: Load core article data
       const data = await request(`/api/v1/articles/${id}`);
       setSelectedArticle(data);
-    } finally {
+      setSelectedArticleLoading(false);
+
+      // Stage 2: Load recommendations asynchronously
+      request(`/api/v1/articles/${id}/recommendations`)
+        .then(recommendations => {
+          setSelectedArticle(prev => {
+            if (prev && prev.article && prev.article.id === id) {
+              return { ...prev, ...recommendations };
+            }
+            return prev;
+          });
+        })
+        .catch(err => console.error("Recommendations failed:", err));
+    } catch (err) {
+      console.error("Article load failed:", err);
       setSelectedArticleLoading(false);
     }
   }

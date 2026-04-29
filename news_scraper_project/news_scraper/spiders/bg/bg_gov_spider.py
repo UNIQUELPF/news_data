@@ -1,58 +1,80 @@
 import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class BgGovSpider(BaseNewsSpider):
+class BgGovSpider(SmartSpider):
     name = "bg_gov"
-
+    source_timezone = 'Europe/Sofia'
+    
     country_code = 'BGR'
-
     country = '保加利亚'
+    language = 'bg'
+    
     allowed_domains = ["www.gov.bg"]
-    start_urls = ["https://www.gov.bg/bg/prestsentar/novini?page=1"]
-    target_table = "bg_gov_news"
 
     custom_settings = {
-        "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
-        },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 8,
-        "DOWNLOAD_DELAY": 0.5
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
     use_curl_cffi = True
+    
+    fallback_content_selector = ".view.col-lg-12, .view, article"
+
+    async def start(self):
+        """Initial requests entry point."""
+        yield scrapy.Request("https://www.gov.bg/bg/prestsentar/novini?page=1", callback=self.parse, dont_filter=True)
 
     def parse(self, response):
         """
         Parse listing page: https://www.gov.bg/bg/prestsentar/novini?page=1
         """
-        # Select all unique government news links
-        # Looking for links containing /bg/prestsentar/novini/
-        links = response.css('a[href*="/bg/prestsentar/novini/"]::attr(href)').getall()
-        # Deduplicate
-        urls = []
-        for l in links:
-            if not l.startswith('http'):
-                l = "https://www.gov.bg" + l
-            if l not in urls and '/bg/prestsentar/novini/' in l and l != "https://www.gov.bg/bg/prestsentar/novini":
-                urls.append(l)
+        # Identify the news items using the actual class from the page
+        items = response.css('.item.no-padding')
+        
+        if not items:
+            self.logger.warning(f"No .item.no-padding blocks found in {response.url}. Check selectors.")
 
-        found_any = False
-        for url in urls:
-            # Persistent memory fingerprint check
-            if url in self.scraped_urls:
+        has_valid_item_in_window = False
+        for item in items:
+            # Preserve the original link pattern as requested
+            link = item.css('a[href*="/bg/prestsentar/novini/"]::attr(href)').get()
+            if not link or "prestsentar/novini" not in link:
+                continue
+                
+            if not link.startswith('http'):
+                link = "https://www.gov.bg" + link
+
+            # Date extraction from .pub-date
+            publish_time_str = item.css('.pub-date::text').get()
+            publish_time = None
+            if publish_time_str:
+                try:
+                    import dateparser
+                    dt_obj = dateparser.parse(publish_time_str.strip(), settings={'DATE_ORDER': 'DMY'})
+                    publish_time = self.parse_to_utc(dt_obj)
+                except Exception as e:
+                    self.logger.warning(f"Date parse error for {link}: {e}")
+
+            # Panic Break: If it's a valid link but we can't find a date, STOP.
+            if not publish_time:
+                self.logger.error(f"STRICT STOP: No date found for {link}. Terminating spider.")
+                return
+
+            # Standard V2 deduplication and incremental check
+            if not self.should_process(link, publish_time):
                 continue
             
-            found_any = True
+            has_valid_item_in_window = True
             yield scrapy.Request(
-                url, 
-                callback=self.parse_article
+                link, 
+                callback=self.parse_detail,
+                dont_filter=self.full_scan
             )
 
         # Pagination logic
-        if found_any:
+        if has_valid_item_in_window:
             current_page = 1
             if 'page=' in response.url:
                 try:
@@ -60,53 +82,21 @@ class BgGovSpider(BaseNewsSpider):
                 except ValueError:
                     pass
             
-            if current_page < 100: 
-                next_page_url = f"https://www.gov.bg/bg/prestsentar/novini?page={current_page + 1}"
-                yield scrapy.Request(next_page_url, callback=self.parse)
+            # Rely on the date window logic to decide if we need the next page.
+            # No hard page limit; it will stop once has_valid_item_in_window remains False.
+            next_page_url = f"https://www.gov.bg/bg/prestsentar/novini?page={current_page + 1}"
+            yield scrapy.Request(next_page_url, callback=self.parse, dont_filter=True)
 
-    def parse_article(self, response):
-        # Title 
-        title = response.css('h1::text').get()
-        if not title:
-            title = response.css('title::text').get()
+    def parse_detail(self, response):
+        """Parses the article detail page using standardized SmartSpider extraction."""
+        # Date is often in the first <p> within .view
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="//div[contains(@class, 'view')]//p/text()"
+        )
         
-        # Date processing (Bulgarian Format: 02.04.2026)
-        # Often the date is in the first <p> or a specific div
-        date_str = response.css('.view p:first-of-type::text').get()
-        if not date_str or '.' not in date_str:
-            # Try to find a date pattern in any p tag in case layout shifts
-            for p in response.css('.view p::text').getall():
-                if '.' in p and len(p.strip()) >= 10:
-                    date_str = p.strip()
-                    break
-
-        pub_date = None
-        if date_str:
-            try:
-                # DD.MM.YYYY
-                import re
-                match = re.search(r'(\d{2}\.\d{2}\.\d{4})', date_str)
-                if match:
-                    pub_date = datetime.strptime(match.group(1), "%d.%m.%Y")
-            except Exception as e:
-                self.logger.warning(f"Could not parse Bulgarian date '{date_str}': {e}")
-
-        # Date filtering (default 2026-01-01)
-        if pub_date and not self.filter_date(pub_date):
-            return
-
-        # Content extraction from government page structure
-        content_nodes = response.css('.view.col-lg-12 p::text, .view.col-lg-12 li::text').getall()
-        # Clean nodes
-        content = "\n".join([c.strip() for c in content_nodes if c.strip() and len(c.strip()) > 5])
-
-        if title and content:
-            yield {
-                "url": response.url,
-                "title": title.strip(),
-                "content": content,
-                "publish_time": pub_date,
-                "author": "Bulgarian Government",
-                "language": "bg",
-                "section": "Press Center"
-            }
+        # Override/Set specific fields
+        item['author'] = "Bulgarian Government"
+        item['section'] = "Press Center"
+        
+        yield item
