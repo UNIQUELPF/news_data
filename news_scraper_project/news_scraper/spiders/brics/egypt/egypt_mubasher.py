@@ -1,209 +1,142 @@
-# 埃及mubasher爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
+from bs4 import BeautifulSoup
+from news_scraper.spiders.smart_spider import SmartSpider
 
-import psycopg2
-import scrapy
-from news_scraper.utils import get_incremental_state
-
-
-class EgyptMubasherSpider(scrapy.Spider):
+class EgyptMubasherSpider(SmartSpider):
     name = 'egypt_mubasher'
-
     country_code = 'EGY'
-
     country = '埃及'
     allowed_domains = ['english.mubasher.info']
     target_table = 'egy_mubasher'
 
-    custom_settings = {
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_DELAY': 0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        'DOWNLOADER_MIDDLEWARES': {
-            'news_scraper.middlewares.BatchDelayMiddleware': 543,
-        },
-        'BATCH_SIZE': 500,
-        'BATCH_DELAY': 20,
-        'ITEM_PIPELINES': {
-            'news_scraper.pipelines.PostgresPipeline': 300,
-        }
-    }
-
-    def __init__(self, *args, **kwargs):
-        super(EgyptMubasherSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.seen_urls = set()
-
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(EgyptMubasherSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider._init_db()
-        return spider
-
-    def _init_db(self):
-        settings = self.settings.get('POSTGRES_SETTINGS', {})
-        if not settings:
-            return
-
-        try:
-            conn = psycopg2.connect(
-                dbname=settings['dbname'], user=settings['user'],
-                password=settings['password'], host=settings['host'], port=settings['port']
-            )
-            cur = conn.cursor()
-
-            cur.execute(f'''
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    url TEXT UNIQUE NOT NULL,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    content TEXT,
-                    site_name TEXT,
-                    language TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            ''')
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-
-        except Exception as e:
-            self.logger.error(f"Failed to connect to DB for initialization: {e}")
-
-    def closed(self, reason):
-        return
-
-    def iter_start_requests(self):
-        url = "https://english.mubasher.info/news/sa/now/latest"
-        yield scrapy.Request(url, callback=self.parse_list, cb_kwargs={'page': 1})
+    # SmartSpider Settings
+    use_curl_cffi = True
+    language = 'en'
+    source_timezone = 'Africa/Cairo'
+    fallback_content_selector = ".article-body, .md-news-details__content, article, .the-news"
 
     def start_requests(self):
-        yield from self.iter_start_requests()
+        url = "https://english.mubasher.info/news/sa/now/latest"
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 
-    async def start(self):
-        for request in self.iter_start_requests():
-            yield request
-
-    def parse_list(self, response, page):
-        # Extract article links from raw HTML using regex (AngularJS page, links are in href attributes)
+    def parse_list(self, response):
         raw_html = response.text
-        article_links = re.findall(r'href=["\']?(/news/\d+/[^"\'>\s]+)', raw_html)
-
-        # Deduplicate within page
-        unique_links = list(dict.fromkeys(article_links))
-
-        if not unique_links:
-            self.logger.info(f"No articles found on page {page}. Stopping.")
+        # Use selector for more precise extraction of pairs (url + date)
+        cards = response.css('.mi-article-media-block__content')
+        
+        if not cards:
+            self.logger.warning(f"No cards found via CSS on {response.url}. Falling back to regex.")
+            # Fallback to regex if CSS fails (e.g. structure change)
+            article_links = re.findall(r'href=["\']?(/news/\d+/[^"\'>\s]+)', raw_html)
+            unique_links = list(dict.fromkeys(article_links))
+            for link in unique_links:
+                url = response.urljoin(link)
+                if self.should_process(url, None):
+                    yield scrapy.Request(url, callback=self.parse_detail)
             return
 
-        found_new = False
-        for link in unique_links:
-            full_url = "https://english.mubasher.info" + link
-            if full_url in self.seen_urls:
+        self.logger.info(f"Found {len(cards)} articles on {response.url}")
+        has_valid_item_in_window = False
+        
+        for card in cards:
+            link = card.css('.mi-article-media-block__title::attr(href)').get()
+            if not link:
                 continue
+                
+            url = response.urljoin(link)
+            date_text = card.css('.mi-article-media-block__date::text').get()
+            
+            publish_time = None
+            if date_text:
+                import dateparser
+                # Mubasher format usually like "28 April 04:56 PM"
+                publish_time = dateparser.parse(date_text, settings={'TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': False})
+            
+            publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
 
-            found_new = True
-            self.seen_urls.add(full_url)
+            if self.should_process(url, publish_time_utc):
+                has_valid_item_in_window = True
+                meta_dict = {'publish_time_hint': publish_time_utc}
+                if getattr(self, 'playwright', False):
+                    meta_dict['playwright'] = True
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
 
-            yield scrapy.Request(
-                full_url,
-                callback=self.parse_article,
-            )
+        if has_valid_item_in_window:
+            page = response.meta.get('page', 1)
+            num_pages_match = re.search(r'window\.midata\.numPages\s*=\s*(\d+)', raw_html)
+            max_pages = int(num_pages_match.group(1)) if num_pages_match else 100
 
-        # Extract pagination info
-        num_pages_match = re.search(r'window\.midata\.numPages\s*=\s*(\d+)', raw_html)
-        max_pages = int(num_pages_match.group(1)) if num_pages_match else 100
+            if page < max_pages:
+                next_page = page + 1
+                next_url = f"https://english.mubasher.info/news/sa/now/latest//{next_page}"
+                yield scrapy.Request(next_url, callback=self.parse_list, dont_filter=True, meta={'page': next_page})
 
-        if found_new and page < max_pages:
-            next_page = page + 1
-            next_url = f"https://english.mubasher.info/news/sa/now/latest//{next_page}"
-            yield scrapy.Request(next_url, callback=self.parse_list, cb_kwargs={'page': next_page})
-
-    def parse_article(self, response):
+    def parse_detail(self, response):
         raw_html = response.text
-
-        # Try to extract window.article JS object
         match = re.search(r"window\.article\s*=\s*(\{[\s\S]*?\})\s*;", raw_html)
 
         title = None
-        publish_time = None
+        publish_time_extracted = None
         content = None
-        author = "Mubasher"
 
         if match:
             raw_js = match.group(1)
-            # Extract fields using regex from JS object (not valid JSON, uses single quotes)
+            
             title_match = re.search(r"'title'\s*:\s*'((?:[^'\\]|\\.)*)'", raw_js)
             if not title_match:
                 title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_js)
             if title_match:
                 title = title_match.group(1).replace("\\'", "'").replace('\\"', '"')
 
-            # Extract publishedAt
             date_match = re.search(r"'publishedAt'\s*:\s*'([^']+)'", raw_js)
             if not date_match:
                 date_match = re.search(r'"publishedAt"\s*:\s*"([^"]+)"', raw_js)
             if date_match:
                 date_str = date_match.group(1)
                 try:
-                    publish_time = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    publish_time_extracted = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
                 except Exception:
-                    publish_time = datetime.now()
+                    pass
 
-            # Extract body (HTML content)
             body_match = re.search(r"'body'\s*:\s*'((?:[^'\\]|\\.)*)'", raw_js)
             if not body_match:
                 body_match = re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_js)
             if body_match:
                 body_html = body_match.group(1).replace("\\'", "'").replace('\\"', '"').replace('\\/', '/')
-                from bs4 import BeautifulSoup
                 body_soup = BeautifulSoup(body_html, 'html.parser')
-                content = body_soup.get_text(separator='\n', strip=True)
+                content = body_soup.get_text(separator='\n\n', strip=True)
 
-        # Fallback: parse from DOM if window.article extraction failed
-        if not title:
-            title_el = response.css('h1::text, .article-title::text, .md-news-details__title::text').get()
-            title = title_el.strip() if title_el else "Unknown Title"
-
-        if not publish_time:
-            publish_time = datetime.now()
-
-        if not content:
-            paragraphs = response.css('.article-body p, .md-news-details__content p, article p, .the-news p')
-            body_parts = []
-            for p in paragraphs:
-                texts = p.xpath('.//text()').getall()
-                text = ' '.join(t.strip() for t in texts if t.strip())
-                if text:
-                    body_parts.append(text)
-            content = '\n\n'.join(body_parts)
-
-        if not content or not content.strip():
+        item = self.auto_parse_item(
+            response,
+            title_xpath=None,
+            publish_time_xpath=None
+        )
+        if not item:
             return
 
-        if publish_time < self.cutoff_date:
+        if title:
+            item['title'] = title
+            
+        if publish_time_extracted:
+            item['publish_time'] = self.parse_to_utc(publish_time_extracted)
+            
+        if content:
+            item['content'] = content
+
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
             return
 
-        yield {
-            'url': response.url,
-            'title': title,
-            'publish_time': publish_time,
-            'author': author,
-            'content': content.strip(),
-            'site_name': 'mubasher',
-            'language': 'en'
-        }
+        featured_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if featured_image:
+            current_images = item.get('images') or []
+            if featured_image not in current_images:
+                item['images'] = [featured_image] + current_images
+            elif current_images[0] != featured_image:
+                current_images.remove(featured_image)
+                item['images'] = [featured_image] + current_images
+
+        item['author'] = item.get('author') or "Mubasher"
+
+        yield item

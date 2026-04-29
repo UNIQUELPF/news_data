@@ -1,111 +1,39 @@
-# 埃及cbe爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
-
-import psycopg2
-import scrapy
-from news_scraper.utils import get_incremental_state
-from scrapy.utils.project import get_project_settings
 from w3lib.html import remove_tags
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class EgyptCbeSpider(scrapy.Spider):
+class EgyptCbeSpider(SmartSpider):
     name = "egypt_cbe"
-
     country_code = 'EGY'
-
     country = '埃及'
     allowed_domains = ["cbe.org.eg"]
     target_table = "egy_cbe"
-    start_urls = ["https://www.cbe.org.eg/sitemap.xml"]
-    
-    custom_settings = {
-        'ROBOTSTXT_OBEY': False,
-        'DEFAULT_REQUEST_HEADERS': {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9,ar;q=0.8", # include Arabic in Accept-Language
-            "Sec-Ch-Ua": "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate"
-        }
-    }
 
-    def __init__(self, *args, **kwargs):
-        super(EgyptCbeSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = getattr(self, 'start_date', datetime(2026, 1, 1))
-        self.seen_urls = set()
-        
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(EgyptCbeSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider._init_db()
-        return spider
-        
-    def _init_db(self):
-        settings = get_project_settings()
-        db_settings = settings.get('POSTGRES_SETTINGS')
-        if not db_settings:
-            return
+    # SmartSpider Settings
+    use_curl_cffi = True
+    language = 'en' # dynamic per article
+    source_timezone = 'Africa/Cairo'
+    fallback_content_selector = ".cbe-rich-text, .content, .details, article, .news-details, #main-content"
 
-        try:
-            conn = psycopg2.connect(
-                host=db_settings['host'],
-                dbname=db_settings['dbname'],
-                user=db_settings['user'],
-                password=db_settings['password'],
-                port=db_settings['port']
-            )
-            cur = conn.cursor()
-            
-            # Create table if not exists
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS egy_cbe (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(500),
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    content TEXT,
-                    url VARCHAR(500) UNIQUE,
-                    language VARCHAR(10),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            conn.commit()
-            cur.close()
-            conn.close()
+    def start_requests(self):
+        url = "https://www.cbe.org.eg/sitemap.xml"
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
 
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = max(self.cutoff_date, state["cutoff_date"])
-            self.seen_urls = state["scraped_urls"]
-            self.logger.info(f"Using cutoff_date={self.cutoff_date}, seen_urls={len(self.seen_urls)}")
-            
-        except psycopg2.Error as e:
-            self.logger.error(f"Database error during initialization: {e}")
-
-    def parse(self, response):
-        # Extract loc elements using regex to avoid xml parsing issues with namespaces
+    def parse_list(self, response):
         xml = response.text
         urls = re.findall(r'<loc>(.*?)</loc>', xml)
-        self.logger.info(f"Found {len(urls)} total URLs in sitemap")
         
         news_urls = [u for u in urls if '/news-publications/news/' in u]
         self.logger.info(f"Filtered down to {len(news_urls)} news URLs")
         
-        passed = 0
+        has_valid_item = False
+        
         for url in news_urls:
             # We enforce scraping both /en/ and /ar/ articles
-            if url in self.seen_urls:
-                continue
-
+            # The date is embedded in the URL: /news-publications/news/2026/04/28/15/30/...
+            pub_time = None
             match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/(\d{2})/(\d{2})/', url)
             if match:
                 dt_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)} {match.group(4)}:{match.group(5)}:00"
@@ -117,54 +45,36 @@ class EgyptCbeSpider(scrapy.Spider):
                 else:
                     continue
                     
-            if pub_time >= self.cutoff_date:
-                passed += 1
-                yield scrapy.Request(
-                    url, 
-                    callback=self.parse_article,
-                    meta={'publish_time': pub_time}
-                )
-                
-        self.logger.info(f"Yielded {passed} article requests matching delta rules since {self.cutoff_date}")
+            publish_time_utc = self.parse_to_utc(pub_time)
 
-    def parse_article(self, response):
-        pub_time = response.meta['publish_time']
+            if self.should_process(url, publish_time_utc):
+                has_valid_item = True
+                meta_dict = {'publish_time_hint': publish_time_utc}
+                if getattr(self, 'playwright', False):
+                    meta_dict['playwright'] = True
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
+
+    def parse_detail(self, response):
+        # Override language dynamically
+        self.language = 'ar' if '/ar/' in response.url else 'en'
         
-        # Double check it safely
-        if pub_time < self.cutoff_date:
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text() | //*[contains(@class, 'article-title')]/text() | //*[contains(@class, 'cbe-title')]/text() | //h2/text()",
+            publish_time_xpath=None # Handled by hint
+        )
+        if not item:
             return
 
-        title_css = response.css('h1::text, .article-title::text, .cbe-title::text, h2::text')
-        title = title_css.get()
-        if title:
-            title = title.strip()
-        
-        author = "Central Bank of Egypt"
-        
-        # Extract content
-        p_elements = response.css('.cbe-rich-text p, .content p, .details p, article p, .news-details p, #main-content p')
-        if not p_elements:
-            # aggressive fallback
-            p_elements = response.css('p')
-            
-        paragraphs = []
-        for p in p_elements:
-            text = remove_tags(p.get()).strip()
-            text = re.sub(r'\s+', ' ', text)
-            if text and len(text) > 10:
-                paragraphs.append(text)
-                
-        content = "\n\n".join(paragraphs)
-        if not content:
-            return
-            
-        item = {
-            'title': title or "CBE News",
-            'publish_time': pub_time,
-            'author': author,
-            'content': content,
-            'url': response.url,
-            'language': 'ar' if '/ar/' in response.url else 'en'
-        }
+        featured_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if featured_image:
+            current_images = item.get('images') or []
+            if featured_image not in current_images:
+                item['images'] = [featured_image] + current_images
+            elif current_images[0] != featured_image:
+                current_images.remove(featured_image)
+                item['images'] = [featured_image] + current_images
+
+        item['author'] = item.get('author') or "Central Bank of Egypt"
+
         yield item
-        
