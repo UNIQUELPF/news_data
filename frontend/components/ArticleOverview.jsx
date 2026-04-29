@@ -11,7 +11,13 @@ export default function ArticleOverview({ article }) {
   
   // Extract images
   const images = Array.isArray(article.images) ? article.images : [];
-  const heroImage = images.length > 0 ? images[0] : null;
+  let heroImage = images.length > 0 ? images[0] : null;
+  
+  // If the hero image is already inside the content markdown, 
+  // don't show it again as a separate hero image to avoid duplication.
+  if (heroImage && typeof displayContent === 'string' && displayContent.includes(heroImage)) {
+    heroImage = null;
+  }
 
   return (
     <div className="article-hero">
@@ -40,6 +46,7 @@ export default function ArticleOverview({ article }) {
           <img 
             src={heroImage} 
             alt={displayTitle} 
+            referrerPolicy="no-referrer"
             className="article-featured-image"
             style={{ 
               maxWidth: '100%', 
@@ -59,7 +66,12 @@ export default function ArticleOverview({ article }) {
             </div>
           )}
           
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            components={{
+              img: ({node, ...props}) => <img {...props} referrerPolicy="no-referrer" style={{maxWidth: '100%'}} />
+            }}
+          >
             {displayContent}
           </ReactMarkdown>
 
