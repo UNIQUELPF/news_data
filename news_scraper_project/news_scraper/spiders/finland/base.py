@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class FinlandBaseSpider(SmartSpider):
     country_code = "FIN"
-    country = "??"
+    country = "芬兰"
     language = "en"
     source_timezone = "Europe/Helsinki"
     start_date = "2026-01-01"

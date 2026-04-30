@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class KoreaBaseSpider(SmartSpider):
     country_code = "KOR"
-    country = "??"
+    country = "韩国"
     language = "en"
     source_timezone = "Asia/Seoul"
     start_date = "2026-01-01"

@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class GermanyBaseSpider(SmartSpider):
     country_code = "DEU"
-    country = "??"
+    country = "德国"
     language = "en"
     source_timezone = "Europe/Berlin"
     start_date = "2025-01-01"

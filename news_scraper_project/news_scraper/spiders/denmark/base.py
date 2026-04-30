@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class DenmarkBaseSpider(SmartSpider):
     country_code = "DNK"
-    country = "??"
+    country = "丹麦"
     language = "en"
     source_timezone = "Europe/Copenhagen"
     start_date = "2026-01-01"

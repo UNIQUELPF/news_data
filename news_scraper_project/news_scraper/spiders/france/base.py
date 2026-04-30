@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class FranceBaseSpider(SmartSpider):
     country_code = "FRA"
-    country = "??"
+    country = "法国"
     language = "en"
     source_timezone = "Europe/Paris"
     start_date = "2026-01-01"

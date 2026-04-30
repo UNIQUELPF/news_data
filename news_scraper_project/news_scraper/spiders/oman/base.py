@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class OmanBaseSpider(SmartSpider):
     country_code = "OMN"
-    country = "??"
+    country = "阿曼"
     language = "en"
     source_timezone = "Asia/Muscat"
     start_date = "2026-01-01"

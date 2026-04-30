@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class NetherlandsBaseSpider(SmartSpider):
     country_code = "NLD"
-    country = "??"
+    country = "荷兰"
     language = "en"
     source_timezone = "Europe/Amsterdam"
     start_date = "2026-01-01"
