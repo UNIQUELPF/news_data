@@ -1,8 +1,23 @@
 import hashlib
 import json
 from urllib.parse import urlparse
+from itemadapter import ItemAdapter
 import psycopg2
 from pipeline.domestic_taxonomy import infer_domestic_location, split_organization_and_company
+
+
+class SpiderMetadataPipeline:
+    def process_item(self, item, spider):
+        adapter = ItemAdapter(item)
+        for field in ("country_code", "country", "organization"):
+            value = getattr(spider, field, None)
+            if value and not adapter.get(field):
+                try:
+                    adapter[field] = value
+                except KeyError:
+                    pass
+        return item
+
 
 class PostgresPipeline:
     def __init__(self, crawler=None):

@@ -42,11 +42,6 @@ class AlgeriaBankOfAlgeriaSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-
-
-    @classmethod
-
-
     def start_requests(self):
         yield scrapy.Request(self.category_api.format(page=1), callback=self.parse_api, meta={"page": 1})
 

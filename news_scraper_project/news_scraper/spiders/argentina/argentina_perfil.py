@@ -47,11 +47,6 @@ class ArgentinaPerfilSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-
-
-    @classmethod
-
-
     def start_requests(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing)

@@ -4,11 +4,21 @@ class NewsItem(scrapy.Item):
     url = scrapy.Field()
     title = scrapy.Field()
     content = scrapy.Field()
+    raw_html = scrapy.Field()
+    content_cleaned = scrapy.Field()
+    content_markdown = scrapy.Field()
+    content_plain = scrapy.Field()
+    images = scrapy.Field()
     publish_time = scrapy.Field()
     scrape_time = scrapy.Field()
     author = scrapy.Field()
     language = scrapy.Field()
     section = scrapy.Field()
+    category = scrapy.Field()
+    country_code = scrapy.Field()
+    country = scrapy.Field()
+    organization = scrapy.Field()
+    company = scrapy.Field()
 
 
 class CaixinHeadlineItem(scrapy.Item):

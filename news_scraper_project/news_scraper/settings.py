@@ -30,6 +30,7 @@ POSTGRES_SETTINGS = {
 }
 
 ITEM_PIPELINES = {
+    "news_scraper.pipelines.SpiderMetadataPipeline": 200,
     "news_scraper.pipelines.PostgresPipeline": 300,
 }
 
