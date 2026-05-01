@@ -27,12 +27,7 @@ class EthiopiaNBESpider(SmartSpider):
         # Elementor typically uses these classes for posts
         cards = response.css('article, .elementor-post')
         if not cards:
-            # Fallback to simple links
-            links = response.css('a[href*="/nbe_news/"]::attr(href)').getall()
-            for link in list(dict.fromkeys(links)):
-                url = response.urljoin(link)
-                if self.should_process(url, None):
-                    yield scrapy.Request(url, callback=self.parse_detail)
+            self.logger.warning(f"No article cards found on {response.url}. Stopping to avoid undated crawl.")
             return
 
         has_valid_item_in_window = False

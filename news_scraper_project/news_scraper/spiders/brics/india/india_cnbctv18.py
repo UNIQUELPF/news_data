@@ -1,151 +1,125 @@
-# 印度cnbctv18爬虫，负责抓取对应站点、机构或栏目内容。
-
 import scrapy
-from scrapy.spiders import SitemapSpider
 import re
+import json
 from datetime import datetime
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class IndiaCnbctv18Spider(SitemapSpider):
+class IndiaCnbctv18Spider(SmartSpider):
     name = 'india_cnbctv18'
-
     country_code = 'IND'
-
     country = '印度'
+    language = 'en'
     allowed_domains = ['cnbctv18.com']
-    
-    # We use their daily sitemaps endpoint which has sub-sitemaps for everyday.
-    sitemap_urls = ['https://www.cnbctv18.com/commonfeeds/v1/cne/sitemap-index.xml']
-    
-    # Custom pipeline config to direct output to the specific table
-    custom_settings = {
-        'ITEM_PIPELINES': {
-            'news_scraper.pipelines.PostgresPipeline': 300,
-        }
-    }
-    
     target_table = "ind_cnbctv18"
+    
+    source_timezone = 'Asia/Kolkata'
+    use_curl_cffi = True
+    
+    fallback_content_selector = ".articleWrap, .narticle-data, .article-content, #main-content"
 
-    def __init__(self, *args, **kwargs):
-        super(IndiaCnbctv18Spider, self).__init__(*args, **kwargs)
-        
-        # We use a compiled regex catch-all and filter URLs manually in parse_detail
-        self.sitemap_rules = [
-            (re.compile(r'.*'), 'parse_detail')
+    custom_settings = {
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1,
+        "AUTOTHROTTLE_ENABLED": True,
+    }
+
+    def start_requests(self):
+        # Categories from user's network capture
+        categories = [
+            "technology", "economy", "auto",
         ]
         
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
+        for cat in categories:
+            # We start with offset 0 and fetch 20 items per request for efficiency
+            url = self.build_api_url(cat, offset=0)
+            yield scrapy.Request(
+                url, 
+                callback=self.parse_api, 
+                meta={'category': cat, 'offset': 0},
+                dont_filter=True
             )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-            self.logger.info(f"Loaded {len(self.seen_urls)} seen URLs via {state['source']}.")
+
+    def build_api_url(self, category, offset=0, count=20):
+        # Original pattern provided by user
+        fields = "story_id,display_headline,weburl_r,images,timetoread,created_at,updated_at"
+        filter_json = json.dumps({"categories.slug": category})
+        return (f"https://api-en.cnbctv18.com/nodeapi/v1/cne/get-article-list?"
+                f"count={count}&offset={offset}&fields={fields}&filter={filter_json}&"
+                f"sortOrder=desc&sortBy=created_at")
+
+    def parse_api(self, response):
+        try:
+            res = json.loads(response.text)
+            if not res.get('status') or not res.get('data'):
+                return
         except Exception as e:
-            self.logger.error(f"Database connection error in __init__: {e}")
-            self.cutoff_date = datetime(2026, 1, 1)
-            self.seen_urls = set()
+            self.logger.error(f"Failed to parse API JSON: {e}")
+            return
 
-    def sitemap_filter(self, entries):
-        """Filter out old sitemaps to optimize crawling speed"""
-        for entry in entries:
-            loc = entry.get('loc', '')
+        category = response.meta['category']
+        offset = response.meta['offset']
+        
+        has_valid_item_in_window = False
+        
+        for entry in res['data']:
+            rel_url = entry.get('weburl_r')
+            if not rel_url:
+                continue
             
-            # If it's a daily sitemap, check the date in the URL (e.g., 2026-03-15.xml)
-            if 'sitemap/daily/' in loc:
+            # Explicitly join with the main domain, not the API domain
+            url = f"https://www.cnbctv18.com{rel_url}"
+            
+            # Date handling: "2026-04-29 18:39:37" (Assuming IST)
+            created_at = entry.get('created_at')
+            publish_time = None
+            if created_at:
                 try:
-                    date_str = re.search(r'(\d{4}-\d{2}-\d{2})', loc).group(1)
-                    sitemap_date = datetime.strptime(date_str, "%Y-%m-%d")
-                    # If the sitemap is older than cutoff (minus 1 day buffer), skip it entirely
-                    if sitemap_date < self.cutoff_date.replace(hour=0, minute=0, second=0):
-                        self.logger.debug(f"Skipping old sitemap: {loc}")
-                        continue
-                except (AttributeError, ValueError):
+                    # SmartSpider.parse_to_utc handles string parsing + tz conversion
+                    publish_time = self.parse_to_utc(created_at)
+                except:
                     pass
-            
-            yield entry
 
-    def parse(self, response):
-        """Mandatory callback for SitemapSpider to process all sub-links"""
-        yield from self.parse_detail(response)
+            if self.should_process(url, publish_time):
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    url, 
+                    callback=self.parse_detail, 
+                    meta={'publish_time_hint': publish_time}
+                )
+
+        # Pagination
+        if has_valid_item_in_window:
+            new_offset = offset + 20
+            # Safety limit to avoid infinite loops on very large categories
+            if new_offset < 200: 
+                next_url = self.build_api_url(category, offset=new_offset)
+                yield scrapy.Request(
+                    next_url, 
+                    callback=self.parse_api, 
+                    meta={'category': category, 'offset': new_offset}
+                )
 
     def parse_detail(self, response):
-        # Skip if already in DB
-        if response.url in self.seen_urls:
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text() | //meta[@property='og:title']/@content",
+            publish_time_xpath="//meta[@property='article:published_time']/@content"
+        )
+        
+        # Priority og:image
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if not item.get('images'):
+                item['images'] = []
+            if og_image not in item['images']:
+                item['images'].insert(0, og_image)
+
+        # Stop if older than cutoff
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
             return
-            
-        # Date extraction - CNBCTV18 stores dates in meta tags
-        date_el = response.css('meta[property="article:published_time"]::attr(content), meta[property="og:published_time"]::attr(content)').get()
-        pub_time = None
-        if date_el:
-            try:
-                # "2026-01-01T05:42:43+05:30" ISO format
-                date_str = date_el.strip()
-                # Strip timezone offset for basic parsing
-                date_str = re.sub(r'([+-]\d{2}:\d{2})$', '', date_str).replace('T', ' ').strip()
-                if '.' in date_str:
-                    date_str = date_str.split('.')[0]
-                pub_time = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                self.logger.debug(f"Could not parse date: {date_el}")
-        
-        # Check against cutoff
-        if pub_time and pub_time < self.cutoff_date:
-            return
-            
-        item = {}
-        item['url'] = response.url
-        
-        # Title
-        item['title'] = response.css('h1::text, h1.article-title::text').get(default='').strip()
-        if not item['title']:
-            return # Drop invalid items
-            
-        item['publish_time'] = pub_time
-        item['language'] = 'en'
-        
-        # Author - try JSON-LD first, then CSS fallback
-        author = None
-        try:
-            import json
-            ld_scripts = response.css('script[type="application/ld+json"]::text').getall()
-            for ld_text in ld_scripts:
-                ld = json.loads(ld_text)
-                if isinstance(ld, dict) and 'author' in ld:
-                    a = ld['author']
-                    if isinstance(a, dict):
-                        author = a.get('name', '')
-                    elif isinstance(a, str):
-                        author = a
-                    if author:
-                        break
-        except Exception:
-            pass
-        if not author:
-            author = response.css('.author-name a::text, .authorname::text').get(default='').strip()
-        item['author'] = author if author else None
-        
-        # Content - CNBCTV18 uses .articleWrap (no <p> tags inside)
-        content_parts = response.css('.articleWrap ::text').getall()
-        if not content_parts:
-            content_parts = response.css('.narticle-data ::text, .article-content ::text').getall()
-             
-        # Clean up whitespace and join
-        cleaned_parts = []
-        for p in content_parts:
-            text = p.strip()
-            # Ignore javascript/css snippets or empty lines
-            if text and len(text) > 1 and "{" not in text:
-                cleaned_parts.append(text)
-                
-        if not cleaned_parts:
-            # Paywall or invalid structure
-            return
-            
-        item['content'] = "\n".join(cleaned_parts)
+
+        item['author'] = response.css('.author-name::text, .byline-author::text').get() or "CNBCTV18 Staff"
+        item['country_code'] = self.country_code
+        item['country'] = self.country
         
         yield item

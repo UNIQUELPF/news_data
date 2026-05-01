@@ -1,168 +1,122 @@
-# 印度entrackr爬虫，负责抓取对应站点、机构或栏目内容。
-
 import scrapy
-from datetime import datetime
-import logging
 import re
-from scrapy.spidermiddlewares.httperror import HttpError
-from scrapy.exceptions import CloseSpider
-from twisted.internet.error import TimeoutError, TCPTimedOutError
-from news_scraper.utils import get_incremental_state
+from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class IndiaEntrackrSpider(scrapy.Spider):
+class IndiaEntrackrSpider(SmartSpider):
     name = 'india_entrackr'
-
     country_code = 'IND'
-
     country = '印度'
+    language = 'en'
     allowed_domains = ['entrackr.com']
     target_table = 'ind_entrackr'
     
+    source_timezone = 'Asia/Kolkata'
     use_curl_cffi = True
+    
+    fallback_content_selector = ".content-wrapper, .post-content, .article-content, .entry-content"
 
     custom_settings = {
-        'CLOSESPIDER_ITEMCOUNT': 0,
-        'DOWNLOAD_DELAY': 2.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DOWNLOADER_MIDDLEWARES': {
-            'news_scraper.middlewares.CurlCffiMiddleware': 500,
-            'news_scraper.middlewares.BatchDelayMiddleware': 543,
-        },
-        'BATCH_SIZE': 500,
-        'BATCH_DELAY': 30,
-        'ITEM_PIPELINES': {
-            'news_scraper.pipelines.PostgresPipeline': 300,
-        }
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, *args, **kwargs):
-        super(IndiaEntrackrSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.seen_urls = set()
-        settings = self.custom_settings
-        
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(IndiaEntrackrSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider._init_db()
-        return spider
-        
-    def _init_db(self):
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-            self.logger.info(
-                f"Incremental scraping via {state['source']} from cutoff date: {self.cutoff_date}, urls: {len(self.seen_urls)}"
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to connect to DB for initialization: {e}")
-
     def start_requests(self):
-        yield self.make_page_request(1)
+        url = 'https://entrackr.com/news'
+        yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 
-    def make_page_request(self, page):
-        if page == 1:
-            url = 'https://entrackr.com/news'
-        else:
-            url = f'https://entrackr.com/news?page={page}'
-        return scrapy.Request(
-            url,
-            callback=self.parse_list,
-            cb_kwargs={'page': page},
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'},
-            errback=self.errback_httpbin
-        )
+    def parse_list(self, response):
+        # IMPORTANT: Only select articles from the main content area.
+        # This excludes the "Latest Stories" sidebar which would otherwise keep the 
+        # pagination alive forever with recent dates.
+        articles = response.css('main .article-box, main .small-post, #feat-len-1')
+        if not articles:
+            # Fallback if 'main' tag is missing or structured differently
+            articles = response.css('.article-box, .small-post')
+        
+        has_valid_item_in_window = False
+        for article in articles:
+            link = article.css('a::attr(href)').get()
+            if not link:
+                continue
+            url = response.urljoin(link)
+            
+            # Robust date extraction from list page
+            # Try multiple ways to get the text to avoid None values
+            date_nodes = article.css('.publish-date *::text').getall()
+            date_str = " ".join([d.strip() for d in date_nodes if d.strip()])
+            
+            publish_time = None
+            if date_str:
+                try:
+                    # Clean whitespace and parse
+                    parsed = dateparser.parse(date_str)
+                    if parsed:
+                        publish_time = self.parse_to_utc(parsed)
+                        self.logger.debug(f"Parsed list date for {url}: {publish_time}")
+                except Exception as e:
+                    self.logger.debug(f"Failed to parse list date {date_str}: {e}")
+            else:
+                self.logger.warning(f"No date found on list page for {url}")
 
-    def parse_list(self, response, page):
-        all_links = response.css('a::attr(href)').getall()
-        # Find article links containing /news/ and optionally a hyphen with digits
-        article_links = [l for l in all_links if '/news/' in l and re.search(r'-\d+$', l.split('?')[0])]
-        article_links = list(set(article_links))
-
-        for link in article_links:
-            if not link.startswith('http'):
-                link = 'https://entrackr.com' + link
-
-            if link not in self.seen_urls:
-                self.seen_urls.add(link)
+            # Now we have a date, so should_process can correctly filter
+            if self.should_process(url, publish_time):
+                has_valid_item_in_window = True
                 yield scrapy.Request(
-                    link, 
-                    callback=self.parse_article,
-                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'},
-                    errback=self.errback_httpbin
+                    url, 
+                    callback=self.parse_detail,
+                    meta={'publish_time_hint': publish_time}
                 )
 
-        # Unconditionally paginate; we will close the spider natively if we hit the cutoff date in parse_article
-        next_page = page + 1
-        yield self.make_page_request(next_page)
+        # Pagination: follow the 'Next' link ONLY if we found valid items on this page
+        if has_valid_item_in_window:
+            next_link = response.xpath("//a[contains(text(), 'Next')]/@href").get()
+            if next_link:
+                next_url = response.urljoin(next_link)
+                yield scrapy.Request(next_url, callback=self.parse_list)
+            else:
+                self.logger.info("No more pages found (Next button missing).")
+        else:
+            self.logger.info("Reached the end of the date window. Stopping pagination.")
 
-    def parse_article(self, response):
-        title = response.css('h1::text').get()
-        if not title:
-            title = response.css('title::text').get()
-
-        date_str = response.css('time::text').get()
-        if not date_str:
-            date_str = response.css('.date::text, [class*="date"]::text, [class*="time"]::text').get()
+    def parse_detail(self, response):
+        # 1. Manually extract the specific date string from JSON-LD to avoid passing long blocks
+        json_time = response.xpath("//script[@type='application/ld+json']/text()").re_first(r'"datePublished":\s*"([^"]+)"')
         
-        publish_time = None
-        if date_str:
-            date_str = date_str.strip()
-            # Try to parse "16 Mar 2026" or similar
+        # 2. Use a specific XPath to avoid picking up dates from sidebars or related posts
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+            publish_time_xpath="//div[contains(@class, 'author-detail')]//time/text()"
+        )
+        
+        # 3. If the high-precision JSON-LD time was found, use it to override
+        if json_time:
             try:
-                publish_time = datetime.strptime(date_str, '%d %b %Y')
-            except ValueError:
+                parsed_time = dateparser.parse(json_time)
+                if parsed_time:
+                    item['publish_time'] = self.parse_to_utc(parsed_time)
+            except:
                 pass
-
-        if not publish_time:
-            # Try to grab meta dates
-            meta_date = response.css('meta[property="article:published_time"]::attr(content)').get()
-            if meta_date:
-                try:
-                    publish_time = datetime.fromisoformat(meta_date.replace('Z', '+00:00')).replace(tzinfo=None)
-                except ValueError:
-                    pass
-
-        if not publish_time:
-            publish_time = datetime.now()
-
-        if publish_time.tzinfo is not None:
-            publish_time = publish_time.replace(tzinfo=None)
-
-        if publish_time < self.cutoff_date:
-            self.logger.info(f"Reached cutoff date: {publish_time} < {self.cutoff_date}. Closing spider.")
-            raise CloseSpider('reached_cutoff_date')
-
-        author = response.css('.author-name::text, [rel="author"]::text').get()
-        if author:
-            author = author.strip()
         
-        # content logic
-        paragraphs = response.css('p, .content-wrapper p, .post-content p, .article-content p')
-        content_text = ' '.join([p.css('::text').getall() and ' '.join(p.css('::text').getall()).strip() or '' for p in paragraphs])
-        # clean extra spaces
-        content_text = re.sub(r'\s+', ' ', content_text).strip()
+        # Priority og:image
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if not item.get('images'):
+                item['images'] = []
+            if og_image not in item['images']:
+                item['images'].insert(0, og_image)
 
-        yield {
-            'url': response.url,
-            'title': title.strip() if title else 'Untitled',
-            'publish_time': publish_time,
-            'author': author,
-            'content': content_text,
-            'language': 'en'
-        }
+        # Stop if older than cutoff or absolute floor
+        if not self.full_scan and item['publish_time']:
+            if item['publish_time'] < self.cutoff_date:
+                return
+            if item['publish_time'] < self.earliest_date:
+                return
 
-    def errback_httpbin(self, failure):
-        if failure.check(HttpError):
-            response = failure.value.response
-            self.logger.error(f"HttpError on {response.url}: {response.status}")
-        elif failure.check(TimeoutError, TCPTimedOutError):
-            request = failure.request
-            self.logger.error(f"TimeoutError on {request.url}")
+        item['author'] = response.css('.author-name::text, [rel="author"]::text').get() or "Entrackr Staff"
+        item['country_code'] = self.country_code
+        item['country'] = self.country
+        
+        yield item

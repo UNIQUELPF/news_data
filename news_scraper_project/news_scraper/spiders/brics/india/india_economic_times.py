@@ -1,228 +1,132 @@
-# 印度economic times爬虫，负责抓取对应站点、机构或栏目内容。
-
 import scrapy
+import re
 from datetime import datetime
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class IndiaEconomicTimesSpider(scrapy.Spider):
-    """
-    Spider for Economic Times India - Economy section.
-    Covers 4 sub-sections: agriculture, economy (general/finance),
-    policy, and foreign-trade.
-
-    Uses ?curpg=N pagination on articlelist endpoints.
-    Each page returns ~16 articles within div.eachStory elements.
-    """
+class IndiaEconomicTimesSpider(SmartSpider):
     name = "india_economic_times"
-
     country_code = 'IND'
-
     country = '印度'
+    language = 'en'
     allowed_domains = ["economictimes.indiatimes.com"]
     target_table = "ind_economic_times"
+    
+    source_timezone = 'Asia/Kolkata'
+    use_curl_cffi = True
+    
+    fallback_content_selector = ".artText, .article_content, .Normal, .artText-fixed"
 
-    # Section configurations: (section_name, articlelist_cms_id, url_path_prefix)
+    # Section configurations: (section_name, msid)
+    # Using the lazyload interface for more efficient crawling
     SECTIONS = [
-        ("agriculture", "1202099874", "/news/economy/agriculture"),
-        ("finance", "1286551815", "/news/economy"),
-        ("policy", "1106944246", "/news/economy/policy"),
-        ("foreign-trade", "1200949414", "/news/economy/foreign-trade"),
+        ("india", "81582957"),
+        ("agriculture", "1202099874"),
+        ("finance", "1286551815"),
+        ("policy", "1106944246"),
+        ("foreign-trade", "1200949414"),
     ]
 
     custom_settings = {
-        'DOWNLOAD_DELAY': 0.5,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, *args, **kwargs):
-        super(IndiaEconomicTimesSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.seen_urls = set()
-
-        try:
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-            self.logger.info(f"Cutoff date: {self.cutoff_date}, existing URLs: {len(self.seen_urls)}")
-        except Exception as e:
-            self.logger.warning(f"DB init error: {e}")
-
     def start_requests(self):
-        for section_name, cms_id, url_prefix in self.SECTIONS:
-            list_url = f"https://economictimes.indiatimes.com{url_prefix}/articlelist/{cms_id}.cms?curpg=1"
+        for section_name, msid in self.SECTIONS:
+            # Lazyload URL format: lazyloadlistnew.cms?msid={msid}&curpg={page}&img=1
+            list_url = f"https://economictimes.indiatimes.com/lazyloadlistnew.cms?msid={msid}&curpg=1&img=1"
             yield scrapy.Request(
                 list_url,
                 callback=self.parse_list,
+                dont_filter=True,
                 meta={
-                    'section': section_name,
-                    'cms_id': cms_id,
-                    'url_prefix': url_prefix,
-                    'curpg': 1,
-                    'consecutive_old': 0,
-                },
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                                  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                },
+                    'section_hint': section_name,
+                    'msid': msid,
+                    'page': 1
+                }
             )
 
     def parse_list(self, response):
-        section = response.meta['section']
-        cms_id = response.meta['cms_id']
-        url_prefix = response.meta['url_prefix']
-        curpg = response.meta['curpg']
-        consecutive_old = response.meta.get('consecutive_old', 0)
+        section = response.meta['section_hint']
+        msid = response.meta['msid']
+        page = response.meta['page']
 
         articles = response.css('div.eachStory')
         if not articles:
-            self.logger.info(f"[{section}] No articles on page {curpg}, stopping section.")
+            self.logger.info(f"[{section}] No articles found on page {page}, stopping.")
             return
 
-        found_new = False
+        has_valid_item_in_window = False
         for article in articles:
             link = article.css('a::attr(href)').get()
             if not link:
                 continue
             url = response.urljoin(link)
 
-            # Skip already seen URLs
-            if url in self.seen_urls:
-                continue
-
-            # Check date from list page to avoid unnecessary detail requests
+            # Date format in lazyload: "Apr 29, 2026, 04:07 PM IST"
             date_el = article.css('time.date-format::attr(data-time)').get()
-            if not date_el:
-                date_el = article.css('time.date-format::text').get()
+            publish_time = None
             if date_el:
                 try:
-                    list_date = datetime.strptime(date_el.strip(), "%b %d, %Y, %I:%M %p IST")
-                    if list_date < self.cutoff_date:
-                        consecutive_old += 1
-                        if consecutive_old >= 32:
-                            self.logger.info(
-                                f"[{section}] 32 consecutive old articles on page {curpg}, stopping."
-                            )
-                            return
-                        continue
-                    else:
-                        consecutive_old = 0
-                        found_new = True
-                except ValueError:
-                    found_new = True
-            else:
-                found_new = True
+                    publish_time = self.parse_to_utc(datetime.strptime(date_el.strip(), "%b %d, %Y, %I:%M %p IST"))
+                except Exception as e:
+                    self.logger.debug(f"Date parsing failed for {date_el}: {e}")
 
-            self.seen_urls.add(url)
-            yield scrapy.Request(
-                url,
-                callback=self.parse_detail,
-                meta={'section': section},
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                                  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                },
-            )
+            if self.should_process(url, publish_time):
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    url,
+                    callback=self.parse_detail,
+                    meta={'section_hint': section, 'publish_time_hint': publish_time}
+                )
 
-        # Paginate: safety cap at 500 pages
-        next_pg = curpg + 1
-        if next_pg <= 500:
-            next_url = (
-                f"https://economictimes.indiatimes.com{url_prefix}"
-                f"/articlelist/{cms_id}.cms?curpg={next_pg}"
-            )
-            yield scrapy.Request(
-                next_url,
-                callback=self.parse_list,
-                meta={
-                    'section': section,
-                    'cms_id': cms_id,
-                    'url_prefix': url_prefix,
-                    'curpg': next_pg,
-                    'consecutive_old': consecutive_old,
-                },
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                                  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                },
-            )
+        # Pagination logic
+        if has_valid_item_in_window:
+            next_page = page + 1
+            if next_page <= 50: # Practical limit for lazyload pagination
+                next_url = f"https://economictimes.indiatimes.com/lazyloadlistnew.cms?msid={msid}&curpg={next_page}&img=1"
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse_list,
+                    meta={
+                        'section_hint': section,
+                        'msid': msid,
+                        'page': next_page
+                    }
+                )
 
     def parse_detail(self, response):
-        section = response.meta.get('section', '')
-        item = NewsItem()
-        item['url'] = response.url
-        item['language'] = 'English'
-        item['section'] = section
+        """Parses the detail page of an article."""
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text() | //h1[contains(@class, 'artTitle')]/text()",
+            publish_time_xpath="//time[contains(@class, 'jsdtTime')]/text() | //time[@class='date-format']/@data-time"
+        )
 
-        # Title
-        title = response.css('h1::text').get()
-        if not title:
-            title = response.css('h1.artTitle::text').get()
-        item['title'] = (title or "").strip()
+        # Priority og:image
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if not item.get('images'):
+                item['images'] = []
+            if og_image not in item['images']:
+                item['images'].insert(0, og_image)
 
-        # Publish time: try time.jsdtTime element first
-        pub_time = None
-        time_text = response.css('time.jsdtTime::text').get()
-        if time_text:
-            # Format: "Last Updated: Mar 15, 2026, 03:43:00 PM IST"
-            clean = time_text.strip()
-            for prefix in ['Last Updated:', 'Updated:', 'Published:']:
-                if clean.startswith(prefix):
-                    clean = clean[len(prefix):].strip()
-                    break
+        # Final publish_time cleaning (sometimes it has prefixes)
+        if isinstance(item.get('publish_time'), str):
             try:
-                pub_time = datetime.strptime(clean, "%b %d, %Y, %I:%M:%S %p IST")
-            except ValueError:
-                try:
-                    pub_time = datetime.strptime(clean, "%b %d, %Y, %I:%M %p IST")
-                except ValueError:
-                    self.logger.warning(f"Cannot parse date: {clean}")
+                clean_time = re.sub(r'^(Last Updated:|Updated:|Published:)', '', item['publish_time']).strip()
+                parsed = datetime.strptime(clean_time, "%b %d, %Y, %I:%M:%S %p IST")
+                item['publish_time'] = self.parse_to_utc(parsed)
+            except:
+                pass
 
-        # Fallback: date-format element
-        if not pub_time:
-            date_attr = response.css('time.date-format::attr(data-time)').get()
-            if date_attr:
-                try:
-                    pub_time = datetime.strptime(date_attr.strip(), "%b %d, %Y, %I:%M %p IST")
-                except ValueError:
-                    pass
-
-        item['publish_time'] = pub_time
-
-        # Skip articles before cutoff
-        if pub_time and pub_time < self.cutoff_date:
+        # Stop if older than cutoff
+        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
             return
 
-        # Content: .artText div contains all article content
-        content_parts = response.css('.artText ::text').getall()
-        if not content_parts:
-            # Fallback: some articles use div.article_content or div.Normal
-            content_parts = response.css('.article_content ::text, .Normal ::text').getall()
+        item['author'] = response.css('.artByline a::text, .publish_by::text').get() or "Economic Times Staff"
+        item['country_code'] = self.country_code
+        item['country'] = self.country
         
-        # Clean up whitespace and join
-        cleaned_parts = []
-        for p in content_parts:
-            text = p.strip()
-            # Ignore short javascript/css snippets or empty lines
-            if text and len(text) > 2 and "{" not in text:
-                cleaned_parts.append(text)
-                
-        item['content'] = "\n".join(cleaned_parts)
-
-        # Author
-        author = response.css('.artByline a::text').get(default='').strip()
-        if not author:
-            author = response.css('.publish_by::text').get(default='').strip()
-        item['author'] = author or "Economic Times"
-
-        if not item['title'] or not item['content']:
-            return
-
         yield item

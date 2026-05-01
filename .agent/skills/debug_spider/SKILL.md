@@ -19,9 +19,45 @@
 
 ### 第一步：列表页精准锁定 (防止 Over-crawl)
 不要使用模糊的 `article` 标签，必须锁定主列表容器。
-1. **浏览器诊断**：在控制台输入 `document.querySelectorAll('.your-selector')`。
-2. **检查点**：确认选中的元素中是否包含侧边栏的“热门文章”或“最新推荐”。
-3. **修复**：使用更长的组合类名，例如 `.main-content .post-item` 而非 `.post-item`。
+
+⛔ **禁止使用浏览器 DevTools 定位选择器！** 浏览器会执行 JavaScript 动态渲染 DOM，与爬虫实际拿到的 HTML 可能完全不同。必须使用以下"源码实测法"。
+
+#### 源码实测法（标准流程）
+
+1. **在 `crawl-worker` 容器内用 `curl_cffi` 下载真实 HTML**：
+   ```bash
+   # 下载列表页源码到容器临时文件
+   docker-compose exec crawl-worker bash -c \
+     "python3 -c \"from curl_cffi import requests; r = requests.get('<列表页URL>', impersonate='chrome110'); print(r.text)\" > /tmp/debug_list.html"
+   
+   # 将文件拷贝到本地分析
+   docker-compose cp crawl-worker:/tmp/debug_list.html ./debug_list.html
+   ```
+   > 这样获得的 HTML 与爬虫 `CurlCffiMiddleware` 实际拿到的完全一致（相同的 TLS 指纹、请求头、IP）。
+
+2. **分析 HTML 结构**：
+   ```bash
+   # 统计页面中所有 class 名出现次数，快速定位列表项容器
+   grep -oE "class=\"[^\"]+\"" debug_list.html | sort | uniq -c | sort -nr | head -n 30
+   
+   # 查看目标容器的完整 HTML 片段
+   grep -C 10 "目标类名" debug_list.html | head -n 50
+   
+   # 确认翻页链接格式
+   grep -oE "href=\"[^\"]+page[^\"]*\"" debug_list.html
+   ```
+
+3. **验证翻页路径是否有效**：
+   ```bash
+   docker-compose exec crawl-worker bash -c \
+     "python3 -c \"from curl_cffi import requests; r = requests.get('<翻页URL>', impersonate='chrome110'); print(r.status_code)\""
+   ```
+   如果返回 404，说明翻页 URL 格式已变更（如 `/page/2` → `?page=2`）。
+
+4. **检查点**：
+   - 确认选中的容器中**不包含**侧边栏的"热门文章"或"最新推荐"。
+   - 确认日期文本的实际格式（是否带前缀如 `Written by ..., 29 April 2026`）。
+5. **修复**：使用更长的组合类名，例如 `.main-content .post-item` 而非 `.post-item`。
 
 ### 第二步：详情页正文“手术刀”定位 (解决漏图)
 如果发现漏掉顶部大图或正文不全：

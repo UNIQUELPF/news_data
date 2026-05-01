@@ -27,14 +27,7 @@ class EgyptMubasherSpider(SmartSpider):
         cards = response.css('.mi-article-media-block__content')
         
         if not cards:
-            self.logger.warning(f"No cards found via CSS on {response.url}. Falling back to regex.")
-            # Fallback to regex if CSS fails (e.g. structure change)
-            article_links = re.findall(r'href=["\']?(/news/\d+/[^"\'>\s]+)', raw_html)
-            unique_links = list(dict.fromkeys(article_links))
-            for link in unique_links:
-                url = response.urljoin(link)
-                if self.should_process(url, None):
-                    yield scrapy.Request(url, callback=self.parse_detail)
+            self.logger.warning(f"No cards found via CSS on {response.url}. Stopping to avoid undated crawl.")
             return
 
         self.logger.info(f"Found {len(cards)} articles on {response.url}")

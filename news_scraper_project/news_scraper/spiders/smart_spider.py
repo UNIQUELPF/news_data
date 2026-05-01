@@ -25,6 +25,12 @@ class SmartSpider(scrapy.Spider):
     # Default start date if DB is empty
     default_start_date = None
 
+    # When True, should_process() returns False if no publish_time is provided.
+    # This ensures pagination stops when date extraction fails on a listing page.
+    # Defaults to True to enforce the skill guideline: no date = no crawl, no pagination.
+    # Set to False only for spiders where list-page date extraction is genuinely impossible.
+    strict_date_required = True
+
     def __init__(self, full_scan=False, window_days=None, *args, **kwargs):
         super(SmartSpider, self).__init__(*args, **kwargs)
         # Parse command line arguments
@@ -67,8 +73,14 @@ class SmartSpider(scrapy.Spider):
                 # Ensure latest_time is naive for comparison
                 if latest_time.tzinfo:
                     latest_time = latest_time.replace(tzinfo=None)
-                self.cutoff_date = latest_time - timedelta(days=window)
-                logger.info(f"[{self.name}] INCREMENTAL MODE. Latest DB record: {latest_time}, Window: {window}d, Cutoff: {self.cutoff_date}")
+                
+                # Dynamic cutoff based on history
+                calculated_cutoff = latest_time - timedelta(days=window)
+                
+                # Crucial Fix: Ensure cutoff_date never goes below the absolute floor (earliest_date)
+                self.cutoff_date = max(calculated_cutoff, self.earliest_date)
+                
+                logger.info(f"[{self.name}] INCREMENTAL MODE. Latest DB: {latest_time}, Window: {window}d, Cutoff: {self.cutoff_date}")
 
         # 4. Load recent URLs for deduplication
         # Note: In a larger setup, this should be replaced by Redis Bloom Filter
@@ -136,11 +148,33 @@ class SmartSpider(scrapy.Spider):
             logger.warning(f"[{self.name}] Timezone conversion failed for {dt_obj}: {e}")
             return dt_obj.replace(tzinfo=None) if dt_obj.tzinfo else dt_obj
 
+    def parse_date(self, date_str: str) -> datetime:
+        """
+        Robustly parses a date string and converts it to a naive UTC datetime.
+        Returns None if parsing fails.
+        """
+        if not date_str:
+            return None
+        try:
+            import dateparser
+            # We don't use strict timezone settings here to allow dateparser 
+            # to detect the format naturally. parse_to_utc handles the rest.
+            parsed = dateparser.parse(date_str)
+            if parsed:
+                return self.parse_to_utc(parsed)
+        except Exception as e:
+            logger.warning(f"[{self.name}] Failed to parse date string '{date_str}': {e}")
+        return None
+
     def should_process(self, url: str, publish_time: datetime = None) -> bool:
         """
         Determines if a URL should be processed.
         - Full Scan: Processes everything down to the earliest_date floor.
         - Incremental: Processes new URLs within the sliding window (cutoff_date).
+        
+        If strict_date_required = True on the spider, this method returns False
+        when publish_time is None in incremental mode. This prevents pagination
+        from running wild when date selectors fail on the listing page.
         """
         # 1. Absolute floor: Never process anything older than our project start date
         if publish_time and publish_time < self.earliest_date:
@@ -150,11 +184,15 @@ class SmartSpider(scrapy.Spider):
         if self.full_scan:
             return True
         
-        # 3. Incremental: Deduplication check
+        # 3. Strict mode: require a date to proceed (prevents runaway pagination)
+        if self.strict_date_required and publish_time is None:
+            return False
+        
+        # 4. Incremental: Deduplication check
         if self.is_already_scraped(url):
             return False
             
-        # 4. Incremental: Sliding window check (e.g. 7 days back from last record)
+        # 5. Incremental: Sliding window check (e.g. 7 days back from last record)
         if publish_time and publish_time < self.cutoff_date:
             return False
             
