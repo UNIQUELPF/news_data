@@ -1,100 +1,34 @@
-# 沙特阿拉伯spa spider爬虫，负责抓取对应站点、机构或栏目内容。
-
 import json
-from datetime import datetime, timedelta, timezone
-
-import psycopg2
+from datetime import datetime, timezone
 import scrapy
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class SaudiPressAgencySpider(scrapy.Spider):
+class SaudiPressAgencySpider(SmartSpider):
     """
     Saudi Press Agency (SPA) spider using Native JSON API for pagination.
-    Supports full scan (from 2026-01-01) and incremental modes.
     """
     name = "saudi_spa"
-
     country_code = 'SAU'
-
     country = '沙特阿拉伯'
-    allowed_domains = ["portalapi.spa.gov.sa"]
-
-    target_table = "saudi_spa_news"
-    default_cutoff = datetime(2026, 1, 1)
-
+    language = 'ar'
+    
     custom_settings = {
-        "DOWNLOAD_DELAY": 0.5,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 5,
+        "DOWNLOAD_DELAY": 1,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
         "RANDOMIZE_DOWNLOAD_DELAY": True,
     }
-
-    def __init__(self, full_scan="false", start_date=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self._init_db_and_get_cutoff()
-        self.target_timezone = timezone(timedelta(hours=8))
-        if start_date:
-            try:
-                self.cutoff_date = datetime.strptime(str(start_date), "%Y-%m-%d")
-                self.logger.info(f"Using custom start_date cutoff: {self.cutoff_date}")
-            except ValueError:
-                self.logger.warning(f"Invalid start_date '{start_date}', expected YYYY-MM-DD. Using cutoff {self.cutoff_date}")
-        self.seen_urls = set()
-
-    def _init_db_and_get_cutoff(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) UNIQUE,
-                    title VARCHAR(500),
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-
-            cur.close()
-            conn.close()
-
-            if self.full_scan:
-                return self.default_cutoff
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return max(state["cutoff_date"], self.default_cutoff)
-        except Exception as exc:
-            self.logger.error(f"DB init failed: {exc}")
-            return self.default_cutoff
 
     def start_requests(self):
         params_ar = "by_latest=1&per_page=50&w_content=1&w_tag=1&page=1&l=ar"
         url = f"https://portalapi.spa.gov.sa/api/v1/news?{params_ar}"
         yield scrapy.Request(
             url=url,
-            callback=self.parse_api_page,
+            callback=self.parse_api,
             meta={'page': 1, 'lang': 'ar', 'failed_count': 0},
             dont_filter=True
         )
 
-    def parse_api_page(self, response):
+    def parse_api(self, response):
         try:
             data = json.loads(response.text)
         except Exception as e:
@@ -108,67 +42,76 @@ class SaudiPressAgencySpider(scrapy.Spider):
         self.logger.info(f"Fetched page {response.meta['page']} - items count: {len(items)}")
 
         if not items:
-            self.logger.info(f"No items found on page {response.meta['page']}, stopping.")
             return
 
-        reached_cutoff = False
-
+        has_valid_item_in_window = False
         for item in items:
             news_id = item.get('uuid')
             title = item.get('title', '').strip()
-            
-            if not news_id or not title:
+            if not news_id:
                 continue
 
-            article_url = f"https://www.spa.gov.sa/N{news_id.replace('N','')}"
+            url = f"https://www.spa.gov.sa/N{news_id.replace('N','')}"
 
             # Parse publish time
-            pub_time = None
+            publish_time = None
             published_at = item.get('published_at')
             if published_at:
                 try:
-                    pub_time = datetime.fromtimestamp(
-                        published_at, tz=timezone.utc
-                    ).astimezone(self.target_timezone).replace(tzinfo=None)
+                    # API returns timestamp
+                    publish_time = datetime.fromtimestamp(published_at, tz=timezone.utc)
+                    publish_time = self.parse_to_utc(publish_time)
                 except Exception:
                     pass
-            
-            if not pub_time:
-                pub_time = datetime.now()
 
-            # Check cutoff
-            if pub_time < self.cutoff_date:
-                self.logger.debug(f"Reached cutoff {self.cutoff_date} with article from {pub_time} - Stopping pagination")
-                reached_cutoff = True
+            if not self.should_process(url, publish_time):
+                if publish_time and publish_time < self.cutoff_date:
+                    self.logger.info(f"Hit date boundary at {publish_time}. Stopping pagination.")
+                    has_valid_item_in_window = False
+                    break
                 continue
 
-            # Extract Content
+            has_valid_item_in_window = True
+
+            # Extract Content via ContentEngine
             content_html = item.get('content', '')
-            if content_html:
-                soup = BeautifulSoup(content_html, 'html.parser')
-                content = soup.get_text(separator='\n', strip=True)
-            else:
-                content = f"[أخبار] {title}"
+            content_data = self.extract_content_from_html(content_html, url)
 
             # Section & Language
             category = item.get('category', {})
             section = category.get('name', 'عام') if isinstance(category, dict) else 'عام'
-            language = item.get('locale', response.meta['lang'])
-            author = "وكالة الأنباء السعودية"
+            lang = item.get('locale', response.meta['lang'])
 
-            news_item = NewsItem(
-                url=article_url,
-                title=title,
-                content=content,
-                publish_time=pub_time,
-                author=author,
-                language=language,
-                section=section
-            )
-            yield news_item
+            # Normalize images: Extract from API 'image' field and 'content'
+            images = []
+            main_image = item.get('image', {})
+            if isinstance(main_image, dict):
+                main_image_url = main_image.get('path')
+                if main_image_url:
+                    images.append(main_image_url)
 
-        # Continue pagination if we haven't reached the cutoff
-        if not reached_cutoff:
+            # Extract images from content_data
+            raw_content_images = content_data.get("images", [])
+            for img in raw_content_images:
+                img_url = img.get("url") if isinstance(img, dict) else img
+                if img_url and img_url not in images:
+                    images.append(img_url)
+
+            yield {
+                "url": url,
+                "title": title,
+                "publish_time": publish_time,
+                "author": "وكالة الأنباء السعودية",
+                "language": lang,
+                "section": section,
+                "country_code": self.country_code,
+                "country": self.country,
+                **content_data,
+                "images": images
+            }
+
+        # Pagination
+        if has_valid_item_in_window:
             current_page = response.meta['page']
             meta_pagination = data.get('meta', {})
             last_page = meta_pagination.get('last_page', 999999)
@@ -180,9 +123,15 @@ class SaudiPressAgencySpider(scrapy.Spider):
                 
                 yield scrapy.Request(
                     url=next_url,
-                    callback=self.parse_api_page,
+                    callback=self.parse_api,
                     meta={'page': next_page, 'lang': response.meta['lang'], 'failed_count': 0},
                     dont_filter=True
                 )
-            else:
-                self.logger.info("Reached last page according to API meta.")
+
+    def extract_content_from_html(self, content_html, url):
+        """Helper to use ContentEngine on raw HTML string."""
+        from pipeline.content_engine import ContentEngine
+        return ContentEngine.process(
+            raw_html=f"<html><body>{content_html}</body></html>",
+            base_url=url
+        )
