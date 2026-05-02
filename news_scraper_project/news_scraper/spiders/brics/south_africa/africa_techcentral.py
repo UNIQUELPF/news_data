@@ -1,176 +1,84 @@
-# 南非africa techcentral爬虫，负责抓取对应站点、机构或栏目内容。
-
-import re
-from datetime import datetime
-
-import psycopg2
 import scrapy
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class AfricaTechCentralSpider(scrapy.Spider):
+class AfricaTechCentralSpider(SmartSpider):
+    """
+    South Africa TechCentral spider.
+    Modernized V2: Standard WordPress-style list/detail spider.
+    """
     name = 'africa_techcentral'
-
     country_code = 'ZAF'
-
     country = '南非'
+    language = 'en'
+    source_timezone = 'Africa/Johannesburg'
+    use_curl_cffi = True
+    fallback_content_selector = ".entry-content, .post-content"
     allowed_domains = ['techcentral.co.za']
-    target_table = 'afr_techcentral'
-
-    # Do not use anti-fingerprint tools unless necessary
-    use_curl_cffi = False
 
     custom_settings = {
-        'CLOSESPIDER_ITEMCOUNT': 2000,
-        # No direct delay
-        'DOWNLOAD_DELAY': 0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        'DOWNLOAD_DELAY': 0.5,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'RANDOMIZE_DOWNLOAD_DELAY': True,
         'DOWNLOADER_MIDDLEWARES': {
             'news_scraper.middlewares.CurlCffiMiddleware': 500,
-            'news_scraper.middlewares.BatchDelayMiddleware': 543,
-        },
-        'BATCH_SIZE': 500,
-        'BATCH_DELAY': 20,
-        'ITEM_PIPELINES': {
-            'news_scraper.pipelines.PostgresPipeline': 300,
         }
     }
 
-    def __init__(self, *args, **kwargs):
-        super(AfricaTechCentralSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.seen_urls = set()
-        
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(AfricaTechCentralSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider._init_db()
-        return spider
-        
-    def _init_db(self):
-        settings = self.settings.get('POSTGRES_SETTINGS', {})
-        if not settings:
-            return
-            
-        try:
-            conn = psycopg2.connect(
-                dbname=settings['dbname'], user=settings['user'],
-                password=settings['password'], host=settings['host'], port=settings['port']
-            )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    content TEXT,
-                    url TEXT UNIQUE,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-        except Exception as e:
-            self.logger.error(f"Failed to connect to DB for initialization: {e}")
-
-    def closed(self, reason):
-        return
-
     def start_requests(self):
-        # Initial request to page 1
         url = "https://techcentral.co.za/category/news/page/1/"
-        yield scrapy.Request(url, callback=self.parse_list, cb_kwargs={'page': 1})
+        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1})
 
-    def parse_list(self, response, page):
+    def parse_list(self, response):
         articles = response.css('article')
         if not articles:
-            self.logger.info(f"No articles found on page {page}. Stopping.")
+            self.logger.info(f"No articles found on {response.url}. Stopping.")
             return
 
-        all_old = True
+        has_valid_item_in_window = False
         for article in articles:
-            # title & link
+            # link
             title_node = article.css('h2.is-title a, h3.title a, a.image-link')
-            link = title_node.css('::attr(href)').get()
-            title = title_node.css('::text').get() or title_node.css('::attr(title)').get() or "Unknown Title"
-            
-            if not link:
+            url = title_node.css('::attr(href)').get()
+            if not url:
                 continue
 
-            title = title.strip()
-            
             # datetime
-            time_node = article.css('time::attr(datetime)')
-            date_str = time_node.get()
+            date_str = article.css('time::attr(datetime)').get()
+            publish_time = self.parse_date(date_str)
             
-            publish_time = None
-            if date_str:
-                try:
-                    publish_time = datetime.fromisoformat(date_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                except Exception:
-                    pass
-            
-            if not publish_time:
-                publish_time = datetime.now()
-
-            # check cutoff
-            if publish_time >= self.cutoff_date:
-                all_old = False
-            else:
-                continue
-
-            if link not in self.seen_urls:
-                self.seen_urls.add(link)
-                
+            if self.should_process(url, publish_time):
+                has_valid_item_in_window = True
                 yield scrapy.Request(
-                    link,
-                    callback=self.parse_article,
-                    cb_kwargs={'title': title, 'publish_time': publish_time}
+                    url,
+                    callback=self.parse_detail,
+                    meta={'publish_time_hint': publish_time}
                 )
+            elif publish_time and publish_time < self.cutoff_date:
+                self.logger.info(f"Hit date boundary at {publish_time}. Stopping pagination.")
+                has_valid_item_in_window = False
+                break
 
-        if not all_old and len(articles) > 0:
-            next_page = page + 1
+        if has_valid_item_in_window:
+            next_page = response.meta['page'] + 1
             next_url = f"https://techcentral.co.za/category/news/page/{next_page}/"
-            yield scrapy.Request(next_url, callback=self.parse_list, cb_kwargs={'page': next_page})
+            yield scrapy.Request(next_url, callback=self.parse_list, meta={'page': next_page})
 
-    def parse_article(self, response, title, publish_time):
-        # find author
-        author = response.css('span.meta-author a::text, a.author::text, meta[name="author"]::attr(content)').get()
-        if author:
-            author = author.strip()
+    def parse_detail(self, response):
+        # Automated extraction using SmartSpider V2
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1//text()",
+            publish_time_xpath="//time/@datetime"
+        )
         
-        # paragraphs
-        paragraphs = response.css('div.post-content p, div.entry-content p')
-        if not paragraphs:
-            paragraphs = response.css('p')
-            
-        content_text = ' '.join([p.css('::text').getall() and ' '.join(p.css('::text').getall()).strip() or '' for p in paragraphs])
-        content_text = re.sub(r'\s+', ' ', content_text).strip()
-
-        if not content_text:
-            return
-
-        yield {
-            'url': response.url,
-            'title': title,
-            'publish_time': publish_time,
-            'author': author,
-            'content': content_text,
-            'language': 'en'
-        }
+        # Ensure main image is captured (trafilatura sometimes misses the lead image in WP)
+        main_image = response.css(".entry-content img::attr(src), .post-content img::attr(src)").get() or \
+                     response.xpath("//meta[@property='og:image']/@content").get()
+        if main_image:
+            main_image = response.urljoin(main_image)
+            images = item.get('images') or []
+            if main_image not in images:
+                images.insert(0, main_image)
+                item['images'] = images
+        
+        yield item

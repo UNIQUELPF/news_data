@@ -1,102 +1,36 @@
 import json
-from datetime import datetime
-
-import psycopg2
 import scrapy
-from news_scraper.utils import get_incremental_state
+from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class AfricaIolSpider(scrapy.Spider):
+class AfricaIolSpider(SmartSpider):
+    """
+    South Africa IOL spider.
+    Modernized V2: Uses the IOL API for efficient discovery and ContentEngine for extraction.
+    """
     name = 'africa_iol'
-
     country_code = 'ZAF'
-
     country = '南非'
-    allowed_domains = ['iol.co.za']
-    target_table = 'afr_iol'
-
+    language = 'en'
+    source_timezone = 'Africa/Johannesburg'
     use_curl_cffi = True
+    fallback_content_selector = '[class*="article_content"]'
+    allowed_domains = ['iol.co.za']
 
     custom_settings = {
-        'CLOSESPIDER_ITEMCOUNT': 0,
-        'DOWNLOAD_DELAY': 0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        'DOWNLOAD_DELAY': 0.5,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'RANDOMIZE_DOWNLOAD_DELAY': True,
         'DOWNLOADER_MIDDLEWARES': {
             'news_scraper.middlewares.CurlCffiMiddleware': 500,
-            'news_scraper.middlewares.BatchDelayMiddleware': 543,
-        },
-        'BATCH_SIZE': 500,
-        'BATCH_DELAY': 20,
-        'ITEM_PIPELINES': {
-            'news_scraper.pipelines.PostgresPipeline': 300,
         }
     }
-
-    def __init__(self, *args, **kwargs):
-        super(AfricaIolSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime(2026, 1, 1)
-        self.seen_urls = set()
-        
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(AfricaIolSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider._init_db()
-        return spider
-        
-    def _init_db(self):
-        settings = self.settings.get('POSTGRES_SETTINGS', {})
-        if not settings:
-            return
-            
-        try:
-            conn = psycopg2.connect(
-                dbname=settings['dbname'], user=settings['user'],
-                password=settings['password'], host=settings['host'], port=settings['port']
-            )
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT,
-                    publish_time TIMESTAMP,
-                    author TEXT,
-                    content TEXT,
-                    url TEXT UNIQUE,
-                    language TEXT,
-                    section TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.seen_urls = state["scraped_urls"]
-            if state["source"] != "default":
-                self.logger.info(f"Incremental scraping starting from cutoff date: {self.cutoff_date} ({state['source']})")
-            else:
-                self.logger.info(f"No existing records found. Starting from default cutoff: {self.cutoff_date}")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to connect to DB for initialization: {e}")
-
-    def closed(self, reason):
-        return
 
     def start_requests(self):
         yield self.make_api_request(page=1)
 
     def make_api_request(self, page):
+        # We target business/economy specifically as per the original spider
         url = f"https://iol.co.za/api-proxy/apiv1/pub/articles/get-all/?exclude_fields=widgets,images,blur&limit=100&publication=iol&section=business&subsection=economy&page={page}"
         headers = {
             "consumer-key": "759d7cf855545a3177a2ca5ecbebbc83b74b5cb8",
@@ -106,87 +40,90 @@ class AfricaIolSpider(scrapy.Spider):
         return scrapy.Request(
             url,
             headers=headers,
-            callback=self.parse_api_response,
-            cb_kwargs={'page': page},
+            callback=self.parse_api,
+            meta={'page': page},
             dont_filter=True
         )
 
-    def parse_api_response(self, response, page):
+    def parse_api(self, response):
         try:
-            data = json.loads(response.body)
+            data = json.loads(response.text)
         except Exception as e:
-            self.logger.error(f"Failed to parse JSON on page {page}: {e}")
+            self.logger.error(f"Failed to parse JSON on {response.url}: {e}")
             return
 
         if not data:
-            self.logger.info(f"Empty data on page {page}. Stopping pagination.")
+            self.logger.info("Empty data from API. Stopping pagination.")
             return
 
-        all_old = True
-
+        has_valid_item_in_window = False
         for item in data:
             pub_url = item.get('pub_url')
             if not pub_url:
                 continue
                 
-            full_url = "https://www.iol.co.za" + pub_url if not pub_url.startswith('http') else pub_url
+            url = "https://www.iol.co.za" + pub_url if not pub_url.startswith('http') else pub_url
             
-            # published looks like epoch ms or string? Subagent said "Epoch ms" but let's be careful
+            # Date extraction logic (handles ms, s, and strings)
             pub_val = item.get('published')
             publish_time = None
             if isinstance(pub_val, dict) and '$date' in pub_val:
                 try:
-                    publish_time = datetime.fromtimestamp(int(pub_val['$date']) / 1000.0)
-                except Exception:
-                    pass
+                    publish_time = self.parse_to_utc(datetime.fromtimestamp(int(pub_val['$date']) / 1000.0))
+                except Exception: pass
             elif isinstance(pub_val, (int, float)):
-                # epoch ms or s
                 try:
-                    if pub_val > 253402300799: # Larger than year 9999 in seconds, likely ms
-                        publish_time = datetime.fromtimestamp(pub_val / 1000.0)
-                    else:
-                        publish_time = datetime.fromtimestamp(pub_val)
-                except Exception:
-                    pass
+                    if pub_val > 253402300799: # ms
+                        publish_time = self.parse_to_utc(datetime.fromtimestamp(pub_val / 1000.0))
+                    else: # s
+                        publish_time = self.parse_to_utc(datetime.fromtimestamp(pub_val))
+                except Exception: pass
             elif isinstance(pub_val, str):
-                try:
-                    # try to parse as iso format
-                    publish_time = datetime.fromisoformat(pub_val.replace('Z', '+00:00')).replace(tzinfo=None)
-                except Exception:
-                    pass
+                publish_time = self.parse_date(pub_val)
 
-            if not publish_time:
-                publish_time = datetime.now()
+            if not self.should_process(url, publish_time):
+                # Stop pagination if we hit old content in the API stream
+                if publish_time and publish_time < self.cutoff_date:
+                    self.logger.info(f"Hit date boundary at {publish_time}. Stopping pagination.")
+                    has_valid_item_in_window = False
+                    break
+                continue
 
-            if publish_time.tzinfo is not None:
-                publish_time = publish_time.replace(tzinfo=None)
+            has_valid_item_in_window = True
 
-            if publish_time >= self.cutoff_date:
-                all_old = False
-            else:
-                continue # skip older articles
-
-            if full_url not in self.seen_urls:
-                self.seen_urls.add(full_url)
-                
-                title = item.get('title', 'Untitled')
-                
-                authors = item.get('authors', [])
-                author_names = [a.get('name') for a in authors if type(a) == dict and a.get('name')]
-                author = ', '.join(author_names) if author_names else None
-                
-                content_text = item.get('plain_text', '').strip()
-                if not content_text:
-                    continue
-                
-                yield {
-                    'url': full_url,
-                    'title': title,
-                    'publish_time': publish_time,
-                    'author': author,
-                    'content': content_text,
-                    'language': 'en'
+            # Metadata from API
+            title = item.get('title', 'Untitled')
+            authors = item.get('authors', [])
+            author_names = [a.get('name') for a in authors if isinstance(a, dict) and a.get('name')]
+            author = ', '.join(author_names) if author_names else None
+            
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                meta={
+                    'publish_time_hint': publish_time,
+                    'title_hint': title,
+                    'author_hint': author
                 }
+            )
 
-        if not all_old and len(data) > 0:
-            yield self.make_api_request(page + 1)
+        if has_valid_item_in_window:
+            next_page = response.meta['page'] + 1
+            yield self.make_api_request(next_page)
+
+    def parse_detail(self, response):
+        # Merge API hints with detail page content via auto_parse_item
+        item = self.auto_parse_item(response)
+        
+        # Manual image fallback (IOL's widget-based layout can confuse trafilatura)
+        if not item.get('images'):
+            # Priority: 1. Picture tag (main article image), 2. OG Image meta
+            main_image = response.css("picture img::attr(src)").get() or \
+                         response.xpath("//meta[@property='og:image']/@content").get()
+            if main_image:
+                item['images'] = [response.urljoin(main_image)]
+        
+        if not item.get('author') and response.meta.get('author_hint'):
+            item['author'] = response.meta['author_hint']
+            
+        yield item
