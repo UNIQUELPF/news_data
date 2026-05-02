@@ -1,7 +1,7 @@
 # Skill: 新闻爬虫 V2 现代化改造指南 (News Spider V2 Modernization)
 
 ## 描述 (Description)
-此技能用于将传统的旧版新闻爬虫重构为现代化的 `SmartSpider` V2 架构。它实现了从老式 Scrapy 爬虫向统一、智能、增量式框架的自动化迁移。
+此技能用于将传统的旧版新闻爬虫重构为现代化的 `SmartSpider` V2 架构。它实现了从老式 Scrapy 爬虫向统一、智能、增量式框架的自动化迁移。可以参考代码：news_scraper_project/news_scraper/spiders/albania/albania.py
 
 ## 目标 (Goal)
 确保所有新闻爬虫遵循标准化的 V2 架构，包括：正确的 UTC 时间处理、TLS 指纹模拟 (curl-cffi)、以及在保留原有验证选择器的基础上实现自动正文提取。

@@ -1,124 +1,108 @@
-import time
-from datetime import datetime
-
-import psycopg2
 import scrapy
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
+import dateparser
+from datetime import datetime
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class IranMehrEnSpider(scrapy.Spider):
+class IranMehrEnSpider(SmartSpider):
     name = 'iran_mehr_en'
-
+    source_timezone = 'Asia/Tehran'
+    fallback_content_selector = ".item-text"
     country_code = 'IRN'
-
     country = '伊朗'
+    language = 'en'
+    
     allowed_domains = ['en.mehrnews.com']
     
-    def __init__(self, *args, **kwargs):
-        super(IranMehrEnSpider, self).__init__(*args, **kwargs)
-        self.target_table = 'iran_mehr_en'
-        self.full_scan = str(kwargs.get('full_scan', 'false')).lower() in ('1', 'true', 'yes')
-        self.cutoff_date = self._init_db()
-        self.item_count = 0
-        self.logger.info(f"Spider initialized. full_scan={self.full_scan}, cutoff date={self.cutoff_date}")
+    custom_settings = {
+        "CONCURRENT_REQUESTS": 2,
+        "DOWNLOAD_DELAY": 1.0,
+        "AUTOTHROTTLE_ENABLED": True,
+    }
 
-    def _init_db(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(500),
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    content TEXT,
-                    url VARCHAR(500) UNIQUE,
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
-            cur.close()
-            conn.close()
-            if self.full_scan:
-                return datetime(2026, 1, 1)
+    use_curl_cffi = True
 
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            if state["source"] in ("unified", "legacy"):
-                now = datetime.now()
-                return datetime(now.year, now.month, now.day)
-
-            return datetime(2026, 1, 1)
-        except Exception as exc:
-            self.logger.error(f"Database init error: {exc}")
-            return datetime(2026, 1, 1)
-
-    def start_requests(self):
+    async def start(self):
         # Economy section
-        yield scrapy.Request(url="https://en.mehrnews.com/service/economy", callback=self.parse_list)
+        yield scrapy.Request(url="https://en.mehrnews.com/service/economy", callback=self.parse, dont_filter=True)
 
-    def parse_list(self, response):
-        # From screenshot 2: <li class="news" ...> <figure> <a href="/news/...">
+    def parse(self, response):
+        # Extract news items
         news_items = response.css('li.news')
+        self.logger.info(f"Found {len(news_items)} news items on {response.url}")
+
+        has_valid_item_in_window = False
         for news in news_items:
             link = news.css('h3 a::attr(href)').get() or news.css('figure a::attr(href)').get()
-            if link:
-                full_url = response.urljoin(link)
-                yield scrapy.Request(url=full_url, callback=self.parse_detail)
+            if not link:
+                continue
+            
+            url = response.urljoin(link)
+            
+            # Extract date from the summary text if possible
+            # Example: "TEHRAN, Apr. 29 (MNA) – ..."
+            summary_text = news.css('p::text').get('')
+            publish_time = None
+            if '–' in summary_text:
+                date_part = summary_text.split('–')[0] # "TEHRAN, Apr. 29 (MNA) "
+                # Try to parse date from "Apr. 29"
+                import re
+                date_match = re.search(r'([A-Z][a-z]{2}\.? \d{1,2})', date_part)
+                if date_match:
+                    date_str = date_match.group(1)
+                    # Add current year if not present
+                    publish_time = dateparser.parse(date_str)
+                    if publish_time:
+                        publish_time = self.parse_to_utc(publish_time)
 
-        # Pagination using API endpoint structure 
-        # The frontend loads pages using /page/archive.xhtml?mn=130&dt=1&pi=N
-        current_page_num = response.meta.get('page_num', 1)
-        next_page_num = current_page_num + 1
-        next_page_url = f"https://en.mehrnews.com/page/archive.xhtml?mn=130&dt=1&pi={next_page_num}"
-        
-        yield scrapy.Request(url=next_page_url, callback=self.parse_list, meta={'page_num': next_page_num})
+            if not self.should_process(url, publish_time):
+                if publish_time and publish_time < self.cutoff_date:
+                    self.logger.info(f"Hit date boundary at {publish_time}. Stopping pagination.")
+                    has_valid_item_in_window = False
+                    break
+                continue
+                
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                dont_filter=self.full_scan,
+                meta={'publish_time_hint': publish_time}
+            )
+
+        if has_valid_item_in_window:
+            # Pagination
+            # The original code used a complex archive URL, but often there's a "Next" button.
+            # Let's check for a standard pagination link first.
+            next_page = response.css('li.next a::attr(href)').get()
+            if next_page:
+                yield scrapy.Request(response.urljoin(next_page), callback=self.parse, dont_filter=True)
+            else:
+                # Fallback to the archive URL logic if needed
+                current_page_num = response.meta.get('page_num', 1)
+                next_page_num = current_page_num + 1
+                next_page_url = f"https://en.mehrnews.com/page/archive.xhtml?mn=130&dt=1&pi={next_page_num}"
+                yield scrapy.Request(url=next_page_url, callback=self.parse, dont_filter=True, meta={'page_num': next_page_num})
 
     def parse_detail(self, response):
-        item = NewsItem()
-        item['url'] = response.url
-        item['title'] = response.css('h1.title::text').get('').strip()
-        item['author'] = response.css('.item-author span::text').get('Mehr News Agency (English)').strip()
+        # Standard auto-parsing
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[contains(@class, 'title')]/text()",
+            publish_time_xpath="//div[contains(@class, 'item-date')]//span/text()",
+        )
         
-        # Content
-        content_parts = response.css('.item-text p::text, .item-text div::text').getall()
-        item['content'] = '\n'.join([p.strip() for p in content_parts if p.strip()])
+        # Prioritize og:image
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        if og_image:
+            if 'images' not in item or not item['images']:
+                item['images'] = [og_image]
+            elif og_image not in item['images']:
+                item['images'].insert(0, og_image)
         
-        # Date parsing
-        # Example: Mar 15, 2026, 11:21
-        date_str = response.css('.item-date span::text').get('')
-        if date_str:
-            try:
-                # Simplified date parsing for standard English format
-                # Mar 15, 2026, 11:21 -> remove extra comma after year if any
-                clean_date = date_str.replace(',', '').split() # ['Mar', '15', '2026', '11:21']
-                dt_obj = datetime.strptime(' '.join(clean_date[:3]), '%b %d %Y')
-                
-                if dt_obj < self.cutoff_date:
-                    return
-                item['publish_time'] = dt_obj
-            except Exception as e:
-                self.logger.warning(f"Date parsing failed for {response.url}: {e}")
-                return
-        else:
-            return
+        # Clean images
+        if 'images' in item and item['images']:
+            item['images'] = [img if isinstance(img, str) else img.get('url') for img in item['images'] if img]
 
-        item['language'] = 'en'
         item['section'] = 'Economy'
         
-        self.item_count += 1
-        if self.item_count % 500 == 0:
-            self.logger.info(f"Reached {self.item_count} items. Sleeping 20s...")
-            time.sleep(20)
-
         yield item
