@@ -1,212 +1,113 @@
-# 印度尼西亚ina news爬虫，负责抓取对应站点、机构或栏目内容。
-
-import re
-from datetime import datetime
-from urllib.parse import urlparse
-
-import psycopg2
 import scrapy
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
-
-class IndonesiaInaNewsSpider(scrapy.Spider):
+class IndonesiaInaNewsSpider(SmartSpider):
     name = "indonesia_ina_news"
-
     country_code = 'IDN'
-
     country = '印度尼西亚'
+    language = 'en'
     allowed_domains = ["ina.go.id", "www.ina.go.id"]
-    start_urls = ["https://www.ina.go.id/ina-in-the-news/"]
-
     target_table = "idn_ina_news"
-    default_cutoff = datetime(2026, 1, 1)
+    
+    source_timezone = 'Asia/Jakarta'
+    use_curl_cffi = True
+    
+    # Root container for the article content as seen in the screenshot
+    fallback_content_selector = "#block-ina-content"
 
     custom_settings = {
-        "DOWNLOAD_DELAY": 0.5,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_DELAY": 1.0,
+        "CONCURRENT_REQUESTS": 2,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self._init_db_and_get_cutoff()
-        self.seen_urls = set()
+    async def start(self):
+        yield scrapy.Request(
+            url="https://www.ina.go.id/ina-in-the-news/",
+            callback=self.parse_list,
+            dont_filter=True
+        )
 
-    def _init_db_and_get_cutoff(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) UNIQUE,
-                    title VARCHAR(500),
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    def parse_list(self, response):
+        # Use XPath for more robust element finding
+        cards = response.xpath("//div[contains(@class, 'media-content_item')]")
+        self.logger.info(f"Discovered {len(cards)} potential news cards on the page.")
+        
+        new_links_found = 0
+        seen_urls = set()
+        
+        for card in cards:
+            link = card.xpath(".//a[contains(@href, '/ina-in-the-news/')]/@href").get()
+            if not link:
+                continue
+            
+            full_url = response.urljoin(link)
+            if full_url in seen_urls:
+                continue
+            seen_urls.add(full_url)
+
+            if full_url.rstrip("/") == "https://www.ina.go.id/ina-in-the-news":
+                continue
+
+            # Extract date from list card as a reliable fallback
+            list_date_str = card.xpath(".//div[contains(@class, 'media-content_post-date')]/text()").get()
+            publish_time_hint = self.parse_date(list_date_str) if list_date_str else None
+            
+            # CRITICAL: Early stop if date is behind cutoff
+            if publish_time_hint and not self.full_scan:
+                if publish_time_hint.date() < self.cutoff_date.date():
+                    self.logger.info(f"STOPPING: Article date {publish_time_hint.date()} is older than cutoff {self.cutoff_date.date()}. URL: {full_url}")
+                    continue
+
+            # Check if we should process
+            if self.should_process(full_url, publish_time_hint):
+                new_links_found += 1
+                yield scrapy.Request(
+                    full_url, 
+                    callback=self.parse_detail,
+                    meta={'list_date_str': list_date_str}
                 )
-                """
-            )
-            conn.commit()
+        
+        if new_links_found == 0 and len(cards) > 0:
+            self.logger.warning("No NEW links found, but cards were present. All articles might be duplicates or filtered.")
 
-            cur.close()
-            conn.close()
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=self.full_scan,
-            )
-            self.seen_urls = state["scraped_urls"]
-            return max(state["cutoff_date"], self.default_cutoff)
-        except Exception as exc:
-            self.logger.error(f"DB init failed: {exc}")
-            return self.default_cutoff
+    def parse_detail(self, response):
+        list_date_str = response.meta.get('list_date_str')
+        
+        # V2 handles image/content extraction automatically
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//div[contains(@class, 'blogpost1_title-wrapper')]//h1/text()",
+            publish_time_xpath="//div[contains(@class, 'blogpost1_title-wrapper')]//div[contains(@class, 'text-size-small')]/text()"
+        )
 
-    def parse(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
+        # Manually supplement images to ensure the cover is captured
+        # Try og:image first as it's usually optimized for external embedding
+        og_image = response.xpath("//meta[@property='og:image']/@content").get()
+        
+        cover_node = response.css(".blogpost1_image-wrapper img")
+        cover_image = cover_node.css("::attr(src)").get()
+        srcset = cover_node.css("::attr(srcset)").get()
+        if srcset:
+            cover_image = srcset.split(",")[-1].strip().split(" ")[0]
+            
+        final_cover = og_image or cover_image
+        if final_cover:
+            full_img_url = response.urljoin(final_cover)
+            item.setdefault('images', [])
+            if full_img_url not in item['images']:
+                item['images'].insert(0, full_img_url)
 
-        for card in soup.select("div.media-content_item"):
-            anchor = card.select_one("a[href]")
-            if not anchor:
-                continue
+        item['author'] = "Indonesia Investment Authority"
+        item['section'] = "In the News"
 
-            article_url = self._normalize_url(anchor.get("href", ""))
-            if not article_url:
-                continue
-            if "/ina-in-the-news/" not in article_url:
-                continue
-            if article_url.rstrip("/") == "https://www.ina.go.id/ina-in-the-news":
-                continue
-            if article_url in self.seen_urls:
-                continue
-            self.seen_urls.add(article_url)
+        # Fallback to list date if detail page date extraction failed
+        if not item.get('publish_time') and list_date_str:
+            item['publish_time'] = self.parse_date(list_date_str)
 
-            title_node = card.select_one("h3.media-content_title")
-            title = title_node.get_text(" ", strip=True) if title_node else ""
+        # Cutoff check
+        if not self.full_scan and item.get('publish_time'):
+            if item['publish_time'].date() < self.cutoff_date.date():
+                return
 
-            date_node = card.select_one(".media-content_post-date")
-            list_date = self._parse_datetime(date_node.get_text(" ", strip=True) if date_node else "")
-            if list_date and list_date < self.cutoff_date:
-                continue
-
-            yield scrapy.Request(
-                article_url,
-                callback=self.parse_article,
-                meta={
-                    "title": title,
-                    "list_date": list_date,
-                },
-            )
-
-    def parse_article(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        title = self._extract_title(soup) or response.meta.get("title")
-        if not title:
-            return
-
-        publish_time = self._extract_publish_time(soup) or response.meta.get("list_date")
-        if publish_time and publish_time < self.cutoff_date:
-            return
-
-        content = self._extract_content(soup)
-        if not content:
-            return
-
-        author = self._extract_author(soup) or "Indonesia Investment Authority"
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = author
-        item["language"] = "en"
-        item["section"] = "indonesia_ina_news"
-        item["scrape_time"] = datetime.now()
         yield item
-
-    def _normalize_url(self, url):
-        cleaned = (url or "").replace("&amp;", "&").strip()
-        cleaned = re.sub(r"\s+", "", cleaned)
-        if cleaned.startswith("//"):
-            return "https:" + cleaned
-        if cleaned.startswith("/"):
-            return "https://www.ina.go.id" + cleaned
-        return cleaned
-
-    def _extract_title(self, soup):
-        node = soup.select_one(".blogpost1_title-wrapper h1")
-        if node:
-            return node.get_text(" ", strip=True)
-
-        og_title = soup.select_one('meta[property="og:title"]')
-        if og_title and og_title.get("content"):
-            return og_title.get("content").strip()
-        return ""
-
-    def _extract_publish_time(self, soup):
-        node = soup.select_one(".blogpost1_title-wrapper .text-size-small")
-        if node:
-            parsed = self._parse_datetime(node.get_text(" ", strip=True))
-            if parsed:
-                return parsed
-
-        return None
-
-    def _parse_datetime(self, text):
-        value = (text or "").strip()
-        if not value:
-            return None
-
-        for fmt in ("%B %d, %Y", "%b %d, %Y"):
-            try:
-                return datetime.strptime(value, fmt)
-            except ValueError:
-                continue
-        return None
-
-    def _extract_content(self, soup):
-        paragraphs = []
-        for p in soup.select(".blogpost1_content .text-lg p"):
-            text = p.get_text(" ", strip=True)
-            if not text:
-                continue
-            normalized = re.sub(r"\s+", " ", text)
-            if len(normalized) < 20:
-                continue
-            paragraphs.append(normalized)
-
-        if not paragraphs:
-            container = soup.select_one(".blogpost1_content .text-lg")
-            if container:
-                text = container.get_text("\n", strip=True)
-                text = re.sub(r"\n{2,}", "\n", text)
-                return text.strip()
-            return ""
-
-        return "\n".join(paragraphs).strip()
-
-    def _extract_author(self, soup):
-        source_link = soup.select_one("a#source-link[href]")
-        if not source_link:
-            return ""
-
-        href = source_link.get("href", "").strip()
-        if not href:
-            return ""
-
-        parsed = urlparse(href)
-        domain = parsed.netloc.lower()
-        if domain.startswith("www."):
-            domain = domain[4:]
-        return domain

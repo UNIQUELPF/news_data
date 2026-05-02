@@ -1,272 +1,126 @@
-# 印度尼西亚bisnis爬虫，负责抓取对应站点、机构或栏目内容。
-
+import scrapy
 import re
 from datetime import datetime
-from urllib.parse import parse_qs, urlparse
+from news_scraper.spiders.smart_spider import SmartSpider
 
-import psycopg2
-import scrapy
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
-
-
-class IndonesiaBisnisSpider(scrapy.Spider):
+class IndonesiaBisnisSpider(SmartSpider):
     name = "indonesia_bisnis"
-
     country_code = 'IDN'
-
     country = '印度尼西亚'
+    language = 'id'
     allowed_domains = ["bisnis.com", "ekonomi.bisnis.com"]
-    start_urls = ["https://www.bisnis.com/index?categoryId=43"]
-
     target_table = "idn_bisnis"
-    default_cutoff = datetime(2026, 1, 1)
+    
+    # Jakarta Timezone (WIB)
+    source_timezone = 'Asia/Jakarta'
+    use_curl_cffi = True
+    
+    fallback_content_selector = ".detailsContent, .detailsDescription, article"
 
     custom_settings = {
-        "DOWNLOAD_DELAY": 0.5,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_DELAY": 1.0,
+        "CONCURRENT_REQUESTS": 2,
+        "AUTOTHROTTLE_ENABLED": True,
     }
 
-    MONTH_MAP = {
-        "januari": 1,
-        "februari": 2,
-        "maret": 3,
-        "april": 4,
-        "mei": 5,
-        "juni": 6,
-        "juli": 7,
-        "agustus": 8,
-        "september": 9,
-        "oktober": 10,
-        "november": 11,
-        "desember": 12,
-    }
+    async def start(self):
+        # Category 43 is Economy
+        yield scrapy.Request(
+            url="https://www.bisnis.com/index?categoryId=43&page=1",
+            callback=self.parse_list,
+            meta={'current_page': 1},
+            dont_filter=True
+        )
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self._init_db_and_get_cutoff()
-        self.reached_cutoff = False
-        self.seen_urls = set()
-        self.total_pages = None
+    def parse_list(self, response):
+        current_page = response.meta.get('current_page', 1)
+        # Extract links from the index
+        links = response.css('a.artLink::attr(href)').getall()
+        
+        new_links_found = 0
+        valid_article_links = []
 
-    def _init_db_and_get_cutoff(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) UNIQUE,
-                    title VARCHAR(500),
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
+        for link in set(links):
+            if '/read/' in link:
+                full_url = response.urljoin(link)
+                # Bisnis.com URL pattern: /read/YYYYMMDD/
+                publish_time_hint = self._extract_date_from_url(full_url)
+                
+                # CRITICAL: Early stop if date is behind cutoff
+                if publish_time_hint and not self.full_scan:
+                    # Use date objects for clean, timezone-independent comparison
+                    hint_date = publish_time_hint.date()
+                    cutoff_date = self.cutoff_date.date()
+                    
+                    if hint_date < cutoff_date:
+                        self.logger.info(f"STOPPING: Article date {hint_date} is older than cutoff {cutoff_date}. URL: {full_url}")
+                        continue 
 
-            cur.close()
-            conn.close()
+                if self.should_process(full_url, publish_time_hint):
+                    valid_article_links.append((full_url, publish_time_hint))
 
-            if self.full_scan:
-                return self.default_cutoff
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return max(state["cutoff_date"], self.default_cutoff)
-        except Exception as exc:
-            self.logger.error(f"DB init failed: {exc}")
-            return self.default_cutoff
-
-    def parse(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        if self.total_pages is None:
-            self.total_pages = self._extract_total_pages(soup)
-
-        current_page = self._extract_current_page(response.url)
-
-        for anchor in soup.select("a.artLink[href]"):
-            article_url = self._normalize_url(anchor.get("href", ""))
-            if not article_url or "/read/" not in article_url:
-                continue
-            if article_url in self.seen_urls:
-                continue
-            self.seen_urls.add(article_url)
-
-            list_date = self._extract_date_from_url(article_url)
-            if list_date and list_date.date() < self.cutoff_date.date():
-                self.reached_cutoff = True
-                continue
-
-            title = anchor.get_text(" ", strip=True)
+        for full_url, time_hint in valid_article_links:
+            new_links_found += 1
             yield scrapy.Request(
-                article_url,
-                callback=self.parse_article,
-                meta={
-                    "title": title,
-                    "list_date": list_date,
-                },
+                full_url, 
+                callback=self.parse_detail,
+                meta={'publish_time_hint': time_hint}
             )
-
-        if self.reached_cutoff:
-            return
-
-        if self.total_pages and current_page < self.total_pages:
+        
+        # Stop pagination if:
+        # 1. We didn't find any new links (incremental sync complete)
+        # 2. OR we encountered an article older than cutoff (time-based sync complete)
+        # 3. BUT if full_scan is on, keep going until no more links
+        should_continue = (new_links_found > 0)
+        if self.full_scan and valid_article_links:
+            should_continue = True
+            
+        if should_continue and current_page < 100:
             next_page = current_page + 1
             next_url = f"https://www.bisnis.com/index?categoryId=43&page={next_page}"
-            yield scrapy.Request(next_url, callback=self.parse)
+            yield scrapy.Request(
+                url=next_url,
+                callback=self.parse_list,
+                meta={'current_page': next_page},
+                priority=-next_page,
+                dont_filter=True
+            )
 
-    def parse_article(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[contains(@class, 'detailsTitleCaption')]/text() | //meta[@property='og:title']/@content",
+            publish_time_xpath="//div[contains(@class, 'detailsAttributeDates')]/text() | //meta[@property='og:updated_time']/@content"
+        )
 
-        title = response.meta.get("title") or self._extract_title(soup)
-        if not title:
-            return
+        # Metadata refinement
+        item['author'] = response.css(".detailsAttributeAuthor a::text, .detailsAuthor a::text").get() or "Bisnis.com"
+        item['section'] = "Economy"
+        
+        # Explicitly extract cover image (Bisnis.com specific)
+        cover_image = response.css(".detailsCover img::attr(src), .detailsCover img::attr(data-src)").get()
+        if cover_image:
+            full_cover_url = response.urljoin(cover_image)
+            if not item.get('images'):
+                item['images'] = []
+            if full_cover_url not in item['images']:
+                item['images'].insert(0, full_cover_url)
 
-        publish_time = self._extract_publish_time(soup) or response.meta.get("list_date")
-        if publish_time and publish_time < self.cutoff_date:
-            return
+        # Final safety check on publish_time (V2 requirement)
+        if not self.full_scan and item.get('publish_time'):
+            if item['publish_time'] < self.cutoff_date:
+                return
 
-        content = self._extract_content(soup)
-        if not content:
-            return
-
-        author = self._extract_author(soup)
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = author or "Bisnis.com"
-        item["language"] = "id"
-        item["section"] = "indonesia_bisnis"
-        item["scrape_time"] = datetime.now()
         yield item
 
-    def _extract_total_pages(self, soup):
-        total_node = soup.select_one("input#total_page")
-        if total_node and total_node.get("value", "").isdigit():
-            return int(total_node.get("value"))
-
-        page_numbers = []
-        for anchor in soup.select("ol.pagingList a[href]"):
-            href = anchor.get("href", "")
-            match = re.search(r"[?&]page=(\d+)", href)
-            if match:
-                page_numbers.append(int(match.group(1)))
-        return max(page_numbers) if page_numbers else 1
-
-    def _extract_current_page(self, url):
-        params = parse_qs(urlparse(url).query)
-        page = params.get("page", ["1"])[0]
-        try:
-            return int(page)
-        except (TypeError, ValueError):
-            return 1
-
-    def _normalize_url(self, url):
-        cleaned = re.sub(r"\s+", "", (url or "")).replace("&amp;", "&")
-        if cleaned.startswith("//"):
-            return "https:" + cleaned
-        if cleaned.startswith("/"):
-            return "https://www.bisnis.com" + cleaned
-        return cleaned
-
     def _extract_date_from_url(self, url):
+        """Helper to extract date from Bisnis.com URL structure: /read/YYYYMMDD/"""
         match = re.search(r"/read/(\d{4})(\d{2})(\d{2})/", url)
-        if not match:
-            return None
-        year, month, day = map(int, match.groups())
-        try:
-            return datetime(year, month, day)
-        except ValueError:
-            return None
-
-    def _extract_title(self, soup):
-        node = soup.select_one("h1.detailsTitleCaption")
-        if node:
-            return node.get_text(" ", strip=True)
-
-        meta_title = soup.select_one('meta[property="og:title"]')
-        if meta_title and meta_title.get("content"):
-            return meta_title.get("content").strip()
-        return ""
-
-    def _extract_publish_time(self, soup):
-        node = soup.select_one(".detailsAttributeDates")
-        if not node:
-            return None
-
-        text = node.get_text(" ", strip=True)
-        text = re.sub(r"\s+", " ", text)
-        text = re.sub(r"^[^,]+,\s*", "", text)
-
-        match = re.search(
-            r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})(?:\s*\|\s*(\d{1,2}):(\d{2}))?",
-            text,
-        )
-        if not match:
-            return None
-
-        day = int(match.group(1))
-        month_name = match.group(2).lower()
-        year = int(match.group(3))
-        hour = int(match.group(4) or 0)
-        minute = int(match.group(5) or 0)
-
-        month = self.MONTH_MAP.get(month_name)
-        if not month:
-            return None
-
-        try:
-            return datetime(year, month, day, hour, minute)
-        except ValueError:
-            return None
-
-    def _extract_content(self, soup):
-        paragraphs = []
-        for p in soup.select(".detailsContent p"):
-            text = p.get_text(" ", strip=True)
-            if not text:
-                continue
-            if len(text) < 20:
-                continue
-            if text.lower().startswith("cek berita"):
-                continue
-            paragraphs.append(text)
-
-        if not paragraphs:
-            container = soup.select_one(".detailsContent")
-            if not container:
-                return ""
-            text = container.get_text("\n", strip=True)
-            return re.sub(r"\n{2,}", "\n", text).strip()
-
-        return "\n".join(paragraphs).strip()
-
-    def _extract_author(self, soup):
-        node = soup.select_one(".detailsAttributeAuthor a, .detailsAuthor a")
-        if node:
-            return node.get_text(" ", strip=True)
-
-        fallback = soup.select_one(".detailsAttributeAuthor, .detailsAuthor")
-        if fallback:
-            text = fallback.get_text(" ", strip=True)
-            text = re.sub(r"\s+", " ", text)
-            text = re.sub(r"^Penulis\s*:\s*", "", text, flags=re.IGNORECASE)
-            return text.strip()
-        return ""
+        if match:
+            year, month, day = map(int, match.groups())
+            try:
+                dt = datetime(year, month, day)
+                return self.parse_to_utc(dt)
+            except Exception:
+                pass
+        return None
