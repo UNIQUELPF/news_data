@@ -1,110 +1,82 @@
 import scrapy
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class BnPmoSpider(BaseNewsSpider):
+class BnPmoSpider(SmartSpider):
     name = 'bn_pmo'
 
     country_code = 'BRN'
-
     country = '文莱'
+    language = 'en'
+    source_timezone = 'Asia/Brunei'
+    use_curl_cffi = True
+
     allowed_domains = ['pmo.gov.bn']
-    
-    # 列表页入口
+
     base_url = 'https://www.pmo.gov.bn/1149-2/page/{}/?et_blog'
-    start_urls = [base_url.format(1)]
-    
-    # 数据库表名配置 (Brunei -> bn, Site -> pmo)
-    target_table = 'bn_pmo_news'
-    
+
+    fallback_content_selector = ".entry-content .et_builder_inner_content"
+
     custom_settings = {
-        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'CONCURRENT_REQUESTS': 8,
-        'DOWNLOAD_DELAY': 1,
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_TIMEOUT': 30
+        'DOWNLOAD_DELAY': 1.0,
+        'DOWNLOAD_TIMEOUT': 30,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-    def parse(self, response):
-        # 提取文章详情链接 (通常在 article 标签内)
-        articles = response.css('article')
-        current_page = response.meta.get('page', 1)
-        
-        valid_items_on_page = 0
-        for art in articles:
-            link = art.css('a::attr(href)').get()
-            if link:
-                valid_items_on_page += 1
-                yield response.follow(link, self.parse_article)
+    def start_requests(self):
+        yield scrapy.Request(
+            self.base_url.format(1),
+            callback=self.parse_list,
+            meta={'page': 1},
+            dont_filter=True
+        )
 
-        # 翻页逻辑
-        if valid_items_on_page > 0 and current_page < 500:
-            next_page = current_page + 1
+    def parse_list(self, response):
+        articles = response.css('article.et_pb_post')
+
+        has_valid_item_in_window = False
+
+        for article in articles:
+            url = article.css('.entry-title a::attr(href)').get()
+            if not url:
+                continue
+            url = response.urljoin(url)
+
+            title_hint = article.css('.entry-title a::text').get()
+
+            date_str = article.css('.published::text').get()
+            publish_time = self.parse_date(date_str.strip()) if date_str else None
+
+            if not self.should_process(url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
             yield scrapy.Request(
-                self.base_url.format(next_page),
-                callback=self.parse,
-                meta={'page': next_page}
+                url,
+                callback=self.parse_detail,
+                meta={
+                    'title_hint': title_hint,
+                    'publish_time_hint': publish_time,
+                    'section_hint': 'Messages',
+                }
             )
 
-    def parse_article(self, response):
-        # 1. 提取标题
-        title = response.css('h1::text, h1.entry-title::text').get('').strip()
-        
-        # 2. 提取发布日期
-        pub_time = None
-        # 针对 WordPress 全 HTML 搜索 DD/MM/YYYY
-        import re
-        content_text = response.text
-        match = re.search(r'(\d{2})/(\d{2})/(\d{4})', content_text)
-        if match:
-            d, m, y = match.groups()
-            try:
-                pub_time = datetime(year=int(y), month=int(m), day=int(d))
-            except: pass
+        if has_valid_item_in_window:
+            next_page = response.meta['page'] + 1
+            yield scrapy.Request(
+                self.base_url.format(next_page),
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True
+            )
 
-        # 兜底: 尝试从页面文本聚合中发现
-        if not pub_time:
-            all_text = "".join(response.css('::text').getall())
-            match_v2 = re.search(r'(\d{2})/(\d{2})/(\d{4})', all_text)
-            if match_v2:
-                d, m, y = match_v2.groups()
-                try:
-                    pub_time = datetime(year=int(y), month=int(m), day=int(d))
-                except: pass
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[contains(@class,'title')]//text()",
+            publish_time_xpath="//span[contains(@class,'published')]//text() | //meta[@property='article:published_time']/@content",
+        )
 
-        if not pub_time:
-            # 备选: URL 中的 uploads 路径带有日期
-            img_match = re.search(r'/uploads/(\d{4})/(\d{2})/', response.text)
-            if img_match:
-                y, m = img_match.groups()
-                pub_time = datetime(year=int(y), month=int(m), day=1)
+        item['author'] = "Prime Minister's Office Brunei"
+        item['section'] = response.meta.get('section_hint', 'Messages')
 
-        if not pub_time:
-            pub_time = datetime.now()
-
-        # 3. 日期过滤
-        if not self.filter_date(pub_time):
-            return
-
-        # 4. 提取正文内容
-        # 针对 WordPress 内容容器
-        content_parts = response.css('div.entry-content p::text, div.post-content p::text, div.et_pb_module_inner p::text').getall()
-        content = "\n\n".join([p.strip() for p in content_parts if p.strip()])
-        
-        # 兜底清理
-        if not content:
-            content = response.xpath('string(//div[contains(@class, "entry-content")])').get()
-            if not content:
-                content = response.xpath('string(//div[contains(@class, "post-content")])').get()
-
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': content,
-            'publish_time': pub_time,
-            'author': 'Prime Minister\'s Office Brunei',
-            'language': 'en',
-            'section': 'Messages'
-        }
-        
         yield item
