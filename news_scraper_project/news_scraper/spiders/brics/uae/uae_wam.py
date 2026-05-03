@@ -1,138 +1,71 @@
 # 阿联酋wam爬虫，负责抓取对应站点、机构或栏目内容。
 
+import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 import json
 from datetime import datetime
 
-import psycopg2
-import scrapy
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
-
-
-class UaeWamSpider(scrapy.Spider):
+class UaeWamSpider(SmartSpider):
     name = "uae_wam"
 
     country_code = 'ARE'
-
     country = '阿联酋'
-    allowed_domains = ["wam.ae"]
-
-    target_table = "uae_wam"
+    language = 'ar'
+    source_timezone = 'Asia/Dubai'
+    
     list_url = "https://www.wam.ae/api/app/views/GetViewByUrl"
     section_url = "https://www.wam.ae/api/app/views/GetSectionArticlesFDto"
     detail_url = "https://www.wam.ae/api/app/articles/GetArticleBySlug"
 
-    default_cutoff = datetime(2026, 1, 1)
+    allowed_domains = ["wam.ae"]
 
     custom_settings = {
-        "DOWNLOAD_DELAY": 0.5,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        'DOWNLOAD_DELAY': 0.5,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        'RANDOMIZE_DOWNLOAD_DELAY': True,
     }
 
-    def __init__(self, full_scan="false", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
-        self.cutoff_date = self._init_db_and_get_cutoff()
-        self.reached_cutoff = False
-        self.seen_slugs = set()
-
-    def _init_db_and_get_cutoff(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) UNIQUE,
-                    title VARCHAR(500),
-                    content TEXT,
-                    publish_time TIMESTAMP,
-                    author VARCHAR(255),
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.commit()
-
-            cur.close()
-            conn.close()
-
-            if self.full_scan:
-                return self.default_cutoff
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.default_cutoff,
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as exc:
-            self.logger.error(f"DB init failed: {exc}")
-            return self.default_cutoff
-
     def start_requests(self):
+        # WAM is API-based, so we bypass normal start_urls
         yield scrapy.Request(
             url=f"{self.list_url}?url=ar/list/latest-news",
-            callback=self.parse_first_page,
+            callback=self.parse_api_list,
             headers={"Accept": "application/json"},
+            meta={'page': 0}
         )
 
-    def parse_first_page(self, response):
+    def parse_api_list(self, response):
         data = json.loads(response.text)
-        section = data["sections"][0]["articlesResult"]
-        section_info = section["paging"]["sectionInfo"]
-
-        yield from self._parse_articles_list(
-            items=section.get("items", []),
-            section_info=section_info,
-            current_page=section["paging"].get("pageNumber", 0),
-            has_next=section["paging"].get("hasNext", False),
-        )
-
-    def parse_section_page(self, response):
-        data = json.loads(response.text)
-        paging = data.get("paging", {})
-        items = data.get("items", [])
+        # Handle the structure of the API response
+        section = data.get("sections", [{}])[0].get("articlesResult", {})
+        paging = section.get("paging", {})
         section_info = paging.get("sectionInfo")
-
-        yield from self._parse_articles_list(
-            items=items,
-            section_info=section_info,
-            current_page=paging.get("pageNumber", 0),
-            has_next=paging.get("hasNext", False),
-        )
-
-    def _parse_articles_list(self, items, section_info, current_page, has_next):
-        if not items:
-            return
-
+        items = section.get("items", [])
+        
+        has_valid_item_in_window = False
+        
         for article in items:
-            publish_time = self._parse_datetime(article.get("articleDate"))
-            if publish_time and publish_time < self.cutoff_date:
-                self.reached_cutoff = True
-                continue
-
+            publish_time = self.parse_date(article.get("articleDate"))
+            
             slug_param = article.get("shortCode") or article.get("urlSlug") or article.get("slug")
-            if not slug_param or slug_param in self.seen_slugs:
+            if not slug_param:
                 continue
-            self.seen_slugs.add(slug_param)
-
+                
+            if not self.should_process(slug_param, publish_time):
+                continue
+                
+            has_valid_item_in_window = True
+            
             yield scrapy.Request(
                 url=f"{self.detail_url}?slug={slug_param}",
-                callback=self.parse_detail,
+                callback=self.parse_api_detail,
                 headers={"Accept": "application/json"},
-                meta={
-                    "list_article": article,
-                },
+                meta={'list_article': article, 'publish_time': publish_time}
             )
 
-        if has_next and not self.reached_cutoff:
+        # Pagination for API
+        if has_valid_item_in_window and paging.get("hasNext"):
+            current_page = paging.get("pageNumber", 0)
             payload = {
                 "sectionInfo": section_info,
                 "pageNumber": current_page + 1,
@@ -146,77 +79,80 @@ class UaeWamSpider(scrapy.Spider):
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                 },
-                callback=self.parse_section_page,
+                callback=self.parse_api_section_page,
+                meta={'page': current_page + 1}
             )
 
-    def parse_detail(self, response):
-        if response.status == 204:
-            return
+    def parse_api_section_page(self, response):
+        data = json.loads(response.text)
+        paging = data.get("paging", {})
+        items = data.get("items", [])
+        section_info = paging.get("sectionInfo")
 
+        has_valid_item_in_window = False
+        for article in items:
+            publish_time = self.parse_date(article.get("articleDate"))
+            slug_param = article.get("shortCode") or article.get("urlSlug") or article.get("slug")
+            
+            if not self.should_process(slug_param, publish_time):
+                continue
+            
+            has_valid_item_in_window = True
+            
+            yield scrapy.Request(
+                url=f"{self.detail_url}?slug={slug_param}",
+                callback=self.parse_api_detail,
+                headers={"Accept": "application/json"},
+                meta={'list_article': article, 'publish_time': publish_time}
+            )
+
+        if has_valid_item_in_window and paging.get("hasNext"):
+            current_page = paging.get("pageNumber", 0)
+            payload = {
+                "sectionInfo": section_info,
+                "pageNumber": current_page + 1,
+                "pageSize": 20,
+            }
+            yield scrapy.Request(
+                url=self.section_url,
+                method="POST",
+                body=json.dumps(payload),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                callback=self.parse_api_section_page,
+                meta={'page': current_page + 1}
+            )
+
+    def parse_api_detail(self, response):
         detail = json.loads(response.text)
-
-        publish_time = self._parse_datetime(detail.get("articleDate"))
-        if publish_time and publish_time < self.cutoff_date:
-            return
-
-        title = (detail.get("title") or "").strip()
-        if not title:
-            return
-
+        
+        # Use SmartSpider's content extraction on the HTML body inside the JSON
         body_html = detail.get("body") or ""
-        content = self._html_to_text(body_html)
-        if not content:
-            content = (detail.get("summary") or "").strip()
-        if not content:
-            return
-
+        # Mock a response for extraction
+        from scrapy.http import HtmlResponse
+        mock_response = HtmlResponse(url=response.url, body=body_html, encoding='utf-8')
+        
+        content_data = self.extract_content(mock_response)
+        
+        title = detail.get("title") or ""
+        publish_time = response.meta.get('publish_time')
+        
+        # Construct Item
         short_code = detail.get("shortCode") or response.meta.get("list_article", {}).get("shortCode")
         slug = detail.get("slug") or response.meta.get("list_article", {}).get("slug")
-        if short_code and slug:
-            article_url = f"https://www.wam.ae/ar/article/{short_code}-{slug}"
-        elif short_code:
-            article_url = f"https://www.wam.ae/ar/article/{short_code}"
-        else:
-            article_url = response.url
+        article_url = f"https://www.wam.ae/ar/article/{short_code}-{slug}" if short_code and slug else response.url
 
-        categories = detail.get("categories") or []
-        section = "WAM"
-        if categories and isinstance(categories[0], dict):
-            section = categories[0].get("title") or section
-
-        authors = detail.get("articleAuthors") or []
-        author = "WAM"
-        if authors:
-            author = ", ".join([a for a in authors if a])
-
-        item = NewsItem()
-        item["url"] = article_url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = author
-        item["language"] = "ar"
-        item["section"] = section
-        item["scrape_time"] = datetime.now()
+        item = {
+            "url": article_url,
+            "title": title,
+            "publish_time": publish_time,
+            "author": ", ".join(detail.get("articleAuthors", [])) or "WAM",
+            "section": detail.get("categories", [{}])[0].get("title") or "WAM",
+            "language": self.language,
+            "country": self.country,
+            **content_data
+        }
+        
         yield item
-
-    def _parse_datetime(self, value):
-        if not value:
-            return None
-        try:
-            dt = datetime.fromisoformat(value)
-            if dt.tzinfo is not None:
-                dt = dt.replace(tzinfo=None)
-            return dt
-        except Exception:
-            return None
-
-    def _html_to_text(self, html):
-        if not html:
-            return ""
-        soup = BeautifulSoup(html, "html.parser")
-        paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-        paragraphs = [p for p in paragraphs if p]
-        if paragraphs:
-            return "\n".join(paragraphs)
-        return soup.get_text(" ", strip=True)

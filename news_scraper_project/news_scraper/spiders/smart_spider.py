@@ -40,6 +40,7 @@ class SmartSpider(scrapy.Spider):
         # Runtime state
         self.cutoff_date = None
         self.seen_urls = set()
+        self._stop_pagination = False  # Emergency stop signal
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
@@ -49,11 +50,12 @@ class SmartSpider(scrapy.Spider):
 
     def _init_incremental_state(self, settings):
         """Calculate cutoff_date and load seen_urls for deduplication."""
-        # 1. Determine the absolute historical floor from settings or cmd args
+        # 1. Determine the absolute historical floor from class attribute or settings
+        # Spider's own start_date attribute has higher priority as it's more specialized.
         default_start_str = getattr(self, 'start_date', None) or settings.get("DEFAULT_START_DATE", "2024-01-01")
         try:
             self.earliest_date = datetime.strptime(default_start_str, "%Y-%m-%d")
-        except ValueError:
+        except (ValueError, TypeError):
             self.earliest_date = datetime(2024, 1, 1)
         
         # 2. Handle Force Full Scan
@@ -171,13 +173,10 @@ class SmartSpider(scrapy.Spider):
         Determines if a URL should be processed.
         - Full Scan: Processes everything down to the earliest_date floor.
         - Incremental: Processes new URLs within the sliding window (cutoff_date).
-        
-        If strict_date_required = True on the spider, this method returns False
-        when publish_time is None in incremental mode. This prevents pagination
-        from running wild when date selectors fail on the listing page.
         """
         # 1. Absolute floor: Never process anything older than our project start date
         if publish_time and publish_time < self.earliest_date:
+            self.logger.debug(f"Filtered out (too old): {url} (Date: {publish_time} < Floor: {self.earliest_date})")
             return False
 
         # 2. If full scan, we ignore deduplication and sliding window
@@ -186,14 +185,17 @@ class SmartSpider(scrapy.Spider):
         
         # 3. Strict mode: require a date to proceed (prevents runaway pagination)
         if self.strict_date_required and publish_time is None:
+            self.logger.debug(f"Filtered out (no date): {url}")
             return False
         
-        # 4. Incremental: Deduplication check
-        if self.is_already_scraped(url):
+        # 4. Incremental: Sliding window check (e.g. 7 days back from last record)
+        if publish_time and self.cutoff_date and publish_time < self.cutoff_date:
+            self.logger.debug(f"Filtered out (below cutoff): {url} (Date: {publish_time} < Cutoff: {self.cutoff_date})")
             return False
-            
-        # 5. Incremental: Sliding window check (e.g. 7 days back from last record)
-        if publish_time and publish_time < self.cutoff_date:
+
+        # 5. Incremental: Deduplication check
+        if self.is_already_scraped(url):
+            self.logger.debug(f"Filtered out (already scraped): {url}")
             return False
             
         return True
@@ -204,17 +206,23 @@ class SmartSpider(scrapy.Spider):
         Handles metadata (title, time) with fallbacks and calls the content engine.
         """
         # 1. Title Extraction
-        title = None
-        if title_xpath:
+        # Absolute Priority: title_hint from listing page (usually cleanest)
+        title = response.meta.get("title_hint")
+        
+        # If no hint, try explicit xpath
+        if not title and title_xpath:
             title = response.xpath(title_xpath).get()
         
-        if not title:
-            # Standard meta tags are usually the most reliable
+        # If still no title or it's a known decoy, try meta tags
+        if not title or title.strip().lower() in ['navigation', 'menu']:
             title = response.xpath("//meta[@property='og:title']/@content").get() \
                     or response.css("title::text").get()
         
+        # Final safety check against "Navigation" trap
         if title:
             title = title.strip()
+            if title.lower() in ['navigation', 'menu'] and response.meta.get("title_hint"):
+                title = response.meta.get("title_hint").strip()
 
         # 2. Publish Time Extraction
         publish_time = None
@@ -245,22 +253,32 @@ class SmartSpider(scrapy.Spider):
             publish_time = content_data["publish_time"]
 
         # 4. Assemble standard V2 dictionary
+        # We unpack content_data FIRST, then set our extracted/hinted metadata
+        # to ensure they are NOT overridden by nulls from the content engine.
         item = {
+            **content_data,
             "url": response.url,
             "title": title or content_data.get("title"),
             "raw_html": response.text,
-            "publish_time": publish_time,
+            "publish_time": publish_time or content_data.get("publish_time"),
             "language": getattr(self, 'language', 'en'),
             "section": response.meta.get("section_hint", "news"),
             "country_code": getattr(self, 'country_code', None),
             "country": getattr(self, 'country', None),
-            **content_data
         }
 
-        # 5. Intelligent Image Deduplication & Normalization
-        # Prevent showing the same image twice if it's already in the body text
-        # Also ensure 'images' is a list of URL strings, not dicts
+        # 5. Intelligent Image Extraction & Deduplication
         raw_images = item.get('images') or []
+        
+        # Fallback to OG Image or Metadata image if ContentEngine found nothing
+        if not raw_images:
+            meta_image = response.xpath("//meta[@property='og:image']/@content").get() or \
+                         response.xpath("//meta[@itemprop='image']/@content").get() or \
+                         response.xpath("//link[@rel='image_src']/@href").get()
+            if meta_image:
+                raw_images = [meta_image]
+                self.logger.debug(f"Used meta fallback image: {meta_image}")
+
         body_text = str(item.get('content_plain', '')) + str(item.get('title', ''))
         
         clean_images = []
@@ -268,11 +286,17 @@ class SmartSpider(scrapy.Spider):
             img_url = img_item.get('url') if isinstance(img_item, dict) else img_item
             if not img_url:
                 continue
-            # Check if the URL (or its main part) is already in the body
-            if img_url not in body_text:
-                clean_images.append(img_url)
-            else:
+            
+            # Normalization: ensure absolute URL
+            img_url = response.urljoin(img_url)
+            
+            # Deduplication: only filter out if it's truly redundant and not the only image
+            # We skip deduplication if it's the only image we found (the cover image)
+            if len(raw_images) > 1 and img_url in body_text:
                 self.logger.debug(f"Deduplicated image (already in body): {img_url}")
+                continue
+            
+            clean_images.append(img_url)
         
         item['images'] = clean_images
 
