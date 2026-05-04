@@ -1,29 +1,26 @@
 # 哈萨克斯坦inbusiness spider爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
-from scrapy_playwright.page import PageMethod
-from news_scraper.items import InBusinessItem
-from datetime import datetime
 import re
-from news_scraper.utils import get_dynamic_cutoff
+from datetime import datetime, timedelta
+from scrapy_playwright.page import PageMethod
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class InBusinessSpider(scrapy.Spider):
+
+class InBusinessSpider(SmartSpider):
     name = 'inbusiness'
 
     country_code = 'KAZ'
-
     country = '哈萨克斯坦'
-    allowed_domains = ['inbusiness.kz']
-    
-    # Global cutoff date will be set dynamically in from_crawler
-    CUTOFF_DATE = None
+    language = 'ru'
+    source_timezone = 'Asia/Almaty'
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(InBusinessSpider, cls).from_crawler(crawler, *args, **kwargs)
-        # Use dynamic cutoff logic
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_inbusiness', spider_name=spider.name)
-        return spider
+    allowed_domains = ['inbusiness.kz']
+
+    # Russian date format (DD.MM.YY) used in listing
+    dateparser_settings = {'DATE_ORDER': 'DMY', 'PREFER_DATES_FROM': 'current_period'}
+
+    fallback_content_selector = '.text'
 
     # Base URL for categories
     BASE_URL = 'https://inbusiness.kz'
@@ -73,51 +70,51 @@ class InBusinessSpider(scrapy.Spider):
     def parse_list(self, response):
         category = response.meta['category']
         current_page = response.meta['page']
-        
-        # InBusiness uses links with <span> for titles and <time> for dates
+
         articles = response.css('a[href^="/ru/news/"]')
         self.logger.info(f"[{category}] Found {len(articles)} article links on page {current_page}")
 
-        found_valid_date = False
-        last_article_date = None
+        has_valid_item_in_window = False
 
         for art in articles:
             link = art.css('::attr(href)').get()
             title = art.css('span::text').get()
             date_str = art.css('time::text').get()
-            
-            if link:
-                url = response.urljoin(link)
-                publish_time = self._parse_russian_date(date_str)
-                
-                if publish_time:
-                    last_article_date = publish_time
-                    if publish_time < self.CUTOFF_DATE:
-                        self.logger.info(f"[{category}] Article {url} dated {publish_time} is before cutoff. Stopping section.")
-                        return # Stop this section
 
-                yield scrapy.Request(
-                    url,
-                    callback=self.parse_detail,
-                    meta={
-                        'category': category,
-                        'title': title,
-                        'playwright': True,
-                        'playwright_page_methods': [
-                            PageMethod('wait_for_timeout', 1500),
-                            PageMethod('wait_for_selector', 'h1', timeout=15000)
-                        ]
-                    }
-                )
-                found_valid_date = True
+            if not link:
+                continue
+
+            url = response.urljoin(link)
+            publish_time = self._parse_listing_date(date_str)
+
+            if not self.should_process(url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                meta={
+                    'category': category,
+                    'section_hint': category,
+                    'title_hint': title,
+                    'publish_time_hint': publish_time,
+                    'playwright': True,
+                    'playwright_page_methods': [
+                        PageMethod('wait_for_timeout', 1500),
+                        PageMethod('wait_for_selector', 'h1', timeout=15000)
+                    ]
+                },
+                dont_filter=self.full_scan,
+            )
 
         # Pagination: ?page=N
-        # If we found articles and didn't trigger the cutoff, try next page
-        if found_valid_date:
+        if has_valid_item_in_window:
             next_page = current_page + 1
             section_path = self.SECTIONS[category]
             next_url = f"{self.BASE_URL}{section_path}?page={next_page}"
-            
+
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
@@ -133,92 +130,75 @@ class InBusinessSpider(scrapy.Spider):
             )
 
     def parse_detail(self, response):
-        category = response.meta['category']
-        
-        title = response.css('h1::text').get()
-        if not title:
-            title = response.meta.get('title')
-        
-        publish_time = None
-        iso_date = response.css('time::attr(datetime)').get()
-        if iso_date:
-            try:
-                # E.g., 2026-03-02T09:00:00+05:00
-                dt_str = iso_date[:19]
-                publish_time = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
-            except Exception:
-                pass
-                
-        if not publish_time:
-            date_str = response.css('time::text').get()
-            publish_time = self._parse_russian_date(date_str)
-            
-        # If published date is before cutoff, ignore
-        if publish_time and publish_time < self.CUTOFF_DATE:
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+            publish_time_xpath="//time/@datetime",
+        )
+
+        if not self.should_process(response.url, item.get('publish_time')):
             return
-        
-        # Article body is in .text block
-        content_parts = response.css('.text p::text, .text h2::text, .text blockquote::text').getall()
-        if not content_parts:
-            content_parts = response.css('.text ::text').getall()
-            
-        content = "\n\n".join([p.strip() for p in content_parts if p.strip()])
-        
-        # Basic validation
+
+        # Basic validation: require title and >= 100 chars of content
+        title = item.get('title')
+        content = item.get('content_plain') or item.get('content', '')
         if not title or len(content) < 100:
             return
 
-        item = InBusinessItem()
-        item['type'] = 'inbusiness'
-        item['category'] = category
-        item['title'] = title.strip() if title else ""
-        item['url'] = response.url
-        item['publish_time'] = publish_time
-        item['content'] = content
-        item['crawl_time'] = datetime.now()
-        
         yield item
 
-    def _parse_russian_date(self, date_str):
+    def _parse_listing_date(self, date_str):
+        """Parse date from listing page.
+
+        Handles Russian date formats:
+        - '02.03.26, 09:00' (DD.MM.YY, HH:MM)
+        - 'Вчера, 18:30' (Yesterday)
+        - 'Сегодня, 10:00' (Today)
+        - '20.02.26' (DD.MM.YY without time)
+        """
         if not date_str:
             return None
-        
-        # Example formats: 
-        # "02.03.26, 09:00" (Full detail)
-        # "Вчера, 18:30" (Yesterday)
-        # "Сегодня, 10:00" (Today)
-        # "20.02.26" (Old date)
-        
+
         date_str = date_str.strip()
+
+        # Try dateparser first (handles Russian 'Вчера', 'Сегодня' and standard formats)
+        parsed = self.parse_date(date_str)
+        if parsed:
+            return parsed
+
+        # Fallback for edge cases
+        return self._parse_russian_date_fallback(date_str)
+
+    def _parse_russian_date_fallback(self, date_str):
+        """Fallback date parser for edge cases that dateparser might miss."""
         now = datetime.now()
-        
+
         try:
             if 'Сегодня' in date_str:
                 time_part = re.search(r'(\d{2}:\d{2})', date_str)
                 if time_part:
                     h, m = map(int, time_part.group(1).split(':'))
-                    return now.replace(hour=h, minute=m, second=0, microsecond=0)
-                return now
-            
+                    return self.parse_to_utc(now.replace(hour=h, minute=m, second=0, microsecond=0))
+                return self.parse_to_utc(now)
+
             if 'Вчера' in date_str:
-                from datetime import timedelta
                 yesterday = now - timedelta(days=1)
                 time_part = re.search(r'(\d{2}:\d{2})', date_str)
                 if time_part:
                     h, m = map(int, time_part.group(1).split(':'))
-                    return yesterday.replace(hour=h, minute=m, second=0, microsecond=0)
-                return yesterday
+                    return self.parse_to_utc(yesterday.replace(hour=h, minute=m, second=0, microsecond=0))
+                return self.parse_to_utc(yesterday)
 
             # Format: DD.MM.YY, HH:MM or DD.MM.YY
             match = re.search(r'(\d{2})\.(\d{2})\.(\d{2})(?:,\s*(\d{1,2}):(\d{2}))?', date_str)
             if match:
                 day, month, year, hour, minute = match.groups()
-                # Assuming 26 means 2026
                 full_year = 2000 + int(year)
                 h = int(hour) if hour else 0
                 m = int(minute) if minute else 0
-                return datetime(full_year, int(month), int(day), h, m)
-                
-            return None
-        except:
-            return None
+                dt = datetime(full_year, int(month), int(day), h, m)
+                return self.parse_to_utc(dt)
+        except Exception:
+            pass
+
+        return None

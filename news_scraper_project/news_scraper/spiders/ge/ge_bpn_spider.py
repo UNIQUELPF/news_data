@@ -1,19 +1,34 @@
 import scrapy
 import json
 import re
-from datetime import datetime
+import dateparser
 from scrapy_playwright.page import PageMethod
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class GeBpnSpider(BaseNewsSpider):
+
+class GeBpnSpider(SmartSpider):
     name = "ge_bpn"
 
     country_code = 'GEO'
-
     country = '格鲁吉亚'
+    source_timezone = 'Asia/Tbilisi'
+    language = 'ka'
+    start_date = '2024-01-01'
+    use_curl_cffi = True
+
     allowed_domains = ["www.bpn.ge"]
     start_urls = ["https://www.bpn.ge/category/161-ekonomika/"]
-    target_table = "ge_bpn_news"
+
+    # Georgian / European date format (DD.MM.YYYY)
+    dateparser_settings = {'DATE_ORDER': 'DMY', 'PREFER_DATES_FROM': 'current_period'}
+
+    # The list page is JavaScript-rendered with only LD+JSON for static data.
+    # Individual article dates are not available in the listing; dates are
+    # extracted from detail pages. We use the page-level dateModified as
+    # a rough filter and collect precise dates on detail pages.
+    strict_date_required = False
+
+    fallback_content_selector = '.article_body_wrapper'
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
@@ -21,104 +36,142 @@ class GeBpnSpider(BaseNewsSpider):
             "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
         },
         "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 2, 
+        "CONCURRENT_REQUESTS": 2,
         "DOWNLOAD_DELAY": 1.5,
-        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 120000,
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 60000,
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
             "args": ["--disable-blink-features=AutomationControlled"]
         }
     }
 
-    use_curl_cffi = True
-
     def parse(self, response):
+        """Parse list page: extract links from LD+JSON, use page-level date for filtering."""
+        result = self._parse_listing_ldjson(response)
+        article_urls = result['urls']
+        page_date = result['page_date_modified']
+        headlines = result['headlines']  # URL -> headline map
+
+        self.logger.info(f"GE_BPN List: Found {len(article_urls)} articles on {response.url}")
+
+        has_valid_item_in_window = False
+
+        for url in article_urls:
+            # Use page-level dateModified as approximate publish_time for filtering.
+            # Prefer None over approximate date to avoid blocking real articles.
+            if not self.should_process(url, publish_time=None):
+                continue
+
+            has_valid_item_in_window = True
+
+            yield scrapy.Request(
+                url,
+                callback=self.parse_article,
+                meta={
+                    "playwright": True,
+                    "title_hint": headlines.get(url),
+                    "publish_time_hint": page_date,
+                    "playwright_page_methods": [
+                        PageMethod("wait_for_load_state", "domcontentloaded", timeout=30000),
+                    ]
+                },
+                dont_filter=self.full_scan,
+            )
+
+        # Pagination: stop when page has no new (non-duplicate) items
+        if has_valid_item_in_window:
+            match = re.search(r'page=(\d+)', response.url)
+            current_page = int(match.group(1)) if match else 1
+            next_page_url = f"https://www.bpn.ge/category/161-ekonomika/?page={current_page + 1}"
+            yield scrapy.Request(next_page_url, callback=self.parse, dont_filter=True)
+
+    def _parse_listing_ldjson(self, response):
         """
-        List page: Static extraction for maximum reliability
+        Parse all LD+JSON scripts on the list page.
+
+        Returns dict with:
+          - urls: list of article URLs
+          - page_date_modified: datetime or None (page-level modification time)
+          - headlines: dict of url -> headline from hasPart
         """
-        links = []
+        article_urls = []
+        page_date_modified = None
+        headlines = {}
+
         scripts = response.css('script[type="application/ld+json"]::text').getall()
         for s in scripts:
             try:
                 data = json.loads(s)
-                if isinstance(data, dict):
-                    items = data.get('itemListElement', [])
-                    for item in items:
-                        url = item.get('item') or item.get('url')
+                if not isinstance(data, dict):
+                    continue
+
+                # 1. Extract article URLs from mainEntity.itemListElement
+                main_entity = data.get('mainEntity')
+                if isinstance(main_entity, dict):
+                    items = main_entity.get('itemListElement', [])
+                    for entry in items:
+                        url = None
+                        if isinstance(entry, dict):
+                            url = entry.get('item') if isinstance(entry.get('item'), str) else entry.get('url')
                         if isinstance(url, str) and '/article/' in url:
-                            links.append(url)
-            except: pass
+                            article_urls.append(url)
 
-        if not links:
-             links = re.findall(r'https://www\.bpn\.ge/article/[\w-]+/', response.text)
+                # 2. Extract page-level dateModified
+                raw_date = data.get('dateModified')
+                if raw_date:
+                    dt = self.parse_date(raw_date)
+                    if dt:
+                        page_date_modified = dt
 
-        links = list(set(links))
-        self.logger.info(f"GE_BPN List Sync: Found {len(links)} links.")
+                # 3. Extract headlines from hasPart (NewsArticle list)
+                has_part = data.get('hasPart', [])
+                if isinstance(has_part, list):
+                    for article in has_part:
+                        if isinstance(article, dict) and article.get('@type') == 'NewsArticle':
+                            article_url = article.get('url')
+                            headline = article.get('headline')
+                            if article_url and headline:
+                                headlines[article_url] = headline
 
-        found_any = False
-        for link in links:
-            if link in self.scraped_urls:
-                continue
+                # 4. Also check flat itemListElement (BreadcrumbList style)
+                flat_items = data.get('itemListElement', [])
+                if isinstance(flat_items, list) and not article_urls:
+                    for entry in flat_items:
+                        url = entry.get('item') if isinstance(entry, dict) else entry
+                        if isinstance(url, str) and '/article/' in url:
+                            article_urls.append(url)
 
-            found_any = True
-            yield scrapy.Request(
-                link, 
-                callback=self.parse_article,
-                meta={
-                    "playwright": True,
-                    "playwright_page_methods": [
-                        # Wait for DOM effectively without visibility constraints on hidden tags
-                        PageMethod("wait_for_load_state", "domcontentloaded", timeout=90000),
-                        PageMethod("wait_for_selector", ".article_body_wrapper", state="attached", timeout=60000),
-                    ]
-                }
-            )
+            except Exception:
+                pass
 
-        # Pagination using ?page=X
-        if found_any:
-            current_page = 1
-            if 'page=' in response.url:
-                try:
-                    match = re.search(r'page=(\d+)', response.url)
-                    if match: current_page = int(match.group(1))
-                except: pass
-            
-            if current_page < 120: 
-                next_page_url = f"https://www.bpn.ge/category/161-ekonomika/?page={current_page + 1}"
-                yield scrapy.Request(next_page_url, callback=self.parse)
+        # Fallback: regex extraction if no URLs found
+        if not article_urls:
+            article_urls = list(set(re.findall(
+                r'https://www\.bpn\.ge/article/[\w-]+/', response.text
+            )))
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_urls = []
+        for url in article_urls:
+            if url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return {
+            'urls': unique_urls,
+            'page_date_modified': page_date_modified,
+            'headlines': headlines,
+        }
 
     def parse_article(self, response):
-        # Precise Ka-language business data aggregation
-        title = response.css('meta[property="og:title"]::attr(content)').get()
-        if not title:
-             title = response.css('.article_title h1::text, h1::text').get()
-        
-        date_str = response.css('.article_date .date_time::text, .article_date::text').get()
-        pub_date = None
-        if date_str:
-            try:
-                match = re.search(r'(\d{2}\.\d{2}\.\d{4})', date_str)
-                if match:
-                     pub_date = datetime.strptime(match.group(0), "%d.%m.%Y")
-            except: pass
+        """Parse detail page using SmartSpider auto_parse_item."""
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+        )
 
-        if pub_date and not self.filter_date(pub_date):
-            return
+        item['author'] = "BPN.ge"
+        item['section'] = "Economy"
 
-        # Content from wrapper or OG fallback
-        intro = response.css('meta[property="og:description"]::attr(content)').get() or ""
-        body_nodes = response.css('.article_body_wrapper p::text, .article_body_wrapper div::text, .article_body_wrapper p span::text').getall()
-        body = "\n".join([c.strip() for c in body_nodes if len(c.strip()) > 30])
-        
-        content = (intro + "\n" + body).strip()
-
-        if title and len(content) > 50:
-            yield {
-                "url": response.url,
-                "title": title.strip(),
-                "content": content,
-                "publish_time": pub_date,
-                "author": "BPN.ge",
-                "language": "ka",
-                "section": "Economy"
-            }
+        yield item

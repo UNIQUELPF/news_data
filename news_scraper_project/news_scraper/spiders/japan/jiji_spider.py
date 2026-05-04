@@ -1,20 +1,22 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
-import re
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class JijiSpider(BaseNewsSpider):
+class JijiSpider(SmartSpider):
     name = 'jp_jiji'
 
     country_code = 'JPN'
-
     country = '日本'
+    language = 'ja'
+    source_timezone = 'Asia/Tokyo'
+
     allowed_domains = ['jiji.com']
-    
-    # 目标表名：jp_jiji_news
-    target_table = 'jp_jiji_news'
-    
+
+    fallback_content_selector = '.ArticleText'
+
+    # List pages do not carry per-article publish dates, so we rely on
+    # the detail page for date extraction and allow undated URLs through.
+    strict_date_required = False
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -26,78 +28,64 @@ class JijiSpider(BaseNewsSpider):
     }
 
     def start_requests(self):
-        # 模式 1: Archive 回溯 (覆盖 2026-01-01 至今)
-        # offset 0: 3月, 1: 2月, 2: 1月
+        # 模式 1: Archive 回溯
+        # offset 0: 当月, 1: 前月, 2: 前々月
         archives = [
             'https://www.jiji.com/jc/archives?g=eco_archive_0',
             'https://www.jiji.com/jc/archives?g=eco_archive_1',
             'https://www.jiji.com/jc/archives?g=eco_archive_2'
         ]
         for url in archives:
-            # 每个月先抓前 10 页 (基本覆盖全月)
             for page in range(1, 11):
                 page_url = f"{url}&p={page}"
-                yield scrapy.Request(page_url, callback=self.parse_list)
+                yield scrapy.Request(page_url, callback=self.parse_list, dont_filter=True)
 
         # 模式 2: 当前列表 (增量)
-        yield scrapy.Request('https://www.jiji.com/jc/list?g=eco', callback=self.parse_list)
+        yield scrapy.Request('https://www.jiji.com/jc/list?g=eco', callback=self.parse_list, dont_filter=True)
 
     def parse_list(self, response):
-        # 提取文章链接: a[href*="/jc/article?k="]
         links = response.css('a[href*="/jc/article?k="]::attr(href)').getall()
+
+        has_valid_item_in_window = False
+
         for link in links:
-            # 过滤掉一些非文章链接 (Jiji 有时会有重复或侧边栏链接)
-            if 'k=' not in link: continue
-            
-            full_url = response.urljoin(link)
-            # 基础去重 (内存中)
-            if full_url in self.scraped_urls:
+            if 'k=' not in link:
                 continue
-            self.scraped_urls.add(full_url)
-            
-            yield scrapy.Request(full_url, callback=self.parse_article)
+
+            full_url = response.urljoin(link)
+
+            if not self.should_process(full_url):
+                continue
+
+            has_valid_item_in_window = True
+
+            # No dont_filter here: the same article URL appears on every
+            # archive page, so we let Scrapy's RFPDupeFilter deduplicate.
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_article,
+            )
+
+        # Archive pages use fixed pagination (1-10); the current list page
+        # has no pagination.  has_valid_item_in_window is tracked to follow
+        # the V2 convention and would gate pagination if we ever switch to
+        # an unbounded date-descending listing.
 
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 1. 标题提取
-        title = response.css('.ArticleTitle h1::text').get() or \
-                response.css('h1::text').get() or \
-                response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else ''
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//div[contains(@class,'ArticleTitle')]//h1//text()",
+            publish_time_xpath="//meta[@itemprop='datePublished']/@content",
+        )
 
-        # 2. 正文提取
-        content_nodes = response.css('.ArticleText p::text').getall()
-        if content_nodes:
-            item['content'] = "\n\n".join([p.strip() for p in content_nodes if len(p.strip()) > 5])
-        else:
-            item['content'] = "".join(response.css('.ArticleText::text').getall()).strip()
-
-        # 3. 发布时间提取 (2026年03月30日10時27分)
-        pub_time_str = response.css('.ArticleDate::text').get() or \
-                       response.xpath('//meta[@property="article:published_time"]/@content').get()
-        
-        pub_time = datetime.now()
-        if pub_time_str:
-            try:
-                # 鲁棒性解析: 提取所有数字 [2026, 03, 30, 10, 27]
-                nums = re.findall(r'\d+', pub_time_str)
-                if len(nums) >= 5:
-                    pub_time = datetime(int(nums[0]), int(nums[1]), int(nums[2]), int(nums[3]), int(nums[4]))
-                elif len(nums) >= 3:
-                    pub_time = datetime(int(nums[0]), int(nums[1]), int(nums[2]))
-            except:
-                pass
-
-        # 4. 日期过滤 (2026-01-01 后)
-        if not self.filter_date(pub_time):
+        # If the detail page had no publish time (unlikely but defensive),
+        # drop the item — SmartSpider strict_date_required=False on the
+        # list phase means we may only catch this here.
+        if not item.get('publish_time'):
             return
 
-        item['publish_time'] = pub_time
         item['author'] = 'Jiji Press'
-        item['language'] = 'ja'
         item['section'] = 'Economy'
 
-        if item.get('content') and len(item['content']) > 50:
+        if item.get('content_plain') and len(item['content_plain']) > 50:
             yield item

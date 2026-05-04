@@ -1,12 +1,12 @@
 # 哈萨克斯坦zakon spider爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
-from news_scraper.items import ZakonItem
+from news_scraper.spiders.smart_spider import SmartSpider
 from datetime import datetime, timedelta
+import pytz
 import re
 from bs4 import BeautifulSoup
 import asyncio
-from news_scraper.utils import get_dynamic_cutoff
 
 RU_MONTHS = {
     'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
@@ -14,44 +14,49 @@ RU_MONTHS = {
     'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
 }
 
-class ZakonSpider(scrapy.Spider):
+class ZakonSpider(SmartSpider):
     name = 'zakon'
 
     country_code = 'KAZ'
-
     country = '哈萨克斯坦'
+    language = 'ru'
+    source_timezone = 'Asia/Almaty'
+    start_date = '2024-01-01'
+
     allowed_domains = ['zakon.kz']
     start_urls = ['https://www.zakon.kz/finansy/']
 
-    CUTOFF_DATE = None
+    fallback_content_selector = 'div.content'
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(ZakonSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, 'news_zakon', spider_name=spider.name)
-        return spider
+    custom_settings = {
+        'PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT': 60000,
+    }
 
     def parse_russian_date(self, date_str):
-        """Converts Zakon.kz date strings to datetime objects."""
-        now = datetime.now()
+        """Converts Zakon.kz Russian date strings to naive UTC datetime objects."""
+        almaty_tz = pytz.timezone('Asia/Almaty')
+        now = datetime.now(almaty_tz)
         date_str = date_str.lower().strip()
-        
+
         if "сегодня" in date_str:
-            return now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+            result = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return self.parse_to_utc(result)
+
         if "вчера" in date_str:
-            return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        
+            result = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            return self.parse_to_utc(result)
+
         match = re.search(r"(\d{1,2})\s+([а-я]+)(?:\s+(\d{4}))?", date_str)
         if match:
             day = int(match.group(1))
             month_str = match.group(2)
             year = int(match.group(3)) if match.group(3) else now.year
-            
+
             month = RU_MONTHS.get(month_str)
             if month:
-                return datetime(year, month, day)
-                
+                result = datetime(year, month, day)
+                return self.parse_to_utc(result)
+
         return None
 
     def start_requests(self):
@@ -66,94 +71,85 @@ class ZakonSpider(scrapy.Spider):
                     'timeout': 60000,
                 }
             },
-            callback=self.parse_list
+            callback=self.parse_list,
+            dont_filter=self.full_scan,
         )
 
     async def parse_list(self, response):
-        page = response.meta['playwright_page']
-        
-        news_list = []
+        try:
+            page = response.meta['playwright_page']
+        except KeyError:
+            self.logger.error("No playwright_page in meta")
+            return
+
         stop_crawling = False
-        cutoff_date = self.CUTOFF_DATE
-        
+        seen_urls = set()
         attempts = 0
-        while attempts < 150:
-            # Scroll down
-            await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-            await asyncio.sleep(2)
-            
-            # Extract current cards
-            cards_html = await page.content()
-            soup = BeautifulSoup(cards_html, 'html.parser')
-            links = soup.select('a.newscard_link')
-            self.logger.debug(f"Found {len(links)} newscard_link elements")
-            
-            for link in links:
-                title_el = link.select_one('.newscard__title')
-                date_el = link.select_one('.newscard__dateline')
-                
-                if not title_el or not date_el:
-                    self.logger.debug("Missing title or date element in link")
-                    continue
-                
-                title = title_el.get_text(strip=True)
-                date_str = date_el.get_text(strip=True)
-                href = link.get('href')
-                full_url = f"https://www.zakon.kz{href}" if href.startswith('/') else href
-                
-                parsed_date = self.parse_russian_date(date_str)
-                if parsed_date:
-                    if parsed_date < cutoff_date:
-                        self.logger.info(f"Reached cutoff date: {parsed_date}. Stopping scroll.")
-                        stop_crawling = True
-                        break
-                    
-                    if not any(item['url'] == full_url for item in news_list):
-                        news_list.append({
-                            "title": title,
-                            "date": parsed_date,
-                            "url": full_url
-                        })
-                else:
-                    self.logger.debug(f"Failed to parse date: {date_str}")
-            
-            if stop_crawling:
+
+        while attempts < 50 and not stop_crawling:
+            try:
+                await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
+                await asyncio.sleep(2)
+
+                cards_html = await page.content()
+                soup = BeautifulSoup(cards_html, 'html.parser')
+                links = soup.select('a.newscard_link')
+                self.logger.debug(f"Found {len(links)} newscard_link elements")
+
+                for link in links:
+                    title_el = link.select_one('.newscard__title')
+                    date_el = link.select_one('.newscard__dateline')
+
+                    if not title_el or not date_el:
+                        continue
+
+                    title = title_el.get_text(strip=True)
+                    date_str = date_el.get_text(strip=True)
+                    href = link.get('href')
+                    full_url = f"https://www.zakon.kz{href}" if href.startswith('/') else href
+
+                    if full_url in seen_urls:
+                        continue
+                    seen_urls.add(full_url)
+
+                    parsed_date = self.parse_russian_date(date_str)
+
+                    if not self.should_process(full_url, parsed_date):
+                        if parsed_date and self.cutoff_date and parsed_date < self.cutoff_date:
+                            self.logger.info(f"Reached cutoff date: {parsed_date}. Stopping scroll.")
+                            stop_crawling = True
+                            break
+                        continue
+
+                    # Yield immediately while the Playwright page is alive
+                    yield scrapy.Request(
+                        full_url,
+                        callback=self.parse_detail,
+                        meta={
+                            'title_hint': title,
+                            'publish_time_hint': parsed_date,
+                        },
+                        dont_filter=self.full_scan,
+                    )
+
+                attempts += 1
+                self.logger.info(f"Scroll attempt {attempts}: collected items from this window")
+            except Exception as e:
+                self.logger.warning(f"Playwright error during scroll (attempt {attempts}): {e}")
                 break
-                
-            attempts += 1
-            self.logger.info(f"Attempt {attempts}: Collected {len(news_list)} items so far...")
 
-        await page.close()
-
-        # Now yield requests for detail pages
-        for item in news_list:
-            yield scrapy.Request(
-                item['url'],
-                callback=self.parse_detail,
-                meta={'item_data': item}
-            )
+        try:
+            await page.close()
+        except Exception:
+            pass
 
     def parse_detail(self, response):
-        item_data = response.meta['item_data']
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        content_div = soup.select_one('div.content')
-        clean_text = ""
-        if content_div:
-            # Cleaning
-            for s in content_div.select('script, style, .articleAdver, .social-buttons, .related-news'):
-                s.decompose()
-            
-            # Extract clean text from paragraphs
-            paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
-            clean_text = "\n\n".join([p for p in paragraphs if p])
-        
-        item = ZakonItem()
-        item['type'] = 'zakon'
-        item['title'] = item_data['title']
-        item['url'] = item_data['url']
-        item['publish_date'] = item_data['date'].strftime("%Y-%m-%d")
-        item['content'] = clean_text
-        item['crawl_time'] = datetime.now()
-        
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+        )
+
+        item['author'] = "Zakon.kz"
+        item['section'] = "Finansy"
+
         yield item

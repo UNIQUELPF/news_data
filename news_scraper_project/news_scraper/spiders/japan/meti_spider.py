@@ -1,55 +1,77 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
-import json
-import re
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class MetiSpider(BaseNewsSpider):
+
+class MetiSpider(SmartSpider):
     name = 'jp_meti'
 
     country_code = 'JPN'
-
     country = '日本'
+    language = 'ja'
+    source_timezone = 'Asia/Tokyo'
+    use_curl_cffi = True
+
+    start_date = '2026-01-01'
+    fallback_content_selector = 'div.main.w1000, div#main'
+
+    dateparser_settings = {'LANGUAGES': ['ja']}
+
     allowed_domains = ['meti.go.jp']
     start_urls = ['https://www.meti.go.jp/press/index.html']
-    
-    # 目标表名：jp_meti_news
-    target_table = 'jp_meti_news'
-    use_curl_cffi = True # 增加 curl_cffi 支持，应对可能的访问限制
-    
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-
     def start_requests(self):
         # 1. 抓取当前主页
-        yield scrapy.Request('https://www.meti.go.jp/press/index.html', callback=self.parse_list_ul)
-        
+        yield scrapy.Request(
+            'https://www.meti.go.jp/press/index.html',
+            callback=self.parse_list_ul,
+            dont_filter=True,
+        )
+
         # 2. 抓取 2026 年各月存档 (回溯至 2026-01-01)
-        # 格式: archive_202601.html, archive_202602.html, archive_202603.html
         for month in ['01', '02', '03']:
             archive_url = f'https://www.meti.go.jp/press/archive_2026{month}.html'
-            yield scrapy.Request(archive_url, callback=self.parse_list_ul)
+            yield scrapy.Request(
+                archive_url,
+                callback=self.parse_list_ul,
+                dont_filter=True,
+            )
 
     def parse_list_ul(self, response):
-        # 针对 archive 页面的 ul.clearfix.float_li 结构
+        has_valid_item_in_window = False
+
+        # Pattern 1: ul.clearfix.float_li structure (archive pages)
         items = response.css('ul.clearfix.float_li li')
         for li in items:
             date_str = li.css('div.txt_box p::text').get()
             link = li.css('div.txt_box a.cut_txt::attr(href)').get()
-            
-            if link:
-                url = response.urljoin(link)
-                if url not in self.scraped_urls:
-                    self.scraped_urls.add(url)
-                    # 传递日期以便后续过滤
-                    yield scrapy.Request(url, callback=self.parse_article, meta={'pub_date': date_str})
 
-        # 同时也支持一下 dt/dd 结构 (如果主页是用这个的)
+            if not link:
+                continue
+
+            url = response.urljoin(link)
+            publish_time = self.parse_date(date_str) if date_str else None
+
+            if not self.should_process(url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                dont_filter=True,
+                meta={
+                    'title_hint': li.css('div.txt_box a.cut_txt::text').get(),
+                    'publish_time_hint': publish_time,
+                },
+            )
+
+        # Pattern 2: dl#release_menulist structure (main index page)
         dls = response.css('dl#release_menulist')
         if dls:
             dts = dls.css('dt')
@@ -57,62 +79,43 @@ class MetiSpider(BaseNewsSpider):
             for dt, dd in zip(dts, dds):
                 date_str = dt.css('::text').get()
                 link = dd.css('a::attr(href)').get()
-                if link:
-                    url = response.urljoin(link)
-                    if url not in self.scraped_urls:
-                        self.scraped_urls.add(url)
-                        yield scrapy.Request(url, callback=self.parse_article, meta={'pub_date': date_str})
+                if not link:
+                    continue
 
-    def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 1. 标题提取 (h1 或 meta)
-        title = response.css('h1::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else ''
+                url = response.urljoin(link)
+                publish_time = self.parse_date(date_str) if date_str else None
 
-        # 2. 正文提取 (针对 METI 的特殊结构: h1 ID 为 MainContentsArea)
-        # 尝试几种可能的容器
-        content_area = response.css('div.main.w1000') or response.css('div#main')
-        
-        if content_area:
-            # 提取 p, li (排除面包屑), h2, h3
-            paragraphs = content_area.css('p::text, li::text, h2::text, h3::text').getall()
-            # 过滤掉较短的噪音 (如面包屑导航)
-            item['content'] = "\n\n".join([p.strip() for p in paragraphs if len(p.strip()) > 10])
-        else:
-            # 兜底：抓取所有文本
-            texts = response.css('body ::text').getall()
-            item['content'] = "\n\n".join([t.strip() for t in texts if len(t.strip()) > 30])
+                if not self.should_process(url, publish_time):
+                    continue
 
-        # 3. 发布时间提取
-        # 优先使用 meta 数据传递的日期，其次从页面抓取
-        pub_time_str = response.meta.get('pub_date')
-        if not pub_time_str:
-            # 尝试从正文寻找日期 pattern (如 2026年3月23日)
-            date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', response.text)
-            if date_match:
-                pub_time_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    url,
+                    callback=self.parse_detail,
+                    dont_filter=True,
+                    meta={
+                        'title_hint': dd.css('a::text').get(),
+                        'publish_time_hint': publish_time,
+                    },
+                )
 
-        pub_time = datetime.now()
-        if pub_time_str:
-            try:
-                # 转换日本日期 2026年3月23日 -> 2026-03-23
-                if '年' in pub_time_str:
-                    pub_time_str = pub_time_str.replace('年', '-').replace('月', '-').replace('日', '')
-                from dateutil import parser
-                pub_time = parser.parse(pub_time_str).replace(tzinfo=None)
-            except:
-                pass
+        if not has_valid_item_in_window:
+            self.logger.info(
+                f"All items on {response.url} are outside the window or already scraped. "
+                "Stopping (no pagination on this page type)."
+            )
 
-        # 4. 日期过滤 (2026-01-01)
-        if not self.filter_date(pub_time):
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1//text()",
+        )
+
+        if not self.should_process(response.url, item.get('publish_time')):
             return
 
-        item['publish_time'] = pub_time
         item['author'] = 'METI Japan'
         item['language'] = 'ja'
         item['section'] = 'Press Release'
 
-        if item.get('content') and len(item['content']) > 100:
-            yield item
+        yield item

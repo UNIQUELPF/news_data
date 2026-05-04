@@ -1,23 +1,28 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
 import json
-import re
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from urllib.parse import urljoin
 
-class BloombergSpider(BaseNewsSpider):
+from news_scraper.spiders.smart_spider import SmartSpider
+
+
+class BloombergSpider(SmartSpider):
     name = 'jp_bloomberg'
 
     country_code = 'JPN'
-
     country = '日本'
+    language = 'en'
+    source_timezone = 'Asia/Tokyo'
+
     allowed_domains = ['bloomberg.com']
     start_urls = ['https://www.bloomberg.com/jp/economics']
-    
-    # 目标表名：jp_bloomberg_news
-    target_table = 'jp_bloomberg_news'
-    use_curl_cffi = True # 启用高效指纹浏览器模拟
-    
+
+    use_curl_cffi = True
+    fallback_content_selector = '.body-copy, article'
+
+    # Bloomberg API list endpoints don't expose publish dates on item cards,
+    # so we defer date-dependent filtering to the detail page.
+    strict_date_required = False
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 2.0,
@@ -25,120 +30,129 @@ class BloombergSpider(BaseNewsSpider):
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-        }
+        },
     }
 
+    def start_requests(self):
+        for url in self.start_urls:
+            yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
 
-    def parse(self, response):
-        # 1. 模式 1: 解析 initialState JSON (最全)
-        # 彭博社将数据直接存放在 JSON 脚本中
+    # ------------------------------------------------------------------
+    # Listing page – embedded JSON
+    # ------------------------------------------------------------------
+    def parse_list(self, response):
+        """Extract article links from the initialState JSON blob on the listing page."""
         scripts = response.xpath('//script[contains(text(), "initialState")]/text()').getall()
-        found_links = []
-        
+
+        found_urls = set()
         for script_text in scripts:
             try:
-                # 尝试解析纯 JSON 字符串
                 data = json.loads(script_text)
-                # 深度遍历或根据 ID 搜索 (由 subagent 记录的结构: props.pageProps.initialState)
-                def find_urls(obj):
-                    if isinstance(obj, dict):
-                        if 'url' in obj and isinstance(obj['url'], str) and '/news/articles/' in obj['url']:
-                            url = response.urljoin(obj['url'])
-                            if url not in self.scraped_urls:
-                                self.scraped_urls.add(url)
-                                found_links.append(url)
-                        for v in obj.values():
-                            find_urls(v)
-                    elif isinstance(obj, list):
-                        for item in obj:
-                            find_urls(item)
-                
-                find_urls(data)
-            except:
+                self._collect_urls(data, response.url, found_urls)
+            except Exception:
                 pass
 
-        # 2. 模式 2: 分页 API (深度回溯)
-        # 彭博社的分页 API 每次请求 10 条
+        self.logger.info(
+            f"Bloomberg List: Found {len(found_urls)} initial article links from JSON."
+        )
+
+        has_valid_item_in_window = False
+        for url in found_urls:
+            if not self.should_process(url):          # dedup-only (strict_date_required=False)
+                continue
+            has_valid_item_in_window = True
+            yield scrapy.Request(url, callback=self.parse_detail,
+                                 dont_filter=self.full_scan)
+
+        # ------------------------------------------------------------------
+        # API pagination – deeper history (offsets 10..190, step 10)
+        # ------------------------------------------------------------------
         for offset in range(10, 200, 10):
-            api_url = f"https://www.bloomberg.com/lineup-next/api/paginate?id=story-list-1&page=jp-economics&offset={offset}&variation=archive&type=lineup_content&locale=ja"
-            yield scrapy.Request(api_url, callback=self.parse_api_json)
+            api_url = (
+                'https://www.bloomberg.com/lineup-next/api/paginate'
+                f'?id=story-list-1&page=jp-economics&offset={offset}'
+                '&variation=archive&type=lineup_content&locale=ja'
+            )
+            yield scrapy.Request(api_url, callback=self.parse_api_json,
+                                 dont_filter=True)
 
-        self.logger.info(f"Bloomberg List: Found {len(set(found_links))} initial article links.")
-        
-        for url in set(found_links):
-            yield scrapy.Request(url, callback=self.parse_article)
-
+    # ------------------------------------------------------------------
+    # API pagination handler
+    # ------------------------------------------------------------------
     def parse_api_json(self, response):
         try:
             data = json.loads(response.text)
-            # data root 通常包含 story-list-1
-            items = []
-            if 'story-list-1' in data:
-                items = data['story-list-1'].get('items', [])
-            else:
-                # 兜底：深度搜索 items
-                def find_items(obj):
-                    if isinstance(obj, dict):
-                        if 'items' in obj and isinstance(obj['items'], list):
-                            return obj['items']
-                        for v in obj.values():
-                            res = find_items(v)
-                            if res: return res
-                    return None
-                items = find_items(data) or []
-
-            for item in items:
-                if 'url' in item:
-                    url = response.urljoin(item['url'])
-                    if url not in self.scraped_urls:
-                        self.scraped_urls.add(url)
-                        yield scrapy.Request(url, callback=self.parse_article)
         except Exception as e:
-            self.logger.error(f"Error parsing Bloomberg API JSON: {e}")
-
-    def parse_article(self, response):
-        self.logger.info(f"Parsing article: {response.url}")
-        item = {}
-        item['url'] = response.url
-        
-        # 1. 标题提取 (h1 结合 meta)
-        title = response.css('h1::text').get() or \
-                response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else ''
-
-        # 2. 正文提取 (使用浏览器探测到的精准选择器，配合 string(.) 递归提取)
-        paragraph_nodes = response.css('p[data-component="paragraph"]') or \
-                          response.css('div.body-copy p') or \
-                          response.css('article p')
-        
-        paragraphs = [p.xpath('string(.)').get().strip() for p in paragraph_nodes if p.xpath('string(.)').get()]
-        
-        if paragraphs:
-            item['content'] = "\n\n".join([p for p in paragraphs if len(p) > 30])
-        else:
-            item['content'] = ""
-
-        # 3. 发布时间提取
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or \
-                       response.xpath('//meta[@name="parsely-pub-date"]/@content').get() or \
-                       response.css('time::attr(datetime)').get()
-        
-        pub_time = datetime.now()
-        if pub_time_str:
-            try:
-                from dateutil import parser
-                pub_time = parser.parse(pub_time_str).replace(tzinfo=None)
-            except:
-                pass
-
-        # 4. 日期过滤 (2026-01-01)
-        if not self.filter_date(pub_time):
+            self.logger.error(f"Failed to parse Bloomberg API JSON: {e}")
             return
 
-        item['publish_time'] = pub_time
+        # Locate the items list inside the paginated payload
+        items = []
+        if 'story-list-1' in data:
+            items = data['story-list-1'].get('items', [])
+        else:
+            items = self._deep_find_items(data) or []
+
+        has_valid_item_in_window = False
+        for item in items:
+            raw_url = item.get('url')
+            if not raw_url:
+                continue
+            url = response.urljoin(raw_url)
+            if not self.should_process(url):
+                continue
+            has_valid_item_in_window = True
+            yield scrapy.Request(url, callback=self.parse_detail,
+                                 dont_filter=self.full_scan)
+
+        if not has_valid_item_in_window:
+            self.logger.info(
+                f"API offset exhausted – no new URLs on {response.url}"
+            )
+
+    # ------------------------------------------------------------------
+    # Detail page
+    # ------------------------------------------------------------------
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1//text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
+
+        # Re-check with the publish_time that auto_parse_item extracted from the page
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
+
         item['author'] = 'Bloomberg'
-        item['language'] = 'ja'
         item['section'] = 'Economics'
 
-        if item.get('content') and len(item['content']) > 100:
-            yield item
+        yield item
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _collect_urls(obj, base_url, found_urls):
+        """Recursively walk a deserialised JSON tree and collect /news/articles/ URLs."""
+        if isinstance(obj, dict):
+            candidate = obj.get('url')
+            if isinstance(candidate, str) and '/news/articles/' in candidate:
+                found_urls.add(urljoin(base_url, candidate))
+            for v in obj.values():
+                BloombergSpider._collect_urls(v, base_url, found_urls)
+        elif isinstance(obj, list):
+            for item in obj:
+                BloombergSpider._collect_urls(item, base_url, found_urls)
+
+    @staticmethod
+    def _deep_find_items(obj):
+        """Fallback: recursively find the first 'items' list in a nested dict."""
+        if isinstance(obj, dict):
+            if 'items' in obj and isinstance(obj['items'], list):
+                return obj['items']
+            for v in obj.values():
+                res = BloombergSpider._deep_find_items(v)
+                if res:
+                    return res
+        return None

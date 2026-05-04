@@ -1,90 +1,89 @@
 import scrapy
-from datetime import datetime
-import json
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class GrNaftemporikiSpider(BaseNewsSpider):
+
+class GrNaftemporikiSpider(SmartSpider):
     name = 'gr_naftemporiki'
 
     country_code = 'GRC'
-
     country = '希腊'
+    language = 'el'
+    source_timezone = 'Europe/Athens'
+    use_curl_cffi = True
+
+    # 列表页只有时间 (如 "14:04")，没有完整日期，所以不能做列表页日期过滤
+    strict_date_required = False
+
     allowed_domains = ['naftemporiki.gr']
-    
+
     # 航运报新闻大厅列表
     base_url = 'https://www.naftemporiki.gr/newsroom/page/{}/'
-    start_urls = [base_url.format(1)]
-    
-    # 数据库配置 (Greece -> gr, Site -> naftemporiki)
-    target_table = 'gr_naftemporiki_news'
 
-    def parse(self, response):
-        # 1. 提取文章链接
-        # 选择器根据探测结果为 div.title a
-        article_links = response.css('div.title a::attr(href)').getall()
-        
-        current_page = response.meta.get('page', 1)
-        valid_items_count = 0
-        
-        for link in article_links:
-            yield response.follow(link, self.parse_article)
-            valid_items_count += 1
+    fallback_content_selector = '.post-content'
 
-        # 2. 翻页逻辑: 只要当前页有文章且未达到安全阈值，继续翻页
-        # 历史回溯至 2026/01/01
-        if valid_items_count > 0 and current_page < 5000:
+    # 列表页无日期，无法做窗口断路，用最大翻页数作为安全阀
+    max_pages = 500
+
+    custom_settings = {
+        'DOWNLOAD_DELAY': 0.5,
+        'DOWNLOAD_TIMEOUT': 30,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
+    }
+
+    def start_requests(self):
+        yield scrapy.Request(
+            self.base_url.format(1),
+            callback=self.parse_list,
+            meta={'page': 1},
+            dont_filter=True
+        )
+
+    def parse_list(self, response):
+        # HTML: <div class="box-item"> containing <div class="time"> and <div class="title">
+        articles = response.css('div.box-item')
+
+        has_valid_item_in_window = False
+
+        for article in articles:
+            url = article.css('div.title a::attr(href)').get()
+            if not url:
+                continue
+            url = response.urljoin(url)
+
+            title_hint = article.css('div.title a::text').get()
+
+            # 列表页只有时间无完整日期，详情页 meta 标签有完整发布时间
+            if not self.should_process(url):
+                continue
+
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                meta={
+                    'title_hint': title_hint,
+                    'section_hint': 'News',
+                }
+            )
+
+        current_page = response.meta['page']
+        if has_valid_item_in_window and current_page < self.max_pages:
             next_page = current_page + 1
             yield scrapy.Request(
                 self.base_url.format(next_page),
-                callback=self.parse,
-                meta={'page': next_page}
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True
             )
 
-    def parse_article(self, response):
-        # 1. 提取发布时间 (ISO 格式优先)
-        pub_time_raw = response.css('meta[property="article:published_time"]::attr(content)').get()
-        if not pub_time_raw:
-            # 兜底从 LD-JSON 提取
-            try:
-                ld_json = json.loads(response.xpath('//script[@type="application/ld+json" and contains(text(), "datePublished")]/text()').get())
-                if isinstance(ld_json, list):
-                    pub_time_raw = ld_json[0].get('datePublished')
-                else:
-                    pub_time_raw = ld_json.get('datePublished')
-            except:
-                pass
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1//text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
 
-        if not pub_time_raw:
-            return
+        item['author'] = 'Naftemporiki Newsroom'
+        item['section'] = response.meta.get('section_hint', 'News')
 
-        # 解析 ISO 时间 (例如 2026-03-31T19:37:08+03:00)
-        try:
-            # 兼容带时区偏移的情况
-            pub_time = datetime.fromisoformat(pub_time_raw.split('+')[0])
-        except:
-            return
-
-        # 2. 日期过滤 (2026-01-01 之后)
-        if not self.filter_date(pub_time):
-            return
-
-        # 3. 提取标题和内容
-        title = response.css('h1::text').get('').strip()
-        content_parts = response.css('.post-content p::text, .post-content li::text').getall()
-        content = "\n\n".join([p.strip() for p in content_parts if p.strip()])
-
-        # 如果 content 为空，尝试更广的选择器
-        if not content:
-            content = "\n\n".join(response.css('article p::text').getall())
-
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': content,
-            'publish_time': pub_time,
-            'author': 'Naftemporiki Newsroom',
-            'language': 'el',
-            'section': response.css('meta[property="article:section"]::attr(content)').get('News')
-        }
-        
         yield item

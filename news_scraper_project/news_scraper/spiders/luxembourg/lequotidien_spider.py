@@ -1,212 +1,146 @@
 import logging
-from datetime import datetime
 
-import psycopg2
+import dateparser
 import scrapy
 from bs4 import BeautifulSoup
-from dateutil import parser as date_parser
-from news_scraper.items import NewsItem
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
 logger = logging.getLogger(__name__)
 
-class LeQuotidienSpider(scrapy.Spider):
+
+class LeQuotidienSpider(SmartSpider):
     """
-    Scrapes the Le Quotidien (lequotidien.lu) news site.
+    V2: Scrapes the Le Quotidien (lequotidien.lu) news site.
     Uses standard WP-like server-side rendering pagination.
     """
     name = "luxembourg_lequotidien"
+    source_timezone = 'Europe/Luxembourg'
 
     country_code = 'LUX'
-
     country = '卢森堡'
+    language = 'fr'
+
     allowed_domains = ["lequotidien.lu"]
-    target_table = "luxembourg_lequotidien_news"
-    
+
     custom_settings = {
         'DOWNLOAD_DELAY': 0.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        # Standard generic user agent to avoid basic blocks
-        'USER_AGENT': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     }
 
+    fallback_content_selector = '.entry-content'
+
     start_categories = [
-        'a-la-une', 'luxembourg', 'politique-societe', 'economie', 
-        'monde', 'grande-region', 'police-justice', 'sport-national', 
+        'a-la-une', 'luxembourg', 'politique-societe', 'economie',
+        'monde', 'grande-region', 'police-justice', 'sport-national',
         'culture', 'lifestyle'
     ]
 
-    def __init__(self, start_date=None, full_scan=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-        # Determine cutoff date
-        if start_date:
-            self.cutoff_date = date_parser.parse(start_date).replace(tzinfo=None)
-            logger.info(f"Using explicitly provided start_date: {self.cutoff_date}")
-        elif full_scan:
-            self.cutoff_date = datetime(2026, 1, 1)
-            logger.info("Doing a FULL SCAN back to 2026-01-01.")
-        else:
-            self.cutoff_date = self.get_latest_db_date()
-            logger.info(f"Using latest DB publish_time as cutoff: {self.cutoff_date}")
-            
-        self.init_db()
-
-    def get_latest_db_date(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' AND table_name = '{self.target_table}'
-                )
-            """)
-            if not cur.fetchone()[0]:
-                return datetime(2026, 1, 1)
-
-            cur.close()
-            conn.close()
-
-            state = get_incremental_state(
-                self.settings,
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=datetime(2026, 1, 1),
-                full_scan=False,
-            )
-            return state["cutoff_date"]
-        except Exception as e:
-            logger.warning(f"Failed to get max date from DB, defaulting to 2026-01-01: {e}")
-            
-        return datetime(2026, 1, 1)
-
-    def init_db(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    url TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP NOT NULL,
-                    author VARCHAR(255),
-                    language VARCHAR(50),
-                    section VARCHAR(100),
-                    scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Failed to initialize table {self.target_table}: {e}")
-
-    def start_requests(self):
+    async def start(self):
+        """Initial requests entry point."""
         for cat in self.start_categories:
             url = f"https://lequotidien.lu/{cat}/page/1/"
             yield scrapy.Request(
                 url=url,
-                callback=self.parse_list,
-                cb_kwargs={"cat": cat, "page": 1}
+                callback=self.parse,
+                cb_kwargs={"cat": cat, "page": 1},
+                dont_filter=True
             )
 
-    def parse_list(self, response, cat, page):
+    def parse(self, response, cat, page):
+        """Parse listing page: extract article blocks with date/title and yield detail requests."""
         soup = BeautifulSoup(response.text, "html.parser")
-        
+
         main_container = soup.select_one('#main-content') or soup.select_one('main') or soup.find(id='content') or soup
         articles = main_container.find_all('article')
-        
+
         if not articles:
             logger.info(f"No articles found on {cat} page {page}. Stopping.")
             return
-            
-        valid_items_found = False
-        
+
+        has_valid_item_in_window = False
+
         for p in articles:
             a_tag = p.find('a')
             if not a_tag or not a_tag.get('href'):
                 continue
-                
+
             href = a_tag.get('href')
             detail_url = href if href.startswith('http') else f"https://lequotidien.lu{href}"
-            
-            # Extract basic info
+
+            # Extract date
             date_el = p.select_one('.tie-date') or p.select_one('time') or p.select_one('.date')
             date_text = date_el.text.strip() if date_el else ""
-            
+
+            # Extract title
             title_el = p.find(['h2', 'h3'])
             title = title_el.text.strip() if title_el else ""
-            
+
             if not date_text or not title:
                 continue
-                
+
+            # Parse date (European DMY) and convert to UTC
+            publish_time = None
             try:
-                # Typically format DD/MM/YYYY
-                pub_time = datetime.strptime(date_text, "%d/%m/%Y")
+                dt_obj = dateparser.parse(date_text, settings={'DATE_ORDER': 'DMY'})
+                if dt_obj:
+                    publish_time = self.parse_to_utc(dt_obj)
             except Exception:
-                try:
-                    # Fallback parser
-                    pub_time = date_parser.parse(date_text).replace(tzinfo=None)
-                except Exception:
-                    continue  # skip invalid
-                    
-            if pub_time < self.cutoff_date:
                 continue
-                
-            valid_items_found = True
-            
+
+            if not publish_time:
+                continue
+
+            # V2 deduplication and incremental check
+            if not self.should_process(detail_url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+
             yield scrapy.Request(
                 url=detail_url,
                 callback=self.parse_detail,
-                cb_kwargs={
-                    "pub_time": pub_time,
-                    "title": title,
-                    "section": cat
-                }
+                meta={
+                    "publish_time_hint": publish_time,
+                    "title_hint": title,
+                    "section_hint": cat
+                },
+                dont_filter=self.full_scan
             )
-            
-        # Pagination handling
-        if valid_items_found:
+
+        # Pagination: continue while items are within the date window
+        if has_valid_item_in_window:
             next_page = page + 1
             next_url = f"https://lequotidien.lu/{cat}/page/{next_page}/"
             yield scrapy.Request(
                 url=next_url,
-                callback=self.parse_list,
-                cb_kwargs={"cat": cat, "page": next_page}
+                callback=self.parse,
+                cb_kwargs={"cat": cat, "page": next_page},
+                dont_filter=True
             )
         else:
             logger.info(f"Reached cutoff for {cat} at page {page}. Stopping.")
 
-    def parse_detail(self, response, pub_time, title, section):
-        soup = BeautifulSoup(response.text, "html.parser")
-        
-        # Primary container
-        content_node = soup.select_one('.entry-content') or soup.select_one('article')
-        
-        if not content_node:
-            content_node = soup.select_one('#post-content') or soup.find('body')
-            
-        # Optional: cleanup typical clutter like embedded ads or 'Read Also'
-        for unwanted in content_node.select('.related-posts, .yarpp-related, .advertisement, script, style'):
-            unwanted.decompose()
-            
-        content = content_node.get_text(separator="\n", strip=True)
-        
-        # Look for author
+    def parse_detail(self, response):
+        """Parse article detail page using standardized SmartSpider extraction."""
+        item = self.auto_parse_item(response)
+
+        # Override with listing-page hints (more reliable than detail page extraction)
+        title_hint = response.meta.get("title_hint")
+        publish_time_hint = response.meta.get("publish_time_hint")
+
+        if title_hint:
+            item['title'] = title_hint
+        if publish_time_hint:
+            item['publish_time'] = publish_time_hint
+
+        # Extract author from detail page
         author = "Le Quotidien"
+        soup = BeautifulSoup(response.text, "html.parser")
         author_el = soup.select_one('.author-name') or soup.select_one('.post-meta-author')
         if author_el:
             author = author_el.get_text(separator=" ", strip=True)
-            
-        news_item = NewsItem()
-        news_item['url'] = response.url
-        news_item['title'] = title
-        news_item['content'] = content
-        news_item['publish_time'] = pub_time.strftime("%Y-%m-%d %H:%M:%S")
-        news_item['author'] = author
-        news_item['language'] = "fr"
-        news_item['section'] = section
-        yield news_item
+
+        item['author'] = author
+        item['language'] = 'fr'
+
+        yield item
