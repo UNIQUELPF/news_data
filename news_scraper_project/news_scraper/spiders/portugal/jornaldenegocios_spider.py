@@ -1,20 +1,19 @@
 import scrapy
-from bs4 import BeautifulSoup
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class PortugalJornalNegociosSpider(BaseNewsSpider):
+
+class PortugalJornalNegociosSpider(SmartSpider):
     name = 'pt_jornaldenegocios'
-
     country_code = 'PRT'
-
     country = '葡萄牙'
+    language = 'pt'
+    source_timezone = 'Europe/Lisbon'
+    start_date = '2024-01-01'
     allowed_domains = ['jornaldenegocios.pt']
+    fallback_content_selector = '.texto_noticia'
     start_urls = ['https://www.jornaldenegocios.pt/economia']
-    
-    # 继承 BaseNewsSpider，自动初始化 pt_jornaldenegocios_news 表
-    target_table = 'pt_jornaldenegocios_news'
-    
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -27,9 +26,8 @@ class PortugalJornalNegociosSpider(BaseNewsSpider):
     def start_requests(self):
         # 初始抓取第一页
         yield scrapy.Request(self.start_urls[0], callback=self.parse_list)
-        
+
         # 模拟 AJAX 翻页逻辑：步长 12
-        # 回溯至 2026-01-01 约为 300 次迭代
         base_ajax = "https://www.jornaldenegocios.pt/economia/loadmore?friendlyUrl=economia&contentStartIndex="
         for index in range(12, 3600, 12):
             url = f"{base_ajax}{index}"
@@ -41,57 +39,16 @@ class PortugalJornalNegociosSpider(BaseNewsSpider):
 
         for link in articles:
             full_url = response.urljoin(link)
-            if full_url in self.scraped_urls:
-                continue
-            self.scraped_urls.add(full_url)
             yield scrapy.Request(full_url, callback=self.parse_article)
 
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 标题提取
-        title = response.css('h1::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else 'Jornal de Negócios Report'
-
-        # 正文提取：容器通常为 .texto_noticia
-        content_html = response.css('.texto_noticia').get() or response.css('.detalhe_corpo').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 移除杂质
-            for tag in soup(['script', 'style', '.relacionadas', '.tags', '.publicidade']):
-                tag.decompose()
-            
-            # 提取文本
-            paragraphs = []
-            for p in soup.find_all(['p', 'div']):
-                text = p.get_text().strip()
-                if len(text) > 40:
-                    paragraphs.append(text)
-            
-            item['content'] = "\n\n".join(paragraphs)
-        
-        # 发布时间获取 (ISO 格式)
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or \
-                       response.css('time::attr(datetime)').get()
-        
-        if pub_time_str:
-            try:
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
-
-        # 日期过滤逻辑 (由 BaseNewsSpider 接管)
-        if not self.filter_date(pub_time):
-            return
-
-        item['publish_time'] = pub_time
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
         item['author'] = 'Jornal de Negócios'
-        item['language'] = 'pt'
         item['section'] = 'Economia/Empresas'
-
-        if item.get('content') and len(item['content']) > 200:
-            yield item
+        if item.get('content_plain') and len(item['content_plain']) > 50:
+            if self.should_process(response.url, item.get('publish_time')):
+                yield item

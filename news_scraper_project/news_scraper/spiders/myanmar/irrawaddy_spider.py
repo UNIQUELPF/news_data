@@ -1,20 +1,19 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class MyanmarIrrawaddySpider(BaseNewsSpider):
+
+class MyanmarIrrawaddySpider(SmartSpider):
     name = 'mm_irrawaddy'
-
     country_code = 'MMR'
-
     country = '缅甸'
+    language = 'en'
+    source_timezone = 'Asia/Yangon'
     allowed_domains = ['irrawaddy.com']
     start_urls = ['https://www.irrawaddy.com/category/news']
-    
-    # 继承 BaseNewsSpider，自动初始化 mm_irrawaddy_news 表
-    target_table = 'mm_irrawaddy_news'
-    
+    fallback_content_selector = '.entry-content'
+    strict_date_required = False
+    MAX_PAGES = 60
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -25,72 +24,45 @@ class MyanmarIrrawaddySpider(BaseNewsSpider):
     }
 
     def start_requests(self):
-        # Irrawaddy 分页格式通常为 /category/news/page/2/
-        # 从 1 月 1 日开始回溯，大约需要 50-60 页
-        for page in range(1, 60):
-            url = self.start_urls[0] if page == 1 else f"{self.start_urls[0]}/page/{page}/"
-            yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse_list,
+            meta={'page': 1}
+        )
 
     def parse_list(self, response):
-        # 获取 JNews 框架下的文章链接 (jeg_post_title a)
         articles = response.css('.jeg_post_title a::attr(href)').getall()
-        # 兼容其他版本
         if not articles:
             articles = response.css('h3 a::attr(href)').getall()
 
+        has_valid_item_in_window = False
+
         for link in articles:
-            if link and link.startswith('https://www.irrawaddy.com/'):
-                if link in self.scraped_urls:
-                    continue
-                self.scraped_urls.add(link)
+            if not link or not link.startswith('https://www.irrawaddy.com/'):
+                continue
+            if self.should_process(link):
+                has_valid_item_in_window = True
                 yield scrapy.Request(link, callback=self.parse_article)
 
+        current_page = response.meta.get('page', 1)
+        if has_valid_item_in_window and current_page < self.MAX_PAGES:
+            next_page = current_page + 1
+            next_url = f"{self.start_urls[0]}/page/{next_page}/"
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True
+            )
+
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 标题提取
-        title = response.css('h1.entry-title::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else 'Unknown'
-
-        # 正文提取：主要是 entry-content
-        content_html = response.css('.entry-content').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 剔除噪音 (分享按钮、相关推荐、广告)
-            for tag in soup(['script', 'style', 'div.jeg_share_links', 'div.related-content', 'aside']):
-                tag.decompose()
-            
-            # 清洗正文
-            paragraphs = []
-            for p in soup.find_all('p'):
-                text = p.get_text().strip()
-                if len(text) > 40 and 'The Irrawaddy' not in text:
-                    paragraphs.append(text)
-            
-            item['content'] = "\n\n".join(paragraphs)
-        
-        # 精准发布日期
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or response.css('time.entry-date::attr(datetime)').get()
-        
-        if pub_time_str:
-            try:
-                # 兼容 ISO 格式
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
-
-        # 日期过滤逻辑 (继承自基类)
-        if not self.filter_date(pub_time):
-            return
-
-        item['publish_time'] = pub_time
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[@class='entry-title']/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
         item['author'] = response.css('.entry-author a::text').get() or 'The Irrawaddy'
-        item['language'] = 'en'
         item['section'] = 'Burma News'
 
-        if item.get('content') and len(item['content']) > 150:
+        if item.get('content_plain') and len(item['content_plain']) > 150:
             yield item

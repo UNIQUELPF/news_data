@@ -2,33 +2,29 @@
 
 import scrapy
 from datetime import datetime
-from news_scraper.items import NewsItem
-from news_scraper.utils import get_dynamic_cutoff
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class PolitikaSpider(scrapy.Spider):
+
+class PolitikaSpider(SmartSpider):
     name = 'politika'
-
     country_code = 'SRB'
-
     country = '塞尔维亚'
+    language = 'sr'
+    source_timezone = 'Europe/Belgrade'
+    start_date = '2024-01-01'
     allowed_domains = ['politika.rs']
     start_urls = ['https://www.politika.rs/scc/columns/archive/6']
-    
-    target_table = 'ser_politika'
+    fallback_content_selector = '#text-holder'
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False
     }
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(PolitikaSpider, cls).from_crawler(crawler, *args, **kwargs)
-        spider.CUTOFF_DATE = get_dynamic_cutoff(crawler.settings, spider.target_table, spider_name=spider.name)
-        return spider
-
     def parse(self, response):
         items = response.css('.column-data .news-item')
-        
+
+        has_valid_item_in_window = False
+
         for item in items:
             title_tag = item.css('h3.h3 a')
             url = title_tag.attrib.get('href')
@@ -36,53 +32,46 @@ class PolitikaSpider(scrapy.Spider):
 
             if url:
                 full_url = response.urljoin(url)
+                # 列表页没有日期，直接通过详情页 should_process 过滤
+                has_valid_item_in_window = True
                 yield scrapy.Request(
-                    full_url, 
-                    callback=self.parse_detail, 
-                    meta={'title': title}
+                    full_url,
+                    callback=self.parse_detail,
+                    meta={'title_hint': title}
                 )
 
-        # Pagination
-        current_page_num = response.meta.get('page', 1)
-        next_page_num = current_page_num + 1
-        
-        if items:
+        # V2 断路器翻页
+        if has_valid_item_in_window:
+            current_page_num = response.meta.get('page', 1)
+            next_page_num = current_page_num + 1
             next_url = f"https://www.politika.rs/scc/columns/archive/6/page:{next_page_num}?url="
             yield scrapy.Request(
-                next_url, 
-                callback=self.parse, 
+                next_url,
+                callback=self.parse,
                 meta={'page': next_page_num}
             )
 
     def parse_detail(self, response):
         publish_time_str = response.css('span[itemprop="datePublished"]::attr(content)').get()
-        
+
+        publish_time = None
         if publish_time_str:
             try:
                 dt_str = publish_time_str.split('+')[0]
                 publish_time = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
             except Exception as e:
                 self.logger.error(f"Error parsing date {publish_time_str}: {e}")
-                return
 
-            if publish_time < self.CUTOFF_DATE:
-                self.logger.info(f"Reached cutoff date: {publish_time}")
-                return
-
-            item = NewsItem()
-            item['url'] = response.url
-            item['title'] = response.meta['title']
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//meta[@property='og:title']/@content",
+        )
+        if publish_time:
             item['publish_time'] = publish_time
-            
-            content_parts = response.css('#text-holder p::text, #text-holder p span::text').getall()
-            if not content_parts:
-                content_parts = response.css('.article-content p::text, .article-content p span::text').getall()
-                
-            item['content'] = "\n".join([p.strip() for p in content_parts if p.strip()])
-            
-            author = response.css('.article-author::text, .article-info .bold::text').get()
-            item['author'] = author.strip() if author else "Politika"
-            item['language'] = 'sr'
-            item['scrape_time'] = datetime.now()
-            
-            yield item
+
+        item['author'] = response.css('.article-author::text, .article-info .bold::text').get() or "Politika"
+        item['section'] = 'Kolumne'
+
+        if item.get('content_plain') and len(item['content_plain']) > 50:
+            if self.should_process(response.url, item.get('publish_time')):
+                yield item

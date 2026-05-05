@@ -1,20 +1,19 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class MyanmarBizTodaySpider(BaseNewsSpider):
+
+class MyanmarBizTodaySpider(SmartSpider):
     name = 'mm_mmbiztoday'
-
     country_code = 'MMR'
-
     country = '缅甸'
+    language = 'en'
+    source_timezone = 'Asia/Yangon'
     allowed_domains = ['mmbiztoday.com']
     start_urls = ['https://mmbiztoday.com/category/investment-and-finance/']
-    
-    # 继承 BaseNewsSpider，自动初始化 mm_mmbiztoday_news 表
-    target_table = 'mm_mmbiztoday_news'
-    
+    fallback_content_selector = '.td-post-content'
+    strict_date_required = False
+    MAX_PAGES = 30
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -25,65 +24,45 @@ class MyanmarBizTodaySpider(BaseNewsSpider):
     }
 
     def start_requests(self):
-        # 翻页回溯逻辑：从第 1 页到约第 30 页 (涵盖 2026 年初)
-        for page in range(1, 30):
-            url = self.start_urls[0] if page == 1 else f"{self.start_urls[0]}page/{page}/"
-            yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse_list,
+            meta={'page': 1}
+        )
 
     def parse_list(self, response):
-        # 获取列表页的文章链接 (td-module-title a)
         articles = response.css('.td-module-title h3 a::attr(href)').getall()
         if not articles:
             articles = response.css('h3.entry-title a::attr(href)').getall()
 
+        has_valid_item_in_window = False
+
         for link in articles:
-            if link and link.startswith('http'):
-                if link in self.scraped_urls:
-                    continue
-                self.scraped_urls.add(link)
+            if not link or not link.startswith('http'):
+                continue
+            if self.should_process(link):
+                has_valid_item_in_window = True
                 yield scrapy.Request(link, callback=self.parse_article)
 
+        current_page = response.meta.get('page', 1)
+        if has_valid_item_in_window and current_page < self.MAX_PAGES:
+            next_page = current_page + 1
+            next_url = f"{self.start_urls[0]}page/{next_page}/"
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True
+            )
+
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 标题提取
-        title = response.css('h1.entry-title::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else 'Unknown'
-
-        # 正文提取：定位 WordPress 主要内容区
-        content_html = response.css('.td-post-content').get() or response.css('.entry-content').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 剔除噪音 (广告占位符、脚本)
-            for tag in soup(['script', 'style', 'div.adsbygoogle', 'aside']):
-                tag.decompose()
-            
-            # 清洗段落
-            paragraphs = soup.find_all('p')
-            item['content'] = "\n\n".join([p.get_text().strip() for p in paragraphs if len(p.get_text()) > 30])
-        
-        # 关键：获取发布日期 (meta 或 time 标签)
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or response.css('time.entry-date::attr(datetime)').get()
-        
-        if pub_time_str:
-            try:
-                # 兼容 ISO 格式 (e.g., 2026-03-20T10:00:00Z)
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
-
-        # 日期过滤逻辑 (继承自基类)
-        if not self.filter_date(pub_time):
-            return
-
-        item['publish_time'] = pub_time
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[@class='entry-title']/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
         item['author'] = response.css('.td-post-author-name a::text').get() or 'Myanmar Business Today'
-        item['language'] = 'en'
         item['section'] = 'Investment & Finance'
 
-        if item.get('content') and len(item['content']) > 150:
+        if item.get('content_plain') and len(item['content_plain']) > 150:
             yield item

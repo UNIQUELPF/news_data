@@ -1,22 +1,25 @@
 import scrapy
 from datetime import datetime
 import json
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class SgBusinessTimesSpider(BaseNewsSpider):
+
+class SgBusinessTimesSpider(SmartSpider):
     name = 'sg_businesstimes'
-
     country_code = 'SGP'
-
     country = '新加坡'
+    language = 'en'
+    source_timezone = 'Asia/Singapore'
+    start_date = '2024-01-01'
     allowed_domains = ['businesstimes.com.sg']
-    
+    fallback_content_selector = '.font-lucida'
+
     # 商业时报隐藏的分页 API (v1)
     api_url = 'https://www.businesstimes.com.sg/_plat/api/v1/articles/sections?size=20&sections=singapore_economy-policy&page={}'
     start_urls = [api_url.format(1)]
-    
+
     use_curl_cffi = True
-    
+
     custom_settings = {
         'DOWNLOADER_MIDDLEWARES': {
             'news_scraper.middlewares.CurlCffiMiddleware': 543,
@@ -30,8 +33,6 @@ class SgBusinessTimesSpider(BaseNewsSpider):
         'CONCURRENT_REQUESTS': 1,
         'DOWNLOAD_DELAY': 2
     }
-    
-    target_table = 'sg_businesstimes_news'
 
     def parse(self, response):
         try:
@@ -48,31 +49,32 @@ class SgBusinessTimesSpider(BaseNewsSpider):
 
         current_page = response.meta.get('page', 1)
         valid_items = 0
-        
+
         for item in items:
             article_data = item.get('articleData', {})
             href = article_data.get('urlPath')
             # 使用 ISO 格式的 publishTime: 2026-03-20T02:30:00.000Z
             pub_time_raw = article_data.get('publishTime')
-            
+
             if not href or not pub_time_raw:
                 continue
-            
+
             try:
                 pub_date = datetime.fromisoformat(pub_time_raw.replace('Z', '+00:00'))
             except:
                 continue
 
-            # 列表级日期拦截
-            if not self.filter_date(pub_date):
-                continue
+            # Make naive for SmartSpider comparison (earliest_date is naive)
+            if pub_date.tzinfo:
+                pub_date = pub_date.replace(tzinfo=None)
 
-            valid_items += 1
-            yield response.follow(
-                href, 
-                self.parse_article,
-                meta={'pub_date': pub_date}
-            )
+            if self.should_process(href, pub_date):
+                valid_items += 1
+                yield response.follow(
+                    href,
+                    self.parse_article,
+                    meta={'publish_time_hint': pub_date}
+                )
 
         # 翻页推进
         if valid_items > 0 and current_page < 1000:
@@ -85,32 +87,11 @@ class SgBusinessTimesSpider(BaseNewsSpider):
             )
 
     def parse_article(self, response):
-        pub_time = response.meta.get('pub_date')
-
-        # 1. 标题提取
-        title = response.css('h1::text, h1 span::text').get('').strip()
-        
-        # 2. 正文内容
-        #  commercial times typically uses font-lucida for body
-        content_parts = response.css('div.font-lucida p::text, div.mx-auto.font-lucida p::text, div.article-content p::text').getall()
-        # 清除过短或重复干扰
-        cleaned_content = "\n\n".join([p.strip() for p in content_parts if len(p.strip()) > 15])
-
-        if not cleaned_content:
-            # 兼容性兜底
-            cleaned_content = "\n\n".join(response.css('main p::text').getall())
-
-        if not cleaned_content:
-            return
-
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': cleaned_content,
-            'publish_time': pub_time,
-            'author': 'Business Times SG',
-            'language': 'en',
-            'section': 'Economy & Policy'
-        }
-        
-        yield item
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+        )
+        item['author'] = 'Business Times SG'
+        item['section'] = 'Economy & Policy'
+        if item.get('content_plain') and len(item['content_plain']) > 50:
+            yield item

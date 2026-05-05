@@ -1,20 +1,20 @@
 import scrapy
-from bs4 import BeautifulSoup
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class PortugalDNSpider(BaseNewsSpider):
+
+class PortugalDNSpider(SmartSpider):
     name = 'pt_dn'
-
     country_code = 'PRT'
-
     country = '葡萄牙'
+    language = 'pt'
+    source_timezone = 'Europe/Lisbon'
+    start_date = '2024-01-01'
     allowed_domains = ['dn.pt', 'dinheirovivo.pt']
-    start_urls = ['https://www.dn.pt/economia']
-    
-    # 继承 BaseNewsSpider，自动初始化 pt_dn_news 表
-    target_table = 'pt_dn_news'
-    
+    fallback_content_selector = '.article-body'
+
+    start_urls = ['https://www.dn.pt/economia/']
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -25,86 +25,64 @@ class PortugalDNSpider(BaseNewsSpider):
     }
 
     def start_requests(self):
-        # Diário de Notícias 和 Dinheiro Vivo 分页格式通常支持 ?page=N 或 /page/N/
-        # 回溯至 2026-01-01 约为 180 页深度
-        for page in range(1, 181):
-            url = f"{self.start_urls[0]}/page/{page}/" if page > 1 else self.start_urls[0]
-            yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse_list,
+            meta={'page': 1},
+            dont_filter=True,
+        )
 
     def parse_list(self, response):
-        # 获取经济频道和专题中的文章链接
-        # 该报内容可能来自 dinheirovivo.pt 或 dn.pt
         articles = response.css('h2.headline a::attr(href)').getall() or \
                    response.css('.article-item h2 a::attr(href)').getall() or \
                    response.xpath('//a[contains(@href, "/economia/")]/@href').getall()
 
+        has_valid_item_in_window = False
+
         for link in articles:
-            # 去除可能携带的一长串追踪参数
             base_link = link.split('?')[0]
             full_url = response.urljoin(base_link)
-            
-            # 过滤掉非文章页面
-            if '/economia/' in full_url:
-                if full_url in self.scraped_urls:
-                    continue
-                self.scraped_urls.add(full_url)
-                yield scrapy.Request(full_url, callback=self.parse_article)
+
+            if '/economia/' not in full_url:
+                continue
+
+            # Extract publish time hint if available
+            pub_time = None
+            time_el = response.xpath(f'//a[@href="{link}"]/ancestor::article//time/@datetime').get()
+            if time_el:
+                pub_time = self.parse_date(time_el)
+
+            if not self.should_process(full_url, pub_time):
+                continue
+
+            has_valid_item_in_window = True
+
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_article,
+                meta={'publish_time_hint': pub_time},
+                dont_filter=self.full_scan,
+            )
+
+        # Circuit breaker pagination
+        if has_valid_item_in_window:
+            page = response.meta.get('page', 1) + 1
+            url = f"{self.start_urls[0]}page/{page}/"
+            yield scrapy.Request(
+                url,
+                callback=self.parse_list,
+                meta={'page': page},
+                dont_filter=True,
+            )
 
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 标题提取 (H1)
-        title = response.css('h1::text').get() or \
-                response.css('.article-content h1::text').get() or \
-                response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else 'Notícia DN Portugal'
-
-        # 正文提取：DN 和 Dinheiro Vivo 的容器可能不同
-        content_html = response.css('.article-body').get() or \
-                       response.css('.article-content-wrapper').get() or \
-                       response.css('div[class*="content"]').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 移除噪音：社交块、广告、相关链接
-            for tag in soup(['script', 'style', '.social-share', '.related-articles', '.ad-slot']):
-                tag.decompose()
-            
-            # 提取所有段落
-            paragraphs = []
-            for p in soup.find_all(['p', 'div']):
-                text = p.get_text().strip()
-                # 过滤冗余信息（如 "Leia também" 等）
-                if len(text) > 40 and not text.lower().startswith(('leia também', 'veja mais')):
-                    paragraphs.append(text)
-            
-            # 保持顺序去重
-            seen = set()
-            unique_paragraphs = [x for x in paragraphs if not (x in seen or seen.add(x))]
-            item['content'] = "\n\n".join(unique_paragraphs)
-        
-        # 精准发布时间获取 (ISO 格式)
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or \
-                       response.css('time::attr(datetime)').get()
-        
-        if pub_time_str:
-            try:
-                # 转换带时区的时间
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
-
-        # 日期过滤逻辑 (由 BaseNewsSpider 接管)
-        if not self.filter_date(pub_time):
-            return
-
-        item['publish_time'] = pub_time
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
         item['author'] = response.css('.article-author::text').get() or 'Global Media Group'
-        item['language'] = 'pt' # 葡萄牙语
         item['section'] = 'Economia'
-
-        if item.get('content') and len(item['content']) > 200:
-            yield item
+        if item.get('content_plain') and len(item['content_plain']) > 50:
+            if self.should_process(response.url, item.get('publish_time')):
+                yield item

@@ -1,20 +1,19 @@
 import scrapy
-from bs4 import BeautifulSoup
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class MexicoExpansionSpider(BaseNewsSpider):
+
+class MexicoExpansionSpider(SmartSpider):
     name = 'mexico_expansion'
-
     country_code = 'MEX'
-
     country = '墨西哥'
+    language = 'es'
+    source_timezone = 'America/Mexico_City'
     allowed_domains = ['expansion.mx']
     start_urls = ['https://expansion.mx/economia']
-    
-    # 继承 BaseNewsSpider，自动初始化 mexico_expansion_news 表
-    target_table = 'mexico_expansion_news'
-    
+    fallback_content_selector = '.ArticlePage-body'
+    strict_date_required = False
+    MAX_PAGES = 50
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -25,74 +24,46 @@ class MexicoExpansionSpider(BaseNewsSpider):
     }
 
     def start_requests(self):
-        # Expansion 分页格式为 ?page=1, ?page=2...
-        # 深度回溯至 2026-01-01 约需 50 页
-        for page in range(1, 51):
-            url = f"{self.start_urls[0]}?page={page}"
-            yield scrapy.Request(url, callback=self.parse_list, meta={'page': page})
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse_list,
+            meta={'page': 1}
+        )
 
     def parse_list(self, response):
-        # 获取 CardGrid 中的文章链接
         articles = response.css('.CardGrid-items .Link::attr(href)').getall()
-        # 兜底选择器
         if not articles:
             articles = response.css('a.Link::attr(href)').getall()
 
+        has_valid_item_in_window = False
+
         for link in articles:
             full_url = response.urljoin(link)
-            if '/202' in full_url: # 只抓取带年份的正式文章
-                if full_url in self.scraped_urls:
-                    continue
-                self.scraped_urls.add(full_url)
+            if '/202' not in full_url:
+                continue
+            if self.should_process(full_url):
+                has_valid_item_in_window = True
                 yield scrapy.Request(full_url, callback=self.parse_article)
 
+        current_page = response.meta.get('page', 1)
+        if has_valid_item_in_window and current_page < self.MAX_PAGES:
+            next_page = current_page + 1
+            next_url = f"{self.start_urls[0]}?page={next_page}"
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True
+            )
+
     def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        
-        # 标题提取 (Brightspot 典型标题)
-        title = response.css('h1.ArticlePage-title::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        item['title'] = title.strip() if title else 'Unknown'
-
-        # 正文提取：ArticlePage-body
-        content_html = response.css('.ArticlePage-body').get() or response.css('.ArticlePage-content').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 移除相关推荐、广告以及亮眼的侧边栏
-            for tag in soup(['script', 'style', '.RelatedContent', '.Ad', '.NewsletterSignup']):
-                tag.decompose()
-            
-            # 清洗段落
-            paragraphs = []
-            for p in soup.find_all('p'):
-                text = p.get_text().strip()
-                if len(text) > 40:
-                    paragraphs.append(text)
-            
-            item['content'] = "\n\n".join(paragraphs)
-        
-        # 精准发布日期从 meta 标签获取
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get() or \
-                       response.xpath('//meta[@name="date"]/@content').get()
-        
-        if pub_time_str:
-            try:
-                # 兼容 ISO 格式
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
-
-        # 日期过滤逻辑 (基类处理)
-        if not self.filter_date(pub_time):
-            return
-
-        item['publish_time'] = pub_time
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[@class='ArticlePage-title']/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content",
+        )
         item['author'] = response.css('.ArticlePage-author::text').get() or 'Expansión'
-        item['language'] = 'es' # 西班牙语
         item['section'] = 'Economía'
 
-        if item.get('content') and len(item['content']) > 200:
+        if item.get('content_plain') and len(item['content_plain']) > 200:
             yield item
