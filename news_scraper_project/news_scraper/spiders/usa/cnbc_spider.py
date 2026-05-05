@@ -1,22 +1,24 @@
 import json
-from datetime import datetime
-
-import psycopg2
+import re
 import scrapy
+from datetime import datetime
 from bs4 import BeautifulSoup
-from news_scraper.settings import POSTGRES_SETTINGS
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
 
-class USACNBCSpider(scrapy.Spider):
+class USACNBCSpider(SmartSpider):
     name = 'usa_cnbc'
+    source_timezone = 'America/New_York'
 
     country_code = 'USA'
-
     country = '美国'
+    language = 'en'
+    start_date = '2026-01-01'
     allowed_domains = ['cnbc.com']
-    
-    # 按照需求列出五个板块：economy, finance, investigations, ai, energy
+    strict_date_required = True
+    use_curl_cffi = True
+    fallback_content_selector = ".ArticleBody-articleBody, div.group"
+
     section_urls = [
         'https://www.cnbc.com/economy/',
         'https://www.cnbc.com/finance/',
@@ -24,161 +26,93 @@ class USACNBCSpider(scrapy.Spider):
         'https://www.cnbc.com/ai-artificial-intelligence/',
         'https://www.cnbc.com/energy/'
     ]
-    
-    target_table = 'usa_cnbc_news'
-    
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
         'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
-        }
+        },
     }
 
-    def __init__(self, start_date='2026-01-01', *args, **kwargs):
-        super(USACNBCSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime.strptime(start_date, '%Y-%m-%d')
-        self.scraped_urls = set()
-        self.init_db()
-
-    def init_db(self):
-        try:
-            conn = psycopg2.connect(**POSTGRES_SETTINGS)
-            cur = conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.target_table} (
-                    url TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    content TEXT,
-                    publish_time TIMESTAMP NOT NULL,
-                    author VARCHAR(255),
-                    language VARCHAR(50) DEFAULT 'en',
-                    section VARCHAR(100),
-                    scraped_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            
-            cur.close()
-            conn.close()
-            state = get_incremental_state(
-                getattr(self, "settings", None),
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.scraped_urls = state["scraped_urls"]
-            if state["source"] != "default":
-                self.logger.info(f"Incremental mode: starting from {self.cutoff_date} ({state['source']})")
-        except Exception as e:
-            self.logger.error(f"Database init failed: {e}")
-
-    def iter_start_requests(self):
-        for url in self.section_urls:
-            # 首先请求板块主页获取第一批文章
-            yield scrapy.Request(url, callback=self.parse_section_page, meta={'section_url': url})
-
-    def start_requests(self):
-        yield from self.iter_start_requests()
-
     async def start(self):
-        for request in self.iter_start_requests():
-            yield request
+        for url in self.section_urls:
+            section_name = url.strip('/').split('/')[-1]
+            yield scrapy.Request(url, callback=self.parse, meta={'section_hint': url})
 
-    def parse_section_page(self, response):
-        section_url = response.meta['section_url']
-        
-        # 1. 尝试从 Next.js 数据中提取
+    def parse(self, response):
+        section_hint = response.meta.get('section_hint', '')
+
+        # Try Next.js structured data
         next_data_str = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
         if next_data_str:
             try:
                 json.loads(next_data_str)
-                # 提取文章列表逻辑
-                # 此处省略复杂路径，通常在 pageProps 下
-                # ...
-            except:
+            except Exception:
                 pass
 
-        # 2. 正常 CSS 提取（用于首屏文章）
+        # CSS extraction
         articles = response.css('a.Card-title::attr(href)').getall()
-        for link in articles:
-            if link and link.startswith('https') and ('/202' in link):
-                yield scrapy.Request(link, callback=self.parse_article)
+        has_valid_item_in_window = False
 
-        # 3. 翻页按钮（Load More）底层通常使用 GraphQL 或具体的 API
-        # CNBC 常见的 Load More API：
-        # https://www.cnbc.com/graphql-proxy 使用的是不同的 ID，此处调用通用翻页。
-        # 这里演示基于板块 URL 的翻页参数猜测或通用 API。
-        # 板块名称提取（如 economy / finance）
-        section_name = section_url.strip('/').split('/')[-1]
-        
-        # CNBC Section 翻页接口示例 (offset 形式)
-        # 通常 offset 翻页是 30 为一页
-        yield from self.request_api_page(section_name, offset=30)
+        for link in articles:
+            if not link or not link.startswith('https') or '/202' not in link:
+                continue
+
+            # Extract date from URL pattern: /2026/03/15/title/
+            publish_time = None
+            date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', link)
+            if date_match:
+                try:
+                    publish_time = datetime(
+                        int(date_match.group(1)),
+                        int(date_match.group(2)),
+                        int(date_match.group(3)),
+                    )
+                except ValueError:
+                    pass
+
+            if not self.should_process(link, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            meta = {'section_hint': section_hint}
+            if publish_time:
+                meta['publish_time_hint'] = publish_time
+            yield scrapy.Request(link, callback=self.parse_detail, meta=meta)
+
+        # CNBC GraphQL pagination placeholder
+        if has_valid_item_in_window:
+            section_name = section_hint.strip('/').split('/')[-1]
+            yield from self.request_api_page(section_name, offset=30)
 
     def request_api_page(self, section_name, offset):
-        # CNBC 针对不同栏目可能有不同的 API 参数，这里采用最稳健的板块加载侦测。
-        # 为保证 100% 成功，我们使用 GraphQL 公开节点。
-        pass # 后续通过测试补充准确的 GraphQL ID 字段
+        """CNBC GraphQL pagination placeholder - implement with actual API endpoint when available."""
+        pass
 
-    def parse_article(self, response):
-        if response.url in self.scraped_urls:
-            return
-        self.scraped_urls.add(response.url)
+    def parse_detail(self, response):
+        item = self.auto_parse_item(response)
 
-        title = response.css('h1.ArticleHeader-headline::text').get()
-        if not title:
-            title = response.xpath('//meta[@property="og:title"]/@content').get()
-        
-        # 正文清洗
-        content_parts = []
-        body = response.css('.ArticleBody-articleBody')
-        if not body:
-            body = response.css('div.group') # 备选
+        # ContentEngine fallback: CNBC specific cleaning
+        if not item.get('content_plain'):
+            content_parts = []
+            body = response.css('.ArticleBody-articleBody')
+            if not body:
+                body = response.css('div.group')
 
-        if body:
-            # 移除非正文元素
-            soup = BeautifulSoup(body.get(), 'html.parser')
-            for tag in soup(['script', 'style', 'aside', 'button', 'nav']):
-                tag.decompose()
-            
-            # 提取所有 P 标签内容
-            for p in soup.find_all(['p', 'div']):
-                text = p.get_text().strip()
-                if len(text) > 40:
-                    content_parts.append(text)
-        
-        content = '\n\n'.join(content_parts)
-        
-        # 发布时间处理 "2026-03-02..."
-        pub_time_str = response.xpath('//meta[@property="article:published_time"]/@content').get()
-        if not pub_time_str:
-            pub_time_str = response.xpath('//time/@datetime').get()
-            
-        if pub_time_str:
-            try:
-                # 兼容不同格式
-                pub_dt = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00'))
-                pub_time = pub_dt.replace(tzinfo=None)
-            except:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
+            if body:
+                soup = BeautifulSoup(body.get(), 'html.parser')
+                for tag in soup(['script', 'style', 'aside', 'button', 'nav']):
+                    tag.decompose()
+                for p in soup.find_all(['p', 'div']):
+                    text = p.get_text().strip()
+                    if len(text) > 40:
+                        content_parts.append(text)
+            if content_parts:
+                item['content_plain'] = '\n\n'.join(content_parts)
 
-        # 日期过滤
-        if pub_time < self.cutoff_date:
-            return
+        item['author'] = response.css('a.Author-authorName::text').get() or 'CNBC'
+        item['section'] = response.meta.get('section_hint', 'USA Business')
 
-        yield {
-            'url': response.url,
-            'title': title.strip() if title else 'Unknown',
-            'content': content.strip(),
-            'publish_time': pub_time,
-            'author': response.css('a.Author-authorName::text').get() or 'CNBC',
-            'language': 'en',
-            'section': response.meta.get('section_name', 'USA Business'),
-        }
+        yield item

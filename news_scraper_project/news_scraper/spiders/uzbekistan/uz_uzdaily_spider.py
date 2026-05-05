@@ -1,122 +1,103 @@
-import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
 
-class UzUzdailySpider(BaseNewsSpider):
-    name = 'uz_uzdaily'
+import scrapy
+from news_scraper.spiders.smart_spider import SmartSpider
 
-    country_code = 'UZB'
 
-    country = '乌兹别克斯坦'
-    allowed_domains = ['uzdaily.uz']
-    
+class UzUzdailySpider(SmartSpider):
+    name = "uz_uzdaily"
+    source_timezone = "Asia/Tashkent"
+
+    country_code = "UZB"
+    country = "乌兹别克斯坦"
+    language = "ru"
+
+    allowed_domains = ["uzdaily.uz"]
+
     # 类别 2 是综合新闻板块
-    base_url = 'https://www.uzdaily.uz/ru/section/2/?page={}'
-    start_urls = [base_url.format(1)]
-    
-    # 数据库配置 (Uzbekistan -> uz, Site -> uzdaily)
-    target_table = 'uz_uzdaily_news'
-    
+    base_url = "https://www.uzdaily.uz/ru/section/2/?page={}"
+
     custom_settings = {
-        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'CONCURRENT_REQUESTS': 16,
-        'DOWNLOAD_DELAY': 0.5,
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_TIMEOUT': 30
+        "USER_AGENT": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "CONCURRENT_REQUESTS": 16,
+        "DOWNLOAD_DELAY": 0.5,
+        "ROBOTSTXT_OBEY": False,
+        "DOWNLOAD_TIMEOUT": 30,
     }
+
+    use_curl_cffi = True
+    fallback_content_selector = ".text"
+    strict_date_required = True
+
+    async def start(self):
+        """Initial requests entry point."""
+        yield scrapy.Request(
+            self.base_url.format(1), callback=self.parse, dont_filter=True
+        )
 
     def parse(self, response):
         # 提取列表项
-        articles = response.css('a.item_news_block')
-        
-        current_page = response.meta.get('page', 1)
-        # 只要这一页存在文章块，就探测下一页 (解耦过滤计数与翻页)
-        if articles:
-            next_page = current_page + 1
-            if next_page < 3000:
-                yield scrapy.Request(
-                    self.base_url.format(next_page),
-                    callback=self.parse,
-                    meta={'page': next_page}
-                )
-        
+        articles = response.css("a.item_news_block")
+
+        current_page = response.meta.get("page", 1)
+        has_valid_item_in_window = False
+
         for art in articles:
-            link = art.css('::attr(href)').get()
-            # 强化日期清洗: 处理可能存在的空格和换行符
-            date_str = art.css('span.date::text').get()
-            
+            link = art.css("::attr(href)").get()
+            date_str = art.css("span.date::text").get()
+
             if not link:
                 continue
 
+            # 强化日期清洗: DD/MM/YYYY 或 YYYY-MM-DD
             pub_time = None
             if date_str:
                 date_str = date_str.strip()
-                try:
-                    # 尝试 DD/MM/YYYY 格式
-                    pub_time = datetime.strptime(date_str, '%d/%m/%Y')
-                except:
-                    # 尝试 YYYY-MM-DD 格式
-                    try: pub_time = datetime.fromisoformat(date_str[:10])
-                    except: pass
+                if date_str:
+                    try:
+                        dt_obj = datetime.strptime(date_str, "%d/%m/%Y")
+                        pub_time = self.parse_to_utc(dt_obj)
+                    except ValueError:
+                        try:
+                            dt_obj = datetime.fromisoformat(date_str[:10])
+                            pub_time = self.parse_to_utc(dt_obj)
+                        except Exception:
+                            pass
 
-            # 日期过滤
-            if pub_time and not self.filter_date(pub_time):
-                # 如果日期存在且早于 2026，跳过单篇文章
+            # Panic Break: 有链接但无日期，说明页面结构变化，终止翻页
+            if pub_time is None:
+                self.logger.error(
+                    f"STRICT STOP: No date found for {link}. Terminating spider."
+                )
+                return
+
+            if not self.should_process(link, pub_time):
                 continue
-            
+
+            has_valid_item_in_window = True
             yield response.follow(
-                link, 
-                self.parse_article, 
-                meta={'pub_time': pub_time}
+                link,
+                self.parse_detail,
+                meta={"publish_time_hint": pub_time},
             )
 
-    def parse_article(self, response):
-        # 1. 提取标题
-        title = response.css('h1::text, span.name::text').get('').strip()
-        
-        # 2. 提取日期 (优先使用 meta 传递，兜底使用 JSON-LD 或页面元数据)
-        pub_time = response.meta.get('pub_time')
-        if not pub_time:
-            # 尝试 JSON-LD
-            import json
-            try:
-                json_ld = response.xpath('//script[@type="application/ld+json"]/text()').get()
-                if json_ld:
-                    data = json.loads(json_ld)
-                    if isinstance(data, list): data = data[0]
-                    # 有的文章是列表，有的是单对象，取其中的 datePublished
-                    for obj in (data if isinstance(data, list) else [data]):
-                        if 'datePublished' in obj:
-                            pub_time = datetime.fromisoformat(obj['datePublished'][:10])
-                            break
-            except: pass
-        
-        if not pub_time:
-            pub_time = datetime.now()
+        # 翻页逻辑
+        if has_valid_item_in_window:
+            next_page = current_page + 1
+            yield scrapy.Request(
+                self.base_url.format(next_page),
+                callback=self.parse,
+                meta={"page": next_page},
+            )
 
-        # 3. 日期过滤
-        if not self.filter_date(pub_time):
-            return
+    def parse_detail(self, response):
+        """Parse article detail page using SmartSpider auto extraction."""
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text() | //*[contains(@class, 'name')]/text()",
+        )
 
-        # 4. 提取正文内容
-        # UzDaily 详情页正文包装在 .text 或 .body 或 article 等容器中
-        content_parts = response.css('div.text p::text, div.body p::text, div.content p::text').getall()
-        content = "\n\n".join([p.strip() for p in content_parts if p.strip()])
-        
-        if not content or len(content) < 100:
-            # 兜底：抓取全文本容器
-            content = response.xpath('string(//div[contains(@id, "content")])').get()
-            if not content:
-                content = response.xpath('string(//article)').get()
+        item["author"] = "UzDaily.uz"
+        item["section"] = "Economy & Society"
 
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': content,
-            'publish_time': pub_time,
-            'author': 'UzDaily.uz',
-            'language': 'ru',
-            'section': 'Economy & Society'
-        }
-        
         yield item

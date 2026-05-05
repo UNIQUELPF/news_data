@@ -1,21 +1,20 @@
 import scrapy
 import json
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class ChAdminSpider(BaseNewsSpider):
+class ChAdminSpider(SmartSpider):
     name = 'ch_admin'
+    source_timezone = 'Europe/Zurich'
 
     country_code = 'CHE'
-
     country = '瑞士'
+    language = 'en'
     allowed_domains = ['news.admin.ch', 'admin.ch', 'www.news.admin.ch']
-    
-    # 国家代码 + 网站
-    target_table = 'ch_admin_news'
+
     use_curl_cffi = True
-    
-    # 必要的请求头
+    strict_date_required = True
+    fallback_content_selector = "main"
+
     custom_settings = {
         'DEFAULT_REQUEST_HEADERS': {
             'Origin': 'https://www.news.admin.ch',
@@ -24,10 +23,7 @@ class ChAdminSpider(BaseNewsSpider):
         }
     }
 
-    def start_requests(self):
-        # 构造符合服务器要求的 URL
-        # start_date: 2026-01-01T00:00:00.000Z
-        # end_date: 2026-12-31T23:59:59.999Z (涵盖整个2026年)
+    async def start(self):
         self.base_api = "https://d-nsbc-p.admin.ch/v1/search"
         params = (
             "languages=en"
@@ -49,74 +45,65 @@ class ChAdminSpider(BaseNewsSpider):
             return
 
         items_list = data.get('items', [])
-        
         if not items_list:
             return
 
+        has_valid_item_in_window = False
+
         for entry in items_list:
             article_id = entry.get('id')
-            # 详情页逻辑：如果存在 externalUrl 则跳转，否则使用 ID 拼接
             url = entry.get('externalUrl')
             if not url:
                 url = f"https://www.news.admin.ch/en/newnsb/{article_id}"
-            
-            # 日期过滤：使用 publishDate
+
+            # Date extraction from API response
+            pub_date = None
             pub_date_str = entry.get('publishDate', '')
             if pub_date_str:
-                try:
-                    pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
-                    if not self.filter_date(pub_date):
-                        continue
-                except:
-                    pass
+                pub_date = self.parse_date(pub_date_str)
 
-            yield scrapy.Request(url, callback=self.parse_article, meta={'entry': entry}, dont_filter=True)
+            if not self.should_process(url, pub_date):
+                continue
 
-        # 分页逻辑
-        current_offset = int(response.url.split('offset=')[1].split('&')[0])
-        next_offset = current_offset + 12
-        
-        # 保持原始参数结构
-        next_url = response.url.replace(f"offset={current_offset}", f"offset={next_offset}")
-        yield scrapy.Request(next_url, callback=self.parse_api)
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_article,
+                meta={
+                    'entry': entry,
+                    'publish_time_hint': pub_date,
+                    'title_hint': entry.get('title'),
+                },
+                dont_filter=True
+            )
+
+        # Pagination via API offset
+        if has_valid_item_in_window:
+            current_offset = int(response.url.split('offset=')[1].split('&')[0])
+            next_offset = current_offset + 12
+            next_url = response.url.replace(f"offset={current_offset}", f"offset={next_offset}")
+            yield scrapy.Request(next_url, callback=self.parse_api)
 
     def parse_article(self, response):
         entry = response.meta.get('entry', {})
-        
-        item = {}
-        item['url'] = response.url
-        item['title'] = entry.get('title') or response.css('h1::text').get('').strip()
-        
-        # 提取发布时间
-        pub_date_str = entry.get('publishDate', '')
-        if pub_date_str:
-            item['publish_time'] = pub_date_str.split('T')[0]
-        else:
-            item['publish_time'] = datetime.now().strftime('%Y-%m-%d')
 
-        # 提取正文内容 - 兼容多种可能出现的 Nuxt 渲染后的标志性结构
-        # 1. 导语
-        lead = response.css('p.hero__description::text').get('').strip()
-        
-        # 2. 主体容器 (通常是这个类)
-        content_nodes = response.css('div.container__center--xs.vertical-spacing p, div.container__center--xs.vertical-spacing h2, div.container__center--xs.vertical-spacing li')
-        
-        # 如果主体容器没中，尝试通用结构
-        if not content_nodes:
-            content_nodes = response.css('section.section--default p, section.section--default h2')
-            
-        body_text = "\n".join([n.css('::text').get('').strip() for n in content_nodes if n.css('::text').get()])
-        
-        item['content'] = (lead + "\n\n" + body_text).strip()
-        
-        # 备选：如果还是没抓到，尝试从 content 对象的描述信息中兜底
-        if not item['content'] and entry.get('content', {}).get('metadata', {}).get('description'):
-            item['content'] = entry['content']['metadata']['description']
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content"
+        )
 
+        # Override/Set specific fields
         item['author'] = 'Swiss Federal News Service'
-        item['country_code'] = 'CH'
-        item['language'] = 'en'
         item['section'] = 'Federal Government'
 
-        if len(item['content']) > 5 or item['title']:
+        # Content fallback: if ContentEngine didn't capture enough, use API description
+        if not item.get('content_plain') or len(item['content_plain']) < 5:
+            desc = entry.get('content', {}).get('metadata', {}).get('description')
+            if desc:
+                item['content_plain'] = desc
+                if not item.get('content_html'):
+                    item['content_html'] = f"<p>{desc}</p>"
+
+        if item.get('title') or (item.get('content_plain') and len(item['content_plain']) > 5):
             yield item

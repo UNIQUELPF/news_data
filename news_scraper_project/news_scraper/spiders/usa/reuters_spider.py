@@ -1,42 +1,42 @@
-from datetime import datetime
-
+import re
 import scrapy
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from datetime import datetime
+from bs4 import BeautifulSoup
+from news_scraper.spiders.smart_spider import SmartSpider
 from scrapy_playwright.page import PageMethod
 
 
-class USAReutersSpider(BaseNewsSpider):
+class USAReutersSpider(SmartSpider):
     name = 'usa_reuters'
+    source_timezone = 'America/New_York'
 
     country_code = 'USA'
-
     country = '美国'
+    language = 'en'
     allowed_domains = ['reuters.com']
+    strict_date_required = True
+    use_curl_cffi = True
+    fallback_content_selector = "div[data-testid='article-body'], .article-body__content"
+
     section_urls = {
         'business/finance': 'https://www.reuters.com/business/finance/',
         'markets/us': 'https://www.reuters.com/markets/us/',
         'world/us': 'https://www.reuters.com/world/us/',
     }
-    
-    # 继承 BaseNewsSpider，自动初始化 usa_reuters_news 表
-    target_table = 'usa_reuters_news'
-    
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        }
     }
 
-    def iter_start_requests(self):
+    async def start(self):
         for section, url in self.section_urls.items():
             yield scrapy.Request(
                 url,
                 callback=self.parse_section_page,
                 meta={
-                    'section': section,
+                    'section_hint': section,
                     'playwright': True,
                     'playwright_page_methods': [
                         PageMethod('wait_for_load_state', 'domcontentloaded'),
@@ -45,23 +45,17 @@ class USAReutersSpider(BaseNewsSpider):
                 },
             )
 
-    def start_requests(self):
-        yield from self.iter_start_requests()
-
-    async def start(self):
-        for request in self.iter_start_requests():
-            yield request
-
     def parse_section_page(self, response):
-        section = response.meta['section']
-        seen_links = set()
+        section = response.meta['section_hint']
+        seen_on_page = set()
+        has_valid_item_in_window = False
 
         for href in response.css('a::attr(href)').getall():
             if not href:
                 continue
 
             full_url = response.urljoin(href)
-            if full_url in seen_links or full_url in self.scraped_urls:
+            if full_url in seen_on_page:
                 continue
             if not full_url.startswith('https://www.reuters.com/'):
                 continue
@@ -70,60 +64,58 @@ class USAReutersSpider(BaseNewsSpider):
             if any(skip in full_url for skip in ['/world/', '/business/', '/markets/']) is False:
                 continue
 
-            seen_links.add(full_url)
-            self.scraped_urls.add(full_url)
-            yield scrapy.Request(
-                full_url,
-                callback=self.parse_article,
-                meta={
-                    'section': section,
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_load_state', 'domcontentloaded'),
-                        PageMethod('wait_for_timeout', 1500),
-                    ],
-                },
-            )
+            seen_on_page.add(full_url)
 
-    def parse_article(self, response):
-        from bs4 import BeautifulSoup
-
-        title = (
-            response.css('h1[data-testid="Heading"]::text').get()
-            or response.css('h1::text').get()
-            or response.xpath('//meta[@property="og:title"]/@content').get()
-        )
-
-        body = (
-            response.css('div[data-testid="article-body"]').get()
-            or response.css('div.article-body__content').get()
-        )
-        content = ""
-        if body:
-            soup = BeautifulSoup(body, 'html.parser')
-            content = "\n\n".join([p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 20])
-
-        pub_time = response.meta.get('pub_time')
-        if not pub_time:
-            pub_time_str = (
-                response.xpath('//meta[@property="article:published_time"]/@content').get()
-                or response.css('time::attr(datetime)').get()
-            )
-            if pub_time_str:
+            # Extract date from URL pattern: /2026/03/15/title/
+            publish_time = None
+            date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', full_url)
+            if date_match:
                 try:
-                    pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                except Exception:
-                    pub_time = None
+                    publish_time = datetime(
+                        int(date_match.group(1)),
+                        int(date_match.group(2)),
+                        int(date_match.group(3)),
+                    )
+                except ValueError:
+                    pass
 
-        if not self.filter_date(pub_time):
-            return
+            if not self.should_process(full_url, publish_time):
+                continue
 
-        yield {
-            'url': response.url,
-            'title': title.strip() if title else 'Unknown',
-            'content': content,
-            'publish_time': pub_time,
-            'author': 'Reuters',
-            'language': 'en',
-            'section': response.meta.get('section', 'USA Finance'),
-        }
+            has_valid_item_in_window = True
+            meta = {
+                'section_hint': section,
+                'playwright': True,
+                'playwright_page_methods': [
+                    PageMethod('wait_for_load_state', 'domcontentloaded'),
+                    PageMethod('wait_for_timeout', 1500),
+                ],
+            }
+            if publish_time:
+                meta['publish_time_hint'] = publish_time
+            yield scrapy.Request(full_url, callback=self.parse_detail, meta=meta)
+
+        # Reuters uses infinite scroll. The initial Playwright load provides
+        # a substantial set of articles. No explicit page-based pagination.
+
+    def parse_detail(self, response):
+        item = self.auto_parse_item(response)
+
+        # ContentEngine fallback: Reuters specific structure
+        if not item.get('content_plain'):
+            body = (
+                response.css('div[data-testid="article-body"]').get()
+                or response.css('div.article-body__content').get()
+            )
+            if body:
+                soup = BeautifulSoup(body, 'html.parser')
+                content = "\n\n".join(
+                    [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 20]
+                )
+                if content:
+                    item['content_plain'] = content
+
+        item['author'] = 'Reuters'
+        item['section'] = response.meta.get('section_hint', 'USA Finance')
+
+        yield item

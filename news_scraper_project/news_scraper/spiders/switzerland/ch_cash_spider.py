@@ -1,17 +1,18 @@
 import scrapy
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class CashCHSpider(BaseNewsSpider):
+class CashCHSpider(SmartSpider):
     name = 'ch_cash'
+    source_timezone = 'Europe/Zurich'
 
     country_code = 'CHE'
-
     country = '瑞士'
+    language = 'de'
     allowed_domains = ['cash.ch']
-    start_urls = ['https://www.cash.ch/news/top-news']
-    target_table = 'ch_cash_news'
+
     use_curl_cffi = True
+    strict_date_required = True
+    fallback_content_selector = "main"
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
@@ -19,42 +20,52 @@ class CashCHSpider(BaseNewsSpider):
         'CONCURRENT_REQUESTS': 1,
     }
 
-
+    async def start(self):
+        yield scrapy.Request('https://www.cash.ch/news/top-news', callback=self.parse)
 
     def parse(self, response):
-        # 提取文章链接
-        links = response.css('a.teaser-image::attr(href), a.teaser-text-link::attr(href), div.c_jLL_d9 a::attr(href)').getall()
-        for link in set(links):
-            if '/news/' in link:
-                yield response.follow(link, self.parse_article)
-
-        # 翻页逻辑 ?page=2
-        next_page = response.css('a.page-loader-next-btn::attr(href)').get()
-        if next_page:
-            yield response.follow(next_page, self.parse)
-
-    def parse_article(self, response):
-        item = {}
-        item['url'] = response.url
-        item['title'] = response.css('h1::text, span.article-title::text').get('').strip()
-        
-        # 正文
-        paragraphs = response.css('div.article-body p::text, div.content-wrapper p::text').getall()
-        item['content'] = '\n\n'.join([p.strip() for p in paragraphs if p.strip()])
-
-        # 时间
-        pub_time_str = response.css('meta[property="article:published_time"]::attr(content)').get()
-        try:
-            pub_time = datetime.fromisoformat(pub_time_str.replace('Z', '+00:00')) if pub_time_str else datetime.now()
-        except:
-            pub_time = datetime.now()
-
-        if not self.filter_date(pub_time):
+        # Extract article blocks from listing page
+        articles = response.css('article, div[class*="teaser"], div.c_jLL_d9')
+        if not articles:
+            self.logger.warning(f"No article containers found on {response.url}")
             return
 
-        item['publish_time'] = pub_time
-        item['author'] = response.css('span.author::text').get('cash.ch').strip()
-        item['language'] = 'de'
+        has_valid_item_in_window = False
+
+        for art in articles:
+            link = art.css('a::attr(href)').get()
+            if not link or '/news/' not in link:
+                continue
+
+            # Date extraction from listing page element
+            publish_time_str = art.css('time::attr(datetime), time::text, [class*="date"]::text').get()
+            publish_time = self.parse_date(publish_time_str.strip()) if publish_time_str else None
+
+            if not self.should_process(response.urljoin(link), publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            yield response.follow(
+                link,
+                self.parse_article,
+                meta={'publish_time_hint': publish_time}
+            )
+
+        # Pagination: has_valid_item_in_window breaker
+        if has_valid_item_in_window:
+            next_page = response.css('a.page-loader-next-btn::attr(href)').get()
+            if next_page:
+                yield response.follow(next_page, self.parse)
+
+    def parse_article(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1/text() | //span[contains(@class, 'article-title')]/text()",
+            publish_time_xpath="//meta[@property='article:published_time']/@content"
+        )
+
+        author = response.css('span.author::text').get()
+        item['author'] = author.strip() if author else 'cash.ch'
         item['section'] = 'Top News'
 
         yield item

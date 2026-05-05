@@ -1,17 +1,20 @@
 import scrapy
-from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+import re
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class UkMoneyweekSpider(BaseNewsSpider):
+
+class UkMoneyweekSpider(SmartSpider):
     name = "uk_moneyweek"
+    source_timezone = 'Europe/London'
 
     country_code = 'GBR'
-
     country = '英国'
+    language = 'en'
     allowed_domains = ["moneyweek.com"]
-    start_urls = ["https://moneyweek.com/economy/uk-economy"]
-    
-    target_table = "uk_moneyweek_news"
+
+    # No dates on listing page; strict mode would block all listing items
+    strict_date_required = False
+    fallback_content_selector = "div.article__body"
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
@@ -25,52 +28,43 @@ class UkMoneyweekSpider(BaseNewsSpider):
 
     use_curl_cffi = True
 
-    def parse(self, response):
-        # 1. Parse article links from listing
-        article_links = response.css('a.listing__link::attr(href), h2.listing__title a::attr(href)').getall()
+    async def start(self):
+        yield scrapy.Request(
+            "https://moneyweek.com/economy/uk-economy",
+            callback=self.parse_listing,
+            dont_filter=True
+        )
+
+    def parse_listing(self, response):
+        """Parse listing page with article links and sequential pagination."""
+        article_links = response.css(
+            'a.listing__link::attr(href), h2.listing__title a::attr(href)'
+        ).getall()
+
+        has_valid_item_in_window = False
         for link in list(set(article_links)):
-            yield response.follow(link, self.parse_article)
+            if self.should_process(link):
+                has_valid_item_in_window = True
+                yield response.follow(link, self.parse_detail)
 
-        # 2. Pagination
-        next_page = response.css('div.flexi-pagination a::attr(href)').getall()
-        # Find the next page link - usually ordered 1, 2, 3... check current page index?
-        # Actually images show simple numbered pages. We can follow them all or extract page count.
-        for page in next_page:
-            yield response.follow(page, self.parse)
+        if has_valid_item_in_window:
+            current_match = re.search(r'[?&]page=(\d+)', response.url)
+            current_page = int(current_match.group(1)) if current_match else 1
 
-    def parse_article(self, response):
-        # Title
-        title = response.css('h1.header__title::text').get("").strip()
-        if not title:
-            title = response.css('h1::text').get("").strip()
+            next_url = (
+                f"https://moneyweek.com/economy/uk-economy"
+                f"?page={current_page + 1}"
+            )
+            yield scrapy.Request(
+                next_url, callback=self.parse_listing
+            )
 
-        # Date from meta
-        date_meta = response.css('meta[property="article:published_time"]::attr(content)').get()
-        pub_date = None
-        if date_meta:
-            try:
-                # 2026-03-19T17:01:14Z or 2026-03-18T13:25:59+00:00
-                dt_str = date_meta.split('.')[0].replace('Z', '')
-                if '+' in dt_str:
-                    dt_str = dt_str.split('+')[0]
-                pub_date = datetime.fromisoformat(dt_str)
-            except Exception as e:
-                self.logger.error(f"Date parse error: {e}")
+    def parse_detail(self, response):
+        """Parse article detail page using SmartSpider auto extraction."""
+        item = self.auto_parse_item(response)
+        item['author'] = response.css(
+            'meta[name="author"]::attr(content)'
+        ).get("MoneyWeek")
+        item['section'] = "UK Economy"
 
-        if pub_date and not self.filter_date(pub_date):
-            return
-
-        # Content
-        content_parts = response.css('div.article__body p::text, div.article__body p *::text, div.article__body h2::text, div.article__body li::text').getall()
-        cleaned_content = "\n\n".join([p.strip() for p in content_parts if p.strip()])
-
-        if cleaned_content and title:
-            yield {
-                "url": response.url,
-                "title": title,
-                "content": cleaned_content,
-                "publish_time": pub_date,
-                "author": response.css('meta[name="author"]::attr(content)').get("MoneyWeek"),
-                "language": "en",
-                "section": "UK Economy"
-            }
+        yield item

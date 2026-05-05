@@ -1,81 +1,75 @@
 import json
-from datetime import datetime
-
+import re
 import scrapy
+from datetime import datetime
 from bs4 import BeautifulSoup
-from news_scraper.utils import get_incremental_state
+from news_scraper.spiders.smart_spider import SmartSpider
 
 
-class USAForbesSpider(scrapy.Spider):
+class USAForbesSpider(SmartSpider):
     name = 'usa_forbes'
+    source_timezone = 'America/New_York'
 
     country_code = 'USA'
-
     country = '美国'
+    language = 'en'
+    start_date = '2026-01-01'
     allowed_domains = ['forbes.com']
+    strict_date_required = True
+    use_curl_cffi = True
+    fallback_content_selector = "div.article-body-container, .article-body"
+
     start_urls = ['https://www.forbes.com/money/']
-    
-    target_table = 'usa_forbes_news'
-    
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        }
     }
 
-    def __init__(self, start_date='2026-01-01', *args, **kwargs):
-        super(USAForbesSpider, self).__init__(*args, **kwargs)
-        self.cutoff_date = datetime.strptime(start_date, '%Y-%m-%d')
-        self.scraped_urls = set()
-        self.init_db()
-
-    def init_db(self):
-        try:
-            state = get_incremental_state(
-                getattr(self, "settings", None),
-                spider_name=self.name,
-                table_name=self.target_table,
-                default_cutoff=self.cutoff_date,
-                full_scan=False,
-            )
-            self.cutoff_date = state["cutoff_date"]
-            self.scraped_urls = state["scraped_urls"]
-        except Exception as e:
-            self.logger.error(f"DB init error: {e}")
-
-    def iter_start_requests(self):
-        # 1. 第一步：抓取首页 HTML 上的首批文章
-        yield scrapy.Request(self.start_urls[0], callback=self.parse_list)
-
-    def start_requests(self):
-        yield from self.iter_start_requests()
-
     async def start(self):
-        for request in self.iter_start_requests():
-            yield request
+        yield scrapy.Request(self.start_urls[0], callback=self.parse)
 
-    def parse_list(self, response):
-        # 从 Next.js 的 JSON 脚本中直接提取
-        data_script = response.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
-        if data_script:
-            try:
-                json.loads(data_script)
-                # 提取首页推荐列表
-                # ... 示例中使用选择器
-            except:
-                pass
-        
-        # 兜底：使用 CSS 选择器
-        for a in response.css('a.kZ_L0i_J::attr(href)'): # Forbes 常见类别选择器
+    def parse(self, response):
+        """Parse the Forbes listing HTML page, then trigger API pagination."""
+        has_valid_item_in_window = False
+
+        # CSS extraction for article links
+        for a in response.css('a.kZ_L0i_J::attr(href)'):
             link = a.get()
-            if link and '/202' in link:
-                yield scrapy.Request(response.urljoin(link), callback=self.parse_article)
+            if not link or '/202' not in link:
+                continue
+
+            full_url = response.urljoin(link)
+
+            # Extract date from URL pattern: /2026/03/15/title/
+            publish_time = None
+            date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', full_url)
+            if date_match:
+                try:
+                    publish_time = datetime(
+                        int(date_match.group(1)),
+                        int(date_match.group(2)),
+                        int(date_match.group(3)),
+                    )
+                except ValueError:
+                    pass
+
+            if not self.should_process(full_url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            meta = {'section_hint': 'Money'}
+            if publish_time:
+                meta['publish_time_hint'] = publish_time
+            yield scrapy.Request(full_url, callback=self.parse_detail, meta=meta)
+
+        # Trigger API pagination for deeper historical articles
+        if has_valid_item_in_window:
+            yield from self.request_api(start=0)
 
     def request_api(self, start):
-        # API 结构：基于 offset (start) & size
+        """Forbes simple-data API request with offset-based pagination."""
         api_url = f"https://www.forbes.com/simple-data/channel/money/?start={start}&size=50"
         yield scrapy.Request(
             api_url,
@@ -86,25 +80,25 @@ class USAForbesSpider(scrapy.Spider):
         )
 
     def parse_api_json(self, response):
+        """Parse Forbes API JSON response with date-aware pagination."""
         if response.status == 403:
             self.logger.info("Forbes simple-data API returned 403, skipping API pagination fallback.")
             return
 
         try:
             data = json.loads(response.text)
-            # Forbes API 的结构通常是 list 或结果数组
             articles = data if isinstance(data, list) else data.get('articles', [])
-            
+
             if not articles:
                 return
 
-            last_date = None
+            has_valid_item_in_window = False
             for art in articles:
                 uri = art.get('uri') or art.get('url')
-                if not uri: continue
-                
-                # 时间判断 "2026-01-25..."
-                # Forbes API 会直接提供时间戳或 date 字段
+                if not uri:
+                    continue
+
+                # Parse publish_time from API response
                 pub_ts = art.get('date') or art.get('published_date')
                 if pub_ts:
                     if isinstance(pub_ts, int):
@@ -112,63 +106,54 @@ class USAForbesSpider(scrapy.Spider):
                     else:
                         try:
                             pub_dt = datetime.fromisoformat(pub_ts.replace('Z', '+00:00'))
-                        except:
+                        except (ValueError, AttributeError):
                             pub_dt = datetime.now()
                 else:
                     pub_dt = datetime.now()
-                
-                last_date = pub_dt.replace(tzinfo=None)
-                
-                if last_date < self.cutoff_date:
-                    self.logger.info("Reached start date, stopping Forbes pagination.")
-                    return
 
-                yield scrapy.Request(response.urljoin(uri), callback=self.parse_article, meta={'meta_date': last_date})
+                pub_dt = pub_dt.replace(tzinfo=None)
 
-            # 继续翻页
+                if not self.should_process(response.urljoin(uri), pub_dt):
+                    # Stop pagination when articles predate the cutoff
+                    if pub_dt and self.cutoff_date and pub_dt < self.cutoff_date:
+                        self.logger.info("Reached cutoff date, stopping Forbes API pagination.")
+                        return
+                    continue
+
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    response.urljoin(uri),
+                    callback=self.parse_detail,
+                    meta={'publish_time_hint': pub_dt, 'section_hint': 'Money'},
+                )
+
+            # Continue pagination if articles are still within the window
             next_start = response.meta['start'] + 50
-            if last_date and last_date >= self.cutoff_date:
+            if has_valid_item_in_window:
                 yield from self.request_api(next_start)
         except Exception as e:
             self.logger.error(f"Forbes API error: {e}")
 
-    def parse_article(self, response):
-        if response.url in self.scraped_urls:
-            return
-        self.scraped_urls.add(response.url)
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h1[contains(@class, 'fs-headline')]/text()",
+        )
 
-        item = {}
-        item['url'] = response.url
-        item['title'] = response.css('h1.fs-headline::text').get() or response.xpath('//meta[@property="og:title"]/@content').get()
-        
-        # 正文提取
-        content_html = response.css('div.article-body-container').get() or response.css('.article-body').get()
-        if content_html:
-            soup = BeautifulSoup(content_html, 'html.parser')
-            # 剔除噪音
-            for tag in soup(['script', 'style', 'aside', 'button', 'ul.related-content']):
-                tag.decompose()
-            
-            # 清理文本
-            text = soup.get_text(separator='\n')
-            lines = [line.strip() for line in text.splitlines() if line.strip() and len(line.strip()) > 30]
-            item['content'] = '\n\n'.join(lines)
-        
-        # 发布日期
-        pub_time = response.meta.get('meta_date')
-        if not pub_time:
-            # 尝试从 URL 提取 /2026/03/24/
-            import re
-            match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', response.url)
-            if match:
-                pub_time = datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            else:
-                pub_time = datetime.now()
+        # ContentEngine fallback: Forbes specific cleaning
+        if not item.get('content_plain'):
+            content_html = response.css('div.article-body-container').get() or response.css('.article-body').get()
+            if content_html:
+                soup = BeautifulSoup(content_html, 'html.parser')
+                for tag in soup(['script', 'style', 'aside', 'button', 'ul.related-content']):
+                    tag.decompose()
+                text = soup.get_text(separator='\n')
+                lines = [line.strip() for line in text.splitlines() if line.strip() and len(line.strip()) > 30]
+                if lines:
+                    item['content_plain'] = '\n\n'.join(lines)
 
-        item['publish_time'] = pub_time
         item['author'] = response.css('a.author-name--desktop::text').get() or 'Forbes'
-        item['language'] = 'en'
-        item['section'] = 'Money'
+        item['section'] = response.meta.get('section_hint', 'Money')
 
-        if item.get('content') and len(item['content']) > 100:
+        if item.get('content_plain') and len(item['content_plain']) > 100:
             yield item

@@ -1,22 +1,26 @@
 import scrapy
 from datetime import datetime
 import re
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
 
-class PlaceraSESpider(BaseNewsSpider):
+class PlaceraSESpider(SmartSpider):
     """
     瑞典 Placera.se 新闻爬虫
     策略：通过 sitemap.xml 获取文章 URL 列表，再逐个抓详情页
     """
-    name = 'se_placera'
+    name = "se_placera"
+    source_timezone = 'Europe/Stockholm'
 
     country_code = 'SWE'
-
     country = '瑞典'
+    language = 'sv'
+    strict_date_required = True
+
     allowed_domains = ['placera.se']
-    target_table = 'se_placera_news'
     use_curl_cffi = True
+
+    fallback_content_selector = "article"
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
@@ -24,18 +28,16 @@ class PlaceraSESpider(BaseNewsSpider):
         'CONCURRENT_REQUESTS': 8,
     }
 
-
-
-    def start_requests(self):
-        """先请求主 sitemap，找到 2026 年的月度子 sitemap"""
+    async def start(self):
+        """Initial request: fetch sitemap index."""
         yield scrapy.Request(
             'https://www.placera.se/sitemap.xml',
             callback=self.parse_sitemap_index,
-            meta={'use_curl_cffi': True},
+            dont_filter=True,
         )
 
     def parse_sitemap_index(self, response):
-        """解析 sitemap 索引，提取 2026 年的月度 sitemap"""
+        """Parse sitemap index, find 2026 monthly sitemaps."""
         sel = scrapy.Selector(response, type='xml')
         sel.remove_namespaces()
         urls = sel.css('loc::text').getall()
@@ -46,69 +48,67 @@ class PlaceraSESpider(BaseNewsSpider):
                 yield scrapy.Request(
                     url,
                     callback=self.parse_monthly_sitemap,
-                    meta={'use_curl_cffi': True},
                 )
 
     def parse_monthly_sitemap(self, response):
-        """解析月度 sitemap，提取所有文章 URL"""
+        """Parse monthly sitemap, extract article URLs with date filtering."""
         sel = scrapy.Selector(response, type='xml')
         sel.remove_namespaces()
-        urls = sel.css('loc::text').getall()
+        url_nodes = sel.css('url')
 
-        self.logger.info(f"Monthly sitemap: {len(urls)} article URLs found")
+        self.logger.info(f"Monthly sitemap: {len(url_nodes)} URLs found")
 
-        for url in urls:
-            if '/nyheter/' in url and url not in self.scraped_urls:
-                self.scraped_urls.add(url)
-                yield scrapy.Request(
-                    url,
-                    callback=self.parse_article,
-                    meta={'use_curl_cffi': True},
-                )
+        has_valid_item_in_window = False
 
-    def parse_article(self, response):
-        """解析文章详情页"""
+        for node in url_nodes:
+            loc = node.css('loc::text').get()
+            if not loc or '/nyheter/' not in loc:
+                continue
 
+            # Extract date: try sitemap lastmod first, then URL pattern
+            publish_time = None
+            lastmod = node.css('lastmod::text').get()
+            if lastmod:
+                try:
+                    dt_obj = datetime.fromisoformat(lastmod.replace('Z', '+00:00'))
+                    publish_time = self.parse_to_utc(dt_obj)
+                except (ValueError, TypeError):
+                    pass
 
-        item = {}
-        item['url'] = response.url
+            if not publish_time:
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', loc)
+                if date_match:
+                    try:
+                        dt_obj = datetime.strptime(date_match.group(1), '%Y-%m-%d')
+                        publish_time = self.parse_to_utc(dt_obj)
+                    except ValueError:
+                        pass
 
-        # 标题：og:title（去掉 " | Placera.se" 后缀）
-        title = response.xpath('//meta[@property="og:title"]/@content').get()
-        if not title:
-            h1_texts = response.css('h1 *::text').getall()
-            title = ' '.join([t.strip() for t in h1_texts if t.strip()])
-        if title:
-            title = re.sub(r'\s*\|\s*Placera\.se$', '', title).strip()
-        item['title'] = title or ''
+            if not self.should_process(loc, publish_time):
+                continue
 
-        # 日期：从 URL 提取 YYYY-MM-DD
-        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', response.url)
-        if date_match:
-            try:
-                pub_time = datetime.strptime(date_match.group(1), '%Y-%m-%d')
-            except ValueError:
-                pub_time = datetime.now()
-        else:
-            pub_time = datetime.now()
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                loc,
+                callback=self.parse_detail,
+                meta={"publish_time_hint": publish_time},
+            )
 
-        if not self.filter_date(pub_time):
-            return
+    def parse_detail(self, response):
+        """Parse article detail page using standardized extraction."""
+        item = self.auto_parse_item(response)
 
-        # 正文：article 标签中的 p 文本，过滤短文本
-        paragraphs = response.css('article p::text').getall()
-        filtered = [p.strip() for p in paragraphs if len(p.strip()) > 40]
-        content = '\n\n'.join(filtered)
-        item['content'] = content
+        # Clean title: remove " | Placera.se" suffix
+        if item.get('title'):
+            item['title'] = re.sub(r'\s*\|\s*Placera\.se$', '', item['title']).strip()
 
-        if not content or len(content) < 50:
+        # Content length check: skip very short pages
+        content = item.get('content_plain', '') or ''
+        if len(content.strip()) < 50:
             self.logger.debug(f"Skipping (short content): {response.url}")
             return
 
-        item['publish_time'] = pub_time
         item['author'] = 'Placera'
-        item['language'] = 'sv'
         item['section'] = 'Nyheter'
 
-        self.logger.info(f"Saved: {item['title']}")
         yield item

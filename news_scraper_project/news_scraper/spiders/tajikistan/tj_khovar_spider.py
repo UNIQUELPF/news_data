@@ -1,97 +1,101 @@
 import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 import re
 
-class TjKhovarSpider(BaseNewsSpider):
+class TjKhovarSpider(SmartSpider):
     name = 'tj_khovar'
+    source_timezone = 'Asia/Dushanbe'
 
     country_code = 'TJK'
 
     country = '塔吉克斯坦'
+    language = 'tg'
     allowed_domains = ['khovar.tj']
-    start_urls = ['https://khovar.tj/category/economic/']
-    
-    # 数据库表名配置
-    target_table = 'tj_khovar_news'
-    
-    custom_settings = {
-        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    }
-    
-    # 塔吉克语月份映射
+    strict_date_required = True
+    use_curl_cffi = True
+    fallback_content_selector = ".content-area"
+
     MONTH_MAP = {
         'Январ': '01', 'Феврал': '02', 'Март': '03', 'Апрел': '04',
         'Май': '05', 'Июн': '06', 'Июл': '07', 'Август': '08',
         'Сентябр': '09', 'Октябр': '10', 'Ноябр': '11', 'Декабр': '12'
     }
 
+    async def start(self):
+        yield scrapy.Request('https://khovar.tj/category/economic/', callback=self.parse, dont_filter=True)
+
     def parse(self, response):
-        # 提取文章列表项
         articles = response.css('h2 a')
+        has_valid_item_in_window = False
         for article in articles:
             link = article.css('::attr(href)').get()
-            if link:
-                yield response.follow(link, self.parse_article)
+            if not link:
+                continue
 
-        # 翻页逻辑
+            # Extract date from listing page if available
+            publish_time = None
+            date_str = article.xpath(
+                './ancestor::article[1]//time/@datetime | '
+                './ancestor::article[1]//*[contains(@class,"meta")]'
+                '/text() | '
+                './ancestor::article[1]//*[contains(@class,"date")]'
+                '/text()'
+            ).get()
+            if date_str:
+                dt_obj = self._parse_date(date_str.strip())
+                if dt_obj:
+                    publish_time = self.parse_to_utc(dt_obj)
+
+            if not self.should_process(response.urljoin(link), publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            yield response.follow(
+                link, self.parse_detail,
+                meta={"publish_time_hint": publish_time}
+            )
+
         next_page = response.css('a.next.page-numbers::attr(href)').get()
-        if next_page:
+        if has_valid_item_in_window and next_page:
             yield response.follow(next_page, self.parse)
 
-    def parse_article(self, response):
-        # 1. 标题
+    def parse_detail(self, response):
         title = response.css('h1::text').get('').strip()
         if not title:
             return
 
-        # 2. 发布时间解析
-        # 格式示例: "Март 25, 2026 11:00"
         raw_date = response.css('div.author span.meta::text').get('').strip()
         if not raw_date:
-            # 备选选择器
             raw_date = response.css('div.author::text').get('').strip()
+        dt_obj = self._parse_date(raw_date)
+        pub_time = self.parse_to_utc(dt_obj) if dt_obj else None
 
-        pub_time = self._parse_date(raw_date)
-        
-        # 3. 日期过滤断点
-        if not self.filter_date(pub_time):
-            self.logger.info(f"Filtered date: {pub_time} for {response.url}")
+        if pub_time and not self.should_process(response.url, pub_time):
             return
 
-        # 4. 正文提取
-        paragraphs = response.css('.content-area p::text').getall()
-        content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
+        item = self.auto_parse_item(response)
+        if not item.get('content_plain'):
+            paragraphs = response.css('.content-area p::text').getall()
+            content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
+            if content:
+                item['content_plain'] = content
 
-        # 5. 作者/来源提取 
         author = 'AMIT «Ховар»'
-        author_match = re.search(r'АМИТ «Ховар»', content)
-        if author_match:
-            author = 'AMIT «Ховар»'
+        item['author'] = author
+        item['section'] = 'Economic'
+        item['title'] = title
 
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': content,
-            'publish_time': pub_time,
-            'author': author,
-            'language': 'tg', # 塔吉克语
-            'section': 'Economic'
-        }
-        
         yield item
 
     def _parse_date(self, date_str):
-        """解析塔吉克语格式日期字符串"""
-        # "Март 25, 2026 11:00" -> "03 25, 2026 11:00"
+        if not date_str:
+            return None
         for tj_month, en_month in self.MONTH_MAP.items():
             if tj_month in date_str:
                 date_str = date_str.replace(tj_month, en_month)
                 break
-        
         try:
-            # 兼容格式: "03 25, 2026 11:00"
             return datetime.strptime(date_str, "%m %d, %Y %H:%M")
         except Exception:
-            self.logger.warning(f"Date parsing failed for: {date_str}, using NOW")
-            return datetime.now()
+            return None

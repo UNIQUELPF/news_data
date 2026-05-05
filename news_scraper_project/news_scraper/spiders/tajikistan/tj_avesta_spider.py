@@ -1,23 +1,20 @@
 import scrapy
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 import re
 
-class TjAvestaSpider(BaseNewsSpider):
+class TjAvestaSpider(SmartSpider):
     name = 'tj_avesta'
+    source_timezone = 'Asia/Dushanbe'
 
     country_code = 'TJK'
 
     country = '塔吉克斯坦'
+    language = 'ru'
     allowed_domains = ['avesta.tj']
-    start_urls = ['https://avesta.tj/news/ekonomika/']
-    
-    # 数据库表名配置
-    target_table = 'tj_avesta_news'
-    
-    custom_settings = {
-        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    }
+    strict_date_required = True
+    use_curl_cffi = True
+    fallback_content_selector = "div.content-inner, div.jeg_inner_content"
 
     # 俄语月份映射
     RUS_MONTHS = {
@@ -26,73 +23,87 @@ class TjAvestaSpider(BaseNewsSpider):
         'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
     }
 
+    async def start(self):
+        yield scrapy.Request('https://avesta.tj/news/ekonomika/', callback=self.parse, dont_filter=True)
+
     def parse(self, response):
-        # 提取文章列表项
         articles = response.css('h3.jeg_post_title a')
+        has_valid_item_in_window = False
         for article in articles:
             link = article.css('::attr(href)').get()
-            if link:
-                yield response.follow(link, self.parse_article)
+            if not link:
+                continue
 
-        # 翻页逻辑
+            # Extract date from listing page (JNews .jeg_meta_date)
+            publish_time = None
+            date_str = (
+                article.xpath(
+                    './../../div[contains(@class, "jeg_meta_date")]'
+                    '//text()'
+                ).get()
+                or
+                article.xpath(
+                    './ancestor::article[1]'
+                    '//div[contains(@class, "jeg_meta_date")]'
+                    '//text()'
+                ).get()
+            )
+            if date_str:
+                dt_obj = self._parse_date(date_str.strip())
+                if dt_obj:
+                    publish_time = self.parse_to_utc(dt_obj)
+
+            if not self.should_process(response.urljoin(link), publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            yield response.follow(
+                link, self.parse_detail,
+                meta={"publish_time_hint": publish_time}
+            )
+
         next_page = response.css('a.page_nav.next::attr(href)').get()
-        if next_page:
+        if has_valid_item_in_window and next_page:
             yield response.follow(next_page, self.parse)
 
-    def parse_article(self, response):
-        # 1. 标题
+    def parse_detail(self, response):
         title = response.css('h1.jeg_post_title::text').get('').strip()
         if not title:
             return
 
-        # 2. 发布时间解析
-        # 格式示例: "31 марта, 2026 / 14:30"
         raw_date = response.css('div.jeg_meta_date a::text').get() or response.css('div.jeg_meta_date::text').get('')
         raw_date = raw_date.strip()
-        
-        pub_time = self._parse_date(raw_date)
-        
-        # 3. 日期过滤断点
-        if not self.filter_date(pub_time):
-            self.logger.info(f"Filtered date: {pub_time} for {response.url}")
+        dt_obj = self._parse_date(raw_date)
+        pub_time = self.parse_to_utc(dt_obj) if dt_obj else None
+
+        if pub_time and not self.should_process(response.url, pub_time):
             return
 
-        # 4. 正文提取
-        # 通常在 div.content-inner 或 div.jeg_inner_content p 中
-        paragraphs = response.css('div.content-inner p::text').getall()
-        if not paragraphs:
-             paragraphs = response.css('div.jeg_inner_content p::text').getall()
-             
-        content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
+        item = self.auto_parse_item(response)
+        if not item.get('content_plain'):
+            paragraphs = response.css('div.content-inner p::text').getall()
+            if not paragraphs:
+                paragraphs = response.css('div.jeg_inner_content p::text').getall()
+            content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
+            if content:
+                item['content_plain'] = content
 
-        item = {
-            'url': response.url,
-            'title': title,
-            'content': content,
-            'publish_time': pub_time,
-            'author': 'Avesta.tj',
-            'language': 'ru', # 俄语
-            'section': 'Economic'
-        }
-        
+        item['author'] = 'Avesta.tj'
+        item['section'] = 'Economic'
+        item['title'] = title
+
         yield item
 
     def _parse_date(self, date_str):
-        """解析俄语格式日期字符串"""
-        # "31 марта, 2026 / 14:30" -> "31 03, 2026 14:30"
-        # 移除 '/' 并替换月份
+        if not date_str:
+            return None
         date_str = date_str.replace('/', ' ')
         for rus_m, num_m in self.RUS_MONTHS.items():
             if rus_m in date_str.lower():
                 date_str = re.sub(rus_m, num_m, date_str, flags=re.IGNORECASE)
                 break
-        
-        # 清理多余空格
         date_str = re.sub(r'\s+', ' ', date_str).strip()
-        
         try:
-            # 格式: "31 03, 2026 14:30"
             return datetime.strptime(date_str, "%d %m, %Y %H:%M")
         except Exception:
-            self.logger.warning(f"Date parsing failed for: {date_str}, using NOW")
-            return datetime.now()
+            return None

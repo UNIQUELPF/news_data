@@ -1,16 +1,23 @@
 import scrapy
 import re
 from datetime import datetime
-from news_scraper.spiders.base_spider import BaseNewsSpider
+from news_scraper.spiders.smart_spider import SmartSpider
 
-class UkComputerweeklySpider(BaseNewsSpider):
+
+class UkComputerweeklySpider(SmartSpider):
     name = "uk_computerweekly"
+    source_timezone = 'Europe/London'
 
     country_code = 'GBR'
-
     country = '英国'
+    language = 'en'
     allowed_domains = ["computerweekly.com", "r.jina.ai"]
-    target_table = "uk_computerweekly_news"
+
+    # No listing page; single URL mode via target_url.
+    # Dates may not always be extractable from Jina response, so relax strict mode
+    # to match original behavior where absent date did not block yield.
+    strict_date_required = False
+    fallback_content_selector = "article"
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
@@ -25,68 +32,70 @@ class UkComputerweeklySpider(BaseNewsSpider):
     use_curl_cffi = True
 
     def __init__(self, target_url=None, *args, **kwargs):
-        super(UkComputerweeklySpider, self).__init__(*args, **kwargs)
-        self.target_url = target_url # Optional param for single URL scraping
+        super().__init__(*args, **kwargs)
+        self.target_url = target_url
 
-    def start_requests(self):
-        """
-        Production mode:
-        If target_url is provided, scrape it.
-        Otherwise, search for new links could be added here.
-        By default, we implement the shadow proxy bypass logic.
-        """
+    async def start(self):
         if self.target_url:
-            urls = [self.target_url]
-        else:
-            # Default empty start - relies on external scheduler or manual URL passing
-            urls = []
-            
-        for url in urls:
-            jina_url = f"https://r.jina.ai/{url}"
-            yield scrapy.Request(jina_url, callback=self.parse_jina, meta={"original_url": url})
+            jina_url = f"https://r.jina.ai/{self.target_url}"
+            yield scrapy.Request(
+                jina_url,
+                callback=self.parse_jina,
+                meta={"original_url": self.target_url}
+            )
 
     def parse_jina(self, response):
+        """Parse Jina.ai markdown response for article content."""
         body = response.text
-        
-        # 1. Extract Title
+        has_valid_item_in_window = False
+
+        # 1. Title
         title_match = re.search(r'^Title:\s*(.*)$', body, re.MULTILINE)
         title = title_match.group(1).strip() if title_match else ""
-        
-        # 2. Extract Date
-        # Format often: 2026-03-31T05:30Z or text in Mardown
+
+        # 2. Date
         date_match = re.search(r'^Published Time:\s*(.*)$', body, re.MULTILINE)
         pub_date = None
         if date_match:
             date_str = date_match.group(1).strip().split('+')[0].replace('Z', '')
-            if len(date_str) == 16: date_str += ":00"
+            if len(date_str) == 16:
+                date_str += ":00"
             try:
                 pub_date = datetime.fromisoformat(date_str)
-            except:
-                # Backup regex for text-based dates
-                text_date = re.search(r'([0-9]{1,2}\s+[A-Z][a-z]{2,9}\s+2026)', body)
+            except Exception:
+                text_date = re.search(
+                    r'([0-9]{1,2}\s+[A-Z][a-z]{2,9}\s+2026)', body
+                )
                 if text_date:
-                    try: pub_date = datetime.strptime(text_date.group(1), "%d %B %Y")
-                    except: pass
-        
-        if pub_date and not self.filter_date(pub_date):
+                    try:
+                        pub_date = datetime.strptime(
+                            text_date.group(1), "%d %B %Y"
+                        )
+                    except Exception:
+                        pass
+
+        url = response.meta["original_url"]
+        if not self.should_process(url, pub_date):
             return
 
-        # 3. Extract Content from Jina Markdown
+        has_valid_item_in_window = True
+
+        # 3. Content
         content_split = body.split("Markdown Content:")
         content = ""
         if len(content_split) > 1:
             content = content_split[1].strip()
-            # Cleanup Markdown artifacts
             content = re.sub(r'!\[.*?\]\(.*?\)', '', content)
             content = re.sub(r'\n{3,}', '\n\n', content)
 
         if title and content:
             yield {
-                "url": response.meta["original_url"],
+                "url": url,
                 "title": title,
-                "content": content,
+                "content_plain": content,
                 "publish_time": pub_date,
                 "author": "Computer Weekly",
                 "language": "en",
-                "section": "IT News"
+                "section": "IT News",
+                "raw_html": response.text,
             }
