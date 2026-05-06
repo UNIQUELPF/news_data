@@ -12,6 +12,7 @@ class PaperjamSpider(SmartSpider):
     country = '卢森堡'
     language = 'fr'
     source_timezone = 'Europe/Luxembourg'
+    fallback_content_selector = 'article.article'
 
     allowed_domains = ["paperjam.lu"]
 

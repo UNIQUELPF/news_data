@@ -20,7 +20,7 @@ class UzNuzSpider(SmartSpider):
 
     custom_settings = {
         "USER_AGENT": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "CONCURRENT_REQUESTS": 16,
+        "CONCURRENT_REQUESTS": 4,
         "DOWNLOAD_DELAY": 0.5,
         "ROBOTSTXT_OBEY": False,
         "DOWNLOAD_TIMEOUT": 30,
@@ -37,6 +37,8 @@ class UzNuzSpider(SmartSpider):
         )
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         # 提取链接，靠 URL 中 /YYYY/MM/DD/ 模式提取日期
         links = response.css("a::attr(href)").getall()
 

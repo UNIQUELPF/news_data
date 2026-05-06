@@ -14,7 +14,7 @@ class TjKhovarSpider(SmartSpider):
     allowed_domains = ['khovar.tj']
     strict_date_required = True
     use_curl_cffi = True
-    fallback_content_selector = ".content-area"
+    fallback_content_selector = ".shortcode-content"
 
     MONTH_MAP = {
         'Январ': '01', 'Феврал': '02', 'Март': '03', 'Апрел': '04',
@@ -22,10 +22,18 @@ class TjKhovarSpider(SmartSpider):
         'Сентябр': '09', 'Октябр': '10', 'Ноябр': '11', 'Декабр': '12'
     }
 
+    custom_settings = {
+        'CONCURRENT_REQUESTS': 4,
+        'ROBOTSTXT_OBEY': False,
+    }
+
     async def start(self):
         yield scrapy.Request('https://khovar.tj/category/economic/', callback=self.parse, dont_filter=True)
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
+
         articles = response.css('h2 a')
         has_valid_item_in_window = False
         for article in articles:
@@ -72,11 +80,12 @@ class TjKhovarSpider(SmartSpider):
         pub_time = self.parse_to_utc(dt_obj) if dt_obj else None
 
         if pub_time and not self.should_process(response.url, pub_time):
+            self._stop_pagination = True
             return
 
         item = self.auto_parse_item(response)
         if not item.get('content_plain'):
-            paragraphs = response.css('.content-area p::text').getall()
+            paragraphs = response.css('.shortcode-content p::text').getall()
             content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
             if content:
                 item['content_plain'] = content

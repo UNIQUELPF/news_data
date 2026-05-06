@@ -12,13 +12,19 @@ class SgBusinessTimesSpider(SmartSpider):
     source_timezone = 'Asia/Singapore'
     start_date = '2024-01-01'
     allowed_domains = ['businesstimes.com.sg']
-    fallback_content_selector = '.font-lucida'
+    fallback_content_selector = 'article'
 
     # 商业时报隐藏的分页 API (v1)
     api_url = 'https://www.businesstimes.com.sg/_plat/api/v1/articles/sections?size=20&sections=singapore_economy-policy&page={}'
-    start_urls = [api_url.format(1)]
-
     use_curl_cffi = True
+
+    async def start(self):
+        yield scrapy.Request(
+            self.api_url.format(1),
+            callback=self.parse,
+            meta={'page': 1},
+            dont_filter=True,
+        )
 
     custom_settings = {
         'DOWNLOADER_MIDDLEWARES': {
@@ -35,6 +41,8 @@ class SgBusinessTimesSpider(SmartSpider):
     }
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         try:
             data = json.loads(response.text)
             items = data.get('data', {}).get('items', [])
@@ -77,7 +85,7 @@ class SgBusinessTimesSpider(SmartSpider):
                 )
 
         # 翻页推进
-        if valid_items > 0 and current_page < 1000:
+        if valid_items > 0:
             next_page = current_page + 1
             yield scrapy.Request(
                 self.api_url.format(next_page),
@@ -91,6 +99,9 @@ class SgBusinessTimesSpider(SmartSpider):
             response,
             title_xpath="//h1/text()",
         )
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
         item['author'] = 'Business Times SG'
         item['section'] = 'Economy & Policy'
         if item.get('content_plain') and len(item['content_plain']) > 50:

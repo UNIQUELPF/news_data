@@ -23,14 +23,18 @@ class NigeriaNairametricsSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             'https://nairametrics.com/category/economy/',
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+            dont_filter=True,
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
+
         articles = response.css('h3.jeg_post_title a::attr(href)').getall()
         if not articles:
             articles = response.css('.jeg_main_content a::attr(href)').getall()
@@ -63,6 +67,7 @@ class NigeriaNairametricsSpider(SmartSpider):
         item['section'] = 'Economy'
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 50:

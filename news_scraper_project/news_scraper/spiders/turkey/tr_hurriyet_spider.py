@@ -19,7 +19,7 @@ class TrHurriyetSpider(SmartSpider):
 
     custom_settings = {
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'CONCURRENT_REQUESTS': 8,
+        'CONCURRENT_REQUESTS': 4,
         'DOWNLOAD_DELAY': 1,
         'ROBOTSTXT_OBEY': False,
     }
@@ -29,9 +29,12 @@ class TrHurriyetSpider(SmartSpider):
     fallback_content_selector = ".news-content"
 
     async def start(self):
-        yield scrapy.Request(self.base_url.format(1), callback=self.parse, meta={'page': 1})
+        yield scrapy.Request(self.base_url.format(1), callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
+
         # 提取文章链接
         links = response.css('.category__list__item a::attr(href)').getall()
         if not links:
@@ -97,6 +100,7 @@ class TrHurriyetSpider(SmartSpider):
 
         # 3. SmartSpider 日期窗口 + 去重过滤
         if not self.should_process(response.url, pub_time_utc):
+            self._stop_pagination = True
             return
 
         # 4. 自动提取 (ContentEngine)

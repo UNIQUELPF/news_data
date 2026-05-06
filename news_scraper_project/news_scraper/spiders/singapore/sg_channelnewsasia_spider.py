@@ -31,7 +31,7 @@ class SgChannelNewsAsiaSpider(SmartSpider):
         'DOWNLOAD_DELAY': 2
     }
 
-    def start_requests(self):
+    async def start(self):
         yield self.get_algolia_request(0)
 
     def get_algolia_request(self, page_num):
@@ -49,6 +49,8 @@ class SgChannelNewsAsiaSpider(SmartSpider):
         )
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         try:
             data = json.loads(response.text)
             hits = data.get('hits', [])
@@ -71,7 +73,7 @@ class SgChannelNewsAsiaSpider(SmartSpider):
                     valid_count += 1
                     yield scrapy.Request(href, self.parse_article, meta={'publish_time_hint': pub_date})
 
-        if valid_count > 0 and current_page < 1000:
+        if valid_count > 0:
             yield self.get_algolia_request(current_page + 1)
 
     def parse_article(self, response):

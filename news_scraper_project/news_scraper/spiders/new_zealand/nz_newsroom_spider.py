@@ -27,13 +27,16 @@ class NzNewsroomSpider(SmartSpider):
         "DOWNLOAD_DELAY": 1
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://newsroom.co.nz/category/economy/",
-            callback=self.parse
+            callback=self.parse,
+            dont_filter=True,
         )
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         article_links = response.css('a[rel="bookmark"]::attr(href)').getall()
 
         has_valid_item_in_window = False
@@ -82,6 +85,7 @@ class NzNewsroomSpider(SmartSpider):
         item['section'] = 'Economy'
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 50:

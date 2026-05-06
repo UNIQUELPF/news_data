@@ -21,7 +21,7 @@ class TmFineconomicSpider(SmartSpider):
 
     custom_settings = {
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'CONCURRENT_REQUESTS': 8,
+        'CONCURRENT_REQUESTS': 4,
         'DOWNLOAD_DELAY': 1,
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_TIMEOUT': 30,
@@ -40,6 +40,8 @@ class TmFineconomicSpider(SmartSpider):
         Parse listing page with date-based circuit breaker.
         Dates are extractable from URL patterns: /habar/xxx-19.03.2026
         """
+        if self._stop_pagination:
+            return
         links = response.css('a[href*="/habar/"]::attr(href)').getall()
         current_page = response.meta.get('page', 1)
 

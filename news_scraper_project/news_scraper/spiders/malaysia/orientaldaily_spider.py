@@ -15,7 +15,7 @@ class OrientalDailySpider(SmartSpider):
     start_date = "2026-01-01"
     use_curl_cffi = True
 
-    fallback_content_selector = 'article'
+    fallback_content_selector = 'div.article'
 
     allowed_domains = ["orientaldaily.com.my"]
 
@@ -25,7 +25,7 @@ class OrientalDailySpider(SmartSpider):
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS': 8,
+        'CONCURRENT_REQUESTS': 1,  # Serial: one-by-one detail check
         'DOWNLOADER_MIDDLEWARES': {
             'news_scraper.middlewares.CurlCffiMiddleware': 543,
             'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
@@ -33,7 +33,7 @@ class OrientalDailySpider(SmartSpider):
         'CURLL_CFFI_IMPERSONATE': 'chrome120',
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.BASE_URL.format(page=1),
             callback=self.parse_list,
@@ -42,6 +42,9 @@ class OrientalDailySpider(SmartSpider):
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
+
         page = response.meta['page']
 
         items = response.css('div.news-item')
@@ -87,13 +90,12 @@ class OrientalDailySpider(SmartSpider):
         # Pagination with circuit breaker
         if has_valid_item_in_window:
             next_page = page + 1
-            if next_page <= 1000:  # Safety cap
-                yield scrapy.Request(
-                    self.BASE_URL.format(page=next_page),
-                    callback=self.parse_list,
-                    meta={'page': next_page},
-                    dont_filter=True,
-                )
+            yield scrapy.Request(
+                self.BASE_URL.format(page=next_page),
+                callback=self.parse_list,
+                meta={'page': next_page},
+                dont_filter=True,
+            )
 
     def parse_detail(self, response):
         item = self.auto_parse_item(
@@ -103,6 +105,7 @@ class OrientalDailySpider(SmartSpider):
         )
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         item['author'] = response.css('meta[name="dable:author"]::attr(content)').get() or "東方網"

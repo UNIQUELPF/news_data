@@ -22,18 +22,21 @@ class PlGovSpider(SmartSpider):
             "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
         },
         "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 4,
+        "CONCURRENT_REQUESTS": 1,  # Serial: listing has no dates, detail check one-by-one
         "DOWNLOAD_DELAY": 1.2,
         "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True}
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://www.gov.pl/web/premier/wydarzenia?page=1",
-            callback=self.parse
+            callback=self.parse,
+            dont_filter=True,
         )
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         links = response.css('div.art-prev ul li .title a::attr(href)').getall()
         if not links:
             links = response.css('a[href*="/web/premier/"]::attr(href)').getall()
@@ -85,6 +88,7 @@ class PlGovSpider(SmartSpider):
         item['section'] = 'Government Announcements'
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 50:

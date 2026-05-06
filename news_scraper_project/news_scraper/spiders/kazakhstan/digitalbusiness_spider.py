@@ -29,7 +29,7 @@ class DigitalBusinessSpider(SmartSpider):
     }
 
     custom_settings = {
-        'CONCURRENT_REQUESTS': 8,
+        'CONCURRENT_REQUESTS': 1,  # Serial: listing-no-date, detail check one-by-one
         'DOWNLOAD_DELAY': 1.0,
         'RANDOMIZE_DOWNLOAD_DELAY': True,
         'PLAYWRIGHT_MAX_CONTEXTS': 4,
@@ -37,7 +37,7 @@ class DigitalBusinessSpider(SmartSpider):
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
-    def start_requests(self):
+    async def start(self):
         for category, path in self.SECTIONS.items():
             url = self.BASE_URL + path
             yield scrapy.Request(
@@ -69,6 +69,8 @@ class DigitalBusinessSpider(SmartSpider):
         return None
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         category = response.meta['category']
         current_page = response.meta['page']
 
@@ -153,6 +155,7 @@ class DigitalBusinessSpider(SmartSpider):
             item['publish_time'] = detail_publish_time
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         # Skip items with insufficient content

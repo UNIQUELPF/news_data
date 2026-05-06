@@ -27,7 +27,7 @@ class MalayMailSpider(SmartSpider):
         'CONCURRENT_REQUESTS': 8,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.BASE_URL.format(page=1),
             callback=self.parse_list,
@@ -36,6 +36,8 @@ class MalayMailSpider(SmartSpider):
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         page = response.meta['page']
 
         items = response.css('div.article-item')
@@ -97,8 +99,8 @@ class MalayMailSpider(SmartSpider):
         item['section'] = 'Money'
 
         # Final safety check on publish_time (V2 requirement)
-        if not self.full_scan and item.get('publish_time'):
-            if item['publish_time'] < self.cutoff_date:
-                return
+        if item.get('publish_time') and not self.should_process(response.url, item['publish_time']):
+            self._stop_pagination = True
+            return
 
         yield item

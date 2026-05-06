@@ -23,23 +23,34 @@ class PortugalCMSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         # 初始抓取第一页
-        yield scrapy.Request(self.start_urls[0], callback=self.parse_list)
-
-        # 模拟 AJAX 翻页逻辑：步长 12
-        base_ajax = "https://www.cmjornal.pt/economia/loadmore?friendlyUrl=economia&contentStartIndex="
-        for index in range(12, 3600, 12):
-            url = f"{base_ajax}{index}"
-            yield scrapy.Request(url, callback=self.parse_list, meta={'index': index})
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse_list,
+            meta={'index': 0},
+            dont_filter=True,
+        )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         # CM 的链接格式通常为 /economia/detalhe/...
         articles = response.xpath('//a[contains(@href, "/detalhe/")]/@href').getall()
 
+        has_valid_item_in_window = False
         for link in articles:
             full_url = response.urljoin(link)
-            yield scrapy.Request(full_url, callback=self.parse_article)
+            if self.should_process(full_url):
+                has_valid_item_in_window = True
+                yield scrapy.Request(full_url, callback=self.parse_article)
+
+        if has_valid_item_in_window:
+            current_index = response.meta.get('index', 0)
+            next_index = current_index + 12
+            if next_index < 3600:
+                next_url = f"https://www.cmjornal.pt/economia/loadmore?friendlyUrl=economia&contentStartIndex={next_index}"
+                yield scrapy.Request(next_url, callback=self.parse_list, meta={'index': next_index})
 
     def parse_article(self, response):
         item = self.auto_parse_item(
@@ -49,6 +60,9 @@ class PortugalCMSpider(SmartSpider):
         )
         item['author'] = 'Correio da Manhã'
         item['section'] = 'Economia'
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
+
         if item.get('content_plain') and len(item['content_plain']) > 50:
-            if self.should_process(response.url, item.get('publish_time')):
-                yield item
+            yield item

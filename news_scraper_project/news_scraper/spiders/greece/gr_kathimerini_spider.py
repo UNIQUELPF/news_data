@@ -15,7 +15,7 @@ class GrKathimeriniSpider(SmartSpider):
     use_curl_cffi = True
 
     start_date = '2026-04-01'
-    fallback_content_selector = '.entry-content'
+    fallback_content_selector = 'main.container, .entry-content'
 
     allowed_domains = ['kathimerini.gr']
 

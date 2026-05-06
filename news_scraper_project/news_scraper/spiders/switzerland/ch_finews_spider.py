@@ -18,13 +18,16 @@ class FinewsCHSpider(SmartSpider):
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.5,
-        'CONCURRENT_REQUESTS': 2,
+        'CONCURRENT_REQUESTS': 4,
     }
 
     async def start(self):
         yield scrapy.Request('https://www.finews.com/news/english-news', callback=self.parse)
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
+
         articles = response.css('div.teaser-element')
         if not articles:
             self.logger.warning(f"No article containers found on {response.url}")
@@ -72,5 +75,9 @@ class FinewsCHSpider(SmartSpider):
         author = response.css('span.author-name::text').get()
         item['author'] = author.strip() if author else 'finews.com'
         item['section'] = 'Financial News'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
 
         yield item

@@ -17,7 +17,7 @@ class EeEmtaSpider(SmartSpider):
     # Internal JSON API endpoint for search/news
     api_url = "https://search.service.eu-live.vportal.ee/v1/search/emta?filters%5Btype%5D=Uudis&sort_by=created&page={page}&langcode=et&limit=15"
 
-    fallback_content_selector = ".field--name-body, article"
+    fallback_content_selector = "article.node, main.w-100, .field--name-body"
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {

@@ -30,7 +30,7 @@ class USACNBCSpider(SmartSpider):
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
         'DEFAULT_REQUEST_HEADERS': {
             'Accept-Language': 'en-US,en;q=0.9',
         },
@@ -42,6 +42,8 @@ class USACNBCSpider(SmartSpider):
             yield scrapy.Request(url, callback=self.parse, meta={'section_hint': url})
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         section_hint = response.meta.get('section_hint', '')
 
         # Try Next.js structured data

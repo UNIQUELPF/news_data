@@ -26,7 +26,7 @@ class ZakonSpider(SmartSpider):
     allowed_domains = ['zakon.kz']
     start_urls = ['https://www.zakon.kz/finansy/']
 
-    fallback_content_selector = 'div.content'
+    fallback_content_selector = 'div.article__content'
 
     custom_settings = {
         'PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT': 60000,

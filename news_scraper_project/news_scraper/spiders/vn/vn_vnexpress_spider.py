@@ -23,7 +23,7 @@ class VnVnexpressSpider(SmartSpider):
             "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
         },
         "CURLL_CFFI_IMPERSONATE": "chrome120",
-        "CONCURRENT_REQUESTS": 8,
+        "CONCURRENT_REQUESTS": 4,
         "DOWNLOAD_DELAY": 0.5
     }
 
@@ -37,6 +37,8 @@ class VnVnexpressSpider(SmartSpider):
 
     def parse(self, response):
         """Parse listing page with articles."""
+        if self._stop_pagination:
+            return
         articles = response.css('article.item-news')
         if not articles:
             articles = response.css('div.item-news')

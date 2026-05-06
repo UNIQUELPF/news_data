@@ -16,7 +16,7 @@ class TheEdgeSpider(SmartSpider):
     allowed_domains = ["theedgemalaysia.com"]
 
     use_curl_cffi = True
-    fallback_content_selector = ".newsTextDataWrapInner"
+    fallback_content_selector = "[class*=\"newsdetailsContent\"]"
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,

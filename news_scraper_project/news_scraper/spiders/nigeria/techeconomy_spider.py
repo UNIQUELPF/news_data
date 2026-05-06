@@ -14,23 +14,29 @@ class NigeriaTechEconomySpider(SmartSpider):
 
     strict_date_required = False
 
+    # Serial processing: listing page has no dates, so articles are checked
+    # one at a time on the detail page to avoid request queue buildup.
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             'https://techeconomy.ng/category/business/',
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+            dont_filter=True,
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
+
         articles = response.css('.jeg_post_title a::attr(href)').getall()
         if not articles:
             articles = response.css('a.jeg_readmore::attr(href)').getall()
@@ -63,6 +69,7 @@ class NigeriaTechEconomySpider(SmartSpider):
         item['section'] = 'Tech & Business'
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 50:

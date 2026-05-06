@@ -35,14 +35,14 @@ class LSMSpider(SmartSpider):
     }
 
     custom_settings = {
-        'CONCURRENT_REQUESTS': 4,
+        'CONCURRENT_REQUESTS': 1,  # Serial: one-by-one detail check
         'DOWNLOAD_DELAY': 1.5,
         'RANDOMIZE_DOWNLOAD_DELAY': True,
         'PLAYWRIGHT_MAX_CONTEXTS': 2,
         'PLAYWRIGHT_MAX_PAGES_PER_CONTEXT': 2,
     }
 
-    def start_requests(self):
+    async def start(self):
         for category, url in self.SECTIONS.items():
             yield scrapy.Request(
                 url,
@@ -60,6 +60,8 @@ class LSMSpider(SmartSpider):
             )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         category = response.meta['category']
         current_page = response.meta['page']
 
@@ -130,6 +132,11 @@ class LSMSpider(SmartSpider):
             title_xpath="//h1[@id='mainArticleLeftTextTopRightHead']/text()",
             publish_time_xpath="//div[@id='mainArticleLeftTextTopRightStatDate']/text()",
         )
+
+        # Final safety check on publish_time (V2 requirement)
+        if item.get('publish_time') and not self.should_process(response.url, item['publish_time']):
+            self._stop_pagination = True
+            return
 
         # Reject articles with excessively short content
         content_plain = item.get('content_plain') or ''

@@ -16,7 +16,7 @@ class EsElconfidencialSpider(SmartSpider):
 
     strict_date_required = True
     use_curl_cffi = True
-    fallback_content_selector = "div.news-body, .article-body, article"
+    fallback_content_selector = ".newsType__content, .innerArticle__body, article"
 
     # 实时新闻入口
     base_url = 'https://www.elconfidencial.com/ultima-hora-en-vivo/?page={}'

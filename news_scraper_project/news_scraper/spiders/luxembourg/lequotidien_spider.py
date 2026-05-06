@@ -27,7 +27,7 @@ class LeQuotidienSpider(SmartSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
     }
 
-    fallback_content_selector = '.entry-content'
+    fallback_content_selector = 'article.post-listing, div#main-content'
 
     start_categories = [
         'a-la-une', 'luxembourg', 'politique-societe', 'economie',

@@ -23,14 +23,17 @@ class NigeriaGovSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             'https://statehouse.gov.ng/category/press-releases/',
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+            dont_filter=True
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         articles = response.css('.news-detail a::attr(href)').getall() or \
                    response.css('.news-item a::attr(href)').getall()
 

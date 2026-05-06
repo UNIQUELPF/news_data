@@ -31,7 +31,7 @@ class EeErrSpider(SmartSpider):
     use_curl_cffi = True
     playwright = True
 
-    fallback_content_selector = '.text'
+    fallback_content_selector = 'article.prime, div.body'
 
     def start_requests(self):
         yield scrapy.Request(

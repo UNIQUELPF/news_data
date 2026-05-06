@@ -22,7 +22,7 @@ class KapitalSpider(SmartSpider):
         {'name': 'technology', 'path': 'tehnology'},
     ]
 
-    def start_requests(self):
+    async def start(self):
         for cat in self.CATEGORIES:
             url = f"https://kapital.kz/{cat['path']}"
             yield scrapy.Request(
@@ -33,6 +33,8 @@ class KapitalSpider(SmartSpider):
             )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         cat_name = response.meta['cat_name']
         page = response.meta['page']
 
@@ -96,4 +98,9 @@ class KapitalSpider(SmartSpider):
         )
         item['author'] = 'Kapital.kz'
         item['section'] = response.meta.get('section_hint', 'economic')
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
+
         yield item

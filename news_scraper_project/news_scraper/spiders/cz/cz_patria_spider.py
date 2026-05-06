@@ -45,6 +45,7 @@ class CzPatriaSpider(SmartSpider):
         yield scrapy.Request(
             "https://www.patria.cz/zpravodajstvi/zpravy.html",
             callback=self.parse,
+            dont_filter=True,
             meta={
                 "playwright": True,
                 "playwright_page_methods": [

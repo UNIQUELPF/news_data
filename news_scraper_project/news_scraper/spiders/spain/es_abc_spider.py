@@ -22,7 +22,7 @@ class EsAbcSpider(SmartSpider):
     base_url = 'https://www.abc.es/economia/pagina-{}.html'
 
     custom_settings = {
-        'CONCURRENT_REQUESTS': 16,
+        'CONCURRENT_REQUESTS': 4,
         'DOWNLOAD_DELAY': 0.5,
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_TIMEOUT': 30
@@ -32,6 +32,9 @@ class EsAbcSpider(SmartSpider):
         yield scrapy.Request(self.base_url.format(1), callback=self.parse, dont_filter=True)
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
+
         # 1. 提取文章链接
         # 链接格式: .../transporte-20260330200020-nt.html
         article_links = response.css('h2.v-a-t a::attr(href), a.v-a-t::attr(href)').getall()
@@ -96,5 +99,9 @@ class EsAbcSpider(SmartSpider):
 
         item['author'] = response.css('span.voc-a-n::text, .v-fc__a::text').get('ABC Economía').strip()
         item['section'] = 'Economía'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
 
         yield item

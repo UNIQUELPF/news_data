@@ -26,7 +26,7 @@ class UzUzdailySpider(SmartSpider):
     }
 
     use_curl_cffi = True
-    fallback_content_selector = ".text"
+    fallback_content_selector = ".content_body"
     strict_date_required = True
 
     async def start(self):

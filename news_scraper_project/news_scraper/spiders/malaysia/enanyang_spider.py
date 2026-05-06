@@ -13,7 +13,7 @@ class EnanyangSpider(SmartSpider):
     start_date = "2026-01-01"
     allowed_domains = ["enanyang.my"]
 
-    fallback_content_selector = "div[class*='article-page-post-content']"
+    fallback_content_selector = 'article.article-page-article'
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,

@@ -49,6 +49,8 @@ class Lebanon24Spider(SmartSpider):
             )
 
     def parse_first_page(self, response, cat_id, load_index):
+        if self._stop_pagination:
+            return
         has_valid_item_in_window = False
         for item in self._parse_list(response):
             has_valid_item_in_window = True
@@ -67,6 +69,8 @@ class Lebanon24Spider(SmartSpider):
             )
 
     def parse_list_page(self, response, cat_id, load_index):
+        if self._stop_pagination:
+            return
         has_valid_item_in_window = False
         for item in self._parse_list(response):
             has_valid_item_in_window = True
@@ -136,6 +140,7 @@ class Lebanon24Spider(SmartSpider):
                     logger.debug(f"Failed to parse date '{date_text}': {e}")
 
             if not self.should_process(url, pub_time):
+                self._stop_pagination = True
                 continue
 
             yield {

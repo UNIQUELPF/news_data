@@ -15,7 +15,7 @@ class USAYFinanceSpider(SmartSpider):
     allowed_domains = ['finance.yahoo.com']
     strict_date_required = False  # List page dates unreliable; extracted on detail pages
     use_curl_cffi = True
-    fallback_content_selector = ".caas-body, div.body.yf-13q2nrc"
+    fallback_content_selector = "article.article-wrap, div.body-wrap, article"
 
     start_urls = ['https://finance.yahoo.com/topic/latest-news/']
 
@@ -63,7 +63,7 @@ class USAYFinanceSpider(SmartSpider):
 
         # ContentEngine fallback: Yahoo Finance specific cleaning
         if not item.get('content_plain'):
-            content_html = response.css('.caas-body').get() or response.css('div.body.yf-13q2nrc').get()
+            content_html = response.css('article.article-wrap').get() or response.css('div.body-wrap').get() or response.css('article').get()
             if content_html:
                 soup = BeautifulSoup(content_html, 'html.parser')
                 for tag in soup(['script', 'style', 'button', 'svg', 'canvas']):

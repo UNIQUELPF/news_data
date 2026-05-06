@@ -30,7 +30,7 @@ class MnMontsameSpider(SmartSpider):
         "DOWNLOAD_DELAY": 2.0,
     }
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(
                 url,
@@ -40,11 +40,14 @@ class MnMontsameSpider(SmartSpider):
                     "playwright_page_methods": [
                         PageMethod("wait_for_selector", ".news-box", timeout=20000),
                     ]
-                }
+                },
+                dont_filter=True,
             )
 
     def parse(self, response):
         """Parse listing page and follow article links."""
+        if self._stop_pagination:
+            return
         news_boxes = response.css('.news-box')
         has_valid_item_in_window = False
 
@@ -114,6 +117,7 @@ class MnMontsameSpider(SmartSpider):
         item['section'] = 'Economy'
 
         if pub_date and not self.should_process(response.url, pub_date):
+            self._stop_pagination = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 100:
