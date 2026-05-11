@@ -26,12 +26,19 @@ class AustriaBmfSpider(AustriaBaseSpider):
         "https://www.bmf.gv.at/presse/pressemeldungen/2026.html",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+    strict_date_required = False
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         links = response.css('a[href*="/presse/pressemeldungen/"]::attr(href)').getall()
+        has_valid_item_in_window = False
         for href in links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url):
@@ -41,6 +48,7 @@ class AustriaBmfSpider(AustriaBaseSpider):
             if full_url.endswith("/2026.html") or "/2026/" not in full_url:
                 yield scrapy.Request(full_url, callback=self.parse_listing)
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
@@ -58,7 +66,8 @@ class AustriaBmfSpider(AustriaBaseSpider):
             or re.search(r"(\d{4}-\d{2}-\d{2})", response.text).group(1) if re.search(r"(\d{4}-\d{2}-\d{2})", response.text) else None,
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

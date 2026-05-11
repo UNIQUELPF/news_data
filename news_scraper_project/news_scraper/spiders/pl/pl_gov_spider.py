@@ -65,9 +65,8 @@ class PlGovSpider(SmartSpider):
                 except ValueError:
                     pass
 
-            if current_page < 300:
-                next_page_url = f"https://www.gov.pl/web/premier/wydarzenia?page={current_page + 1}"
-                yield scrapy.Request(next_page_url, callback=self.parse)
+            next_page_url = f"https://www.gov.pl/web/premier/wydarzenia?page={current_page + 1}"
+            yield scrapy.Request(next_page_url, callback=self.parse)
 
     def parse_article(self, response):
         # Custom date extraction (DD.MM.YYYY)

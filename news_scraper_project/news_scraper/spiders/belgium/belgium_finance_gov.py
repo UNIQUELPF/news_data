@@ -16,9 +16,9 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
     allowed_domains = ["finance.belgium.be", "financien.belgium.be"]
     start_urls = ["https://finance.belgium.be/en/news"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -50,7 +50,7 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
 
         article_text = self._clean_text(" ".join(response.css("article ::text, main ::text").getall()[:160]))
         publish_time = self._parse_datetime(article_text, languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

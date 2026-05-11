@@ -50,7 +50,7 @@ class CaixinSpider(scrapy.Spider):
             self.logger.error(f"Failed to check URL existence: {e}")
             return False
 
-    def start_requests(self):
+    async def start(self):
         self.is_first_run = self.check_if_first_run()
         
         # JS 脚本：点击“加载更多”直到结束（仅限首次运行）
@@ -86,7 +86,8 @@ class CaixinSpider(scrapy.Spider):
                         PageMethod("evaluate", js_script) if js_script else PageMethod("wait_for_timeout", 1000),
                     ],
                 },
-                callback=self.parse
+                callback=self.parse,
+            dont_filter=True,
             )
 
     def parse(self, response):

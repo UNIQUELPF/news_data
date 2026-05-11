@@ -2,6 +2,7 @@ import json
 import re
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -61,7 +62,7 @@ class PaperjamSpider(SmartSpider):
         'lifestyle-vie-pratique/concours'
     ]
 
-    def start_requests(self):
+    async def start(self):
         for cat in self.CATEGORIES:
             url = f"https://paperjam.lu/sector/{cat}?page=1"
             yield scrapy.Request(
@@ -171,6 +172,27 @@ class PaperjamSpider(SmartSpider):
                 text += self.extract_text(item)
         return text
 
+    def _extract_content(self, response):
+        """Extract article content from article.article via BS4.
+
+        This ensures we get all rendered content even if ContentEngine's
+        trafilatura misses parts of the article.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root = soup.select_one('article.article')
+        if not root:
+            return ''
+
+        for tag in root.find_all(['script', 'style', 'nav', 'footer', 'aside']):
+            tag.decompose()
+
+        parts = []
+        for node in root.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 5:
+                parts.append(text)
+        return '\n\n'.join(parts)
+
     def parse_article(self, response):
         # Extract metadata from __NEXT_DATA__ JSON for maximum accuracy
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', response.text)
@@ -247,9 +269,14 @@ class PaperjamSpider(SmartSpider):
 
         item['section'] = section_hint
 
-        # If ContentEngine didn't extract meaningful content, fall back to JSON content
-        content_plain = item.get('content_plain', '') or ''
-        if (not content_plain or len(content_plain) < 100) and json_content:
-            item['content_plain'] = json_content
+        # Prefer BS4 extraction from article.article for reliable rendered content
+        bs4_content = self._extract_content(response)
+        if bs4_content:
+            item['content_plain'] = bs4_content
+        else:
+            # If ContentEngine didn't extract meaningful content, fall back to JSON content
+            content_plain = item.get('content_plain', '') or ''
+            if (not content_plain or len(content_plain) < 100) and json_content:
+                item['content_plain'] = json_content
 
         yield item

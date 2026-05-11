@@ -21,12 +21,12 @@ class PakistanEconomySpider(PakistanBaseSpider):
         "https://www.economy.pk/category/business/",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        should_continue = self.full_scan
+        has_valid_item_in_window = self.full_scan
 
         for article in response.css("article"):
             href = article.css("a[href]::attr(href)").get()
@@ -34,7 +34,7 @@ class PakistanEconomySpider(PakistanBaseSpider):
                 continue
 
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.full_scan and full_url in self.seen_urls:
                 continue
             if "/category/" in full_url or "#respond" in full_url:
                 continue
@@ -43,20 +43,20 @@ class PakistanEconomySpider(PakistanBaseSpider):
                 article.css("time::attr(datetime), time::text, .jeg_meta_date a::text, .jeg_meta_date::text").get(),
                 languages=["en"],
             )
-            if publish_time and not self.full_scan:
+            if publish_time:
                 if publish_time < self.cutoff_date:
                     continue
-                should_continue = True
+                has_valid_item_in_window = True
             else:
-                should_continue = True
+                has_valid_item_in_window = True
 
             self.seen_urls.add(full_url)
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
-        if should_continue:
+        if has_valid_item_in_window:
             next_url = response.css("a.page-numbers.next::attr(href), a.next::attr(href), a.page-numbers::attr(href)").get()
             if next_url:
-                yield scrapy.Request(response.urljoin(next_url), callback=self.parse_listing)
+                yield scrapy.Request(response.urljoin(next_url), callback=self.parse_listing, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         data = self._extract_article_schema(response)
@@ -75,7 +75,7 @@ class PakistanEconomySpider(PakistanBaseSpider):
             or response.css("time::attr(datetime), time::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._clean_text((data or {}).get("articleBody")) or self._extract_content(response, title)
@@ -117,7 +117,12 @@ class PakistanEconomySpider(PakistanBaseSpider):
 
     def _extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one("article") or soup.select_one("main") or soup.select_one(".content-inner")
+        root = (
+            soup.select_one(".entry-content")
+            or soup.select_one(".content-inner")
+            or soup.select_one("main")
+            or soup.select_one("article")
+        )
         if not root:
             return ""
 

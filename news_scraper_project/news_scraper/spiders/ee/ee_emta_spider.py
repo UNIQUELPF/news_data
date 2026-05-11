@@ -29,7 +29,7 @@ class EeEmtaSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5
     }
 
-    def start_requests(self):
+    async def start(self):
         # Start with page 1
         yield scrapy.Request(
             self.api_url.format(page=1),

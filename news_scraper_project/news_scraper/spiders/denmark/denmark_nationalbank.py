@@ -16,9 +16,9 @@ class DenmarkNationalbankSpider(DenmarkBaseSpider):
     allowed_domains = ["nationalbanken.dk", "www.nationalbanken.dk"]
     start_urls = ["https://www.nationalbanken.dk/en/news-and-knowledge/publications-and-speeches/"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -51,7 +51,7 @@ class DenmarkNationalbankSpider(DenmarkBaseSpider):
 
         main_text = self._clean_text(" ".join(response.css("main ::text").getall()[:160]))
         publish_time = self._parse_datetime(main_text, languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

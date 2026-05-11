@@ -18,7 +18,7 @@ class SaudiPressAgencySpider(SmartSpider):
         "RANDOMIZE_DOWNLOAD_DELAY": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         params_ar = "by_latest=1&per_page=50&w_content=1&w_tag=1&page=1&l=ar"
         url = f"https://portalapi.spa.gov.sa/api/v1/news?{params_ar}"
         yield scrapy.Request(

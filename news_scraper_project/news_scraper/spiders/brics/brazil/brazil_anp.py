@@ -18,7 +18,7 @@ class BrazilANPSpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = "div#content"
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.gov.br/anp/pt-br/canais_atendimento/imprensa/noticias-comunicados?b_start:int=0"
         yield scrapy.Request(url=url, callback=self.parse_list, dont_filter=True, meta={"start_index": 0})
 

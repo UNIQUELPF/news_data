@@ -18,12 +18,16 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
     country = '菲律宾'
     allowed_domains = ["bworldonline.com", "www.bworldonline.com"]
     start_urls = ["https://www.bworldonline.com/economy/"]
+    fallback_content_selector = "article, main"
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+        has_valid_item_in_window = False
         html = self._fetch_html(self.start_urls[0])
         urls = sorted(
             set(
@@ -36,13 +40,18 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
         for full_url in urls:
             if not self.should_process(full_url):
                 continue
+            if self._stop_pagination:
+                break
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
             if item:
+                has_valid_item_in_window = True
                 yield item
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         schema = self._extract_article_schema(response)
@@ -60,7 +69,8 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
             or response.css("time::attr(datetime), time::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._clean_text((schema or {}).get("articleBody")) or self._extract_content(response, title)

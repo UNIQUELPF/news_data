@@ -22,9 +22,9 @@ class KyrgyzstanAkipressSpider(KyrgyzstanBaseSpider):
         "https://akipress.com/cat:13/",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         emitted = 0
@@ -77,7 +77,7 @@ class KyrgyzstanAkipressSpider(KyrgyzstanBaseSpider):
             self._extract_first_match(body_text, r"([A-Z][a-z]+ \d{1,2}, \d{4} / \d{1,2}:\d{2} [AP]M)"),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_teaser(body_text, title)

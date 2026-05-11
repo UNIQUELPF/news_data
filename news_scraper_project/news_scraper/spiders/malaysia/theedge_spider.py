@@ -28,7 +28,7 @@ class TheEdgeSpider(SmartSpider):
         {'id': 'economy', 'name': 'Economy'}
     ]
 
-    def start_requests(self):
+    async def start(self):
         for cat in self.CATEGORIES:
             url = f"https://theedgemalaysia.com/api/loadMoreCategories?offset=0&categories={cat['id']}"
             yield scrapy.Request(

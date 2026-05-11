@@ -1,12 +1,15 @@
-# 法国amf爬虫，负责抓取对应站点、机构或栏目内容。
+# 法国AMF爬虫，使用站点地图发现文章 URL。
+# 列表页文章列表由 JavaScript 渲染，curl_cffi 无法抓取，
+# 因此改用 sitemap.xml 发现文章链接。
 
 import re
+import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
 
-import scrapy
-
 from news_scraper.spiders.france.base import FranceBaseSpider
+
+SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 
 
 class FranceAmfSpider(FranceBaseSpider):
@@ -16,45 +19,46 @@ class FranceAmfSpider(FranceBaseSpider):
 
     country = '法国'
     allowed_domains = ["amf-france.org", "www.amf-france.org"]
-    start_urls = [
-        "https://www.amf-france.org/fr/actualites-publications/communiques/communiques-de-lamf",
-        "https://www.amf-france.org/fr/actualites-publications/actualites",
-    ]
+    start_urls = ["https://www.amf-france.org/fr/sitemap.xml"]
 
-    def start_requests(self):
-        for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+    fallback_content_selector = "article, main"
+    strict_date_required = False
 
-    def parse_listing(self, response):
-        html = self._fetch_html(response.url)
-        soup = BeautifulSoup(html, "html.parser")
-        for link in soup.select("a[href^='/fr/actualites-publications/']"):
-            href = link.get("href") or ""
-            if href.rstrip("/") in {"/fr/actualites-publications/communiques/communiques-de-lamf", "/fr/actualites-publications/actualites"}:
+    def parse(self, response):
+        root = ET.fromstring(response.text.encode())
+        # 站点地图按 lastmod 升序排列（旧到新），从末尾开始处理（最新优先）
+        url_elems = root.findall(f"{{{SITEMAP_NS}}}url")
+        for url_elem in reversed(url_elems):
+            loc = url_elem.find(f"{{{SITEMAP_NS}}}loc")
+            lastmod = url_elem.find(f"{{{SITEMAP_NS}}}lastmod")
+            if loc is None:
                 continue
-            if any(
-                segment in href
-                for segment in (
-                    "/agenda",
-                    "/la-une",
-                    "/dossiers-thematiques",
-                    "/publications/",
-                    "/evenements-de-lamf/",
-                    "/positions-ue-de-lamf",
-                    "/consultations-de-lamf",
-                )
-            ):
+            url = loc.text.strip()
+            # 只处理新闻稿和动态栏目
+            if "/communiques-de-lamf/" not in url and "/actualites/" not in url:
                 continue
-            if href.count("/") < 5:
+            # 过滤掉栏目页自身，只保留具体文章
+            if url.rstrip("/").endswith("/communiques-de-lamf") or url.rstrip("/").endswith("/actualites"):
                 continue
-            full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            # 跳过 commission des sanctions 栏目
+            if "/communiques-de-la-commission-des-sanctions" in url:
                 continue
+
+            publish_time = None
+            if lastmod is not None and lastmod.text:
+                publish_time = self._parse_datetime(lastmod.text.strip(), languages=["fr", "en"])
+            if not self.should_process(url, publish_time):
+                if publish_time and publish_time < self.cutoff_date:
+                    break
+                continue
+
             try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+                detail_html = self._fetch_html(url)
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch {url}: {e}")
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+
+            item = next(self.parse_detail(self._make_response(url, detail_html)), None)
             if item:
                 yield item
 
@@ -72,10 +76,10 @@ class FranceAmfSpider(FranceBaseSpider):
             or self._extract_publish_text(response),
             languages=["fr", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response, title)
+        content = self._extract_content(response, ["article", "main"])
         if not content:
             content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
         if not content:
@@ -102,22 +106,3 @@ class FranceAmfSpider(FranceBaseSpider):
         if match:
             return match.group(1)
         return text
-
-    def _extract_content(self, response, title):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one("main") or soup.select_one("article")
-        if not root:
-            return ""
-        for unwanted in root.select("script, style, nav, footer, header, aside, form"):
-            unwanted.decompose()
-        title_text = self._clean_text(title)
-        parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 30 or text == title_text:
-                continue
-            if text.startswith("Publié le") or text.startswith("En savoir plus"):
-                continue
-            if text not in parts:
-                parts.append(text)
-        return "\n\n".join(parts)

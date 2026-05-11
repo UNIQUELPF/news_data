@@ -23,22 +23,28 @@ class IrelandIndependentSpider(IrelandBaseSpider):
 
     country = '爱尔兰'
     allowed_domains = ["independent.ie", "www.independent.ie"]
+    fallback_content_selector = "article, main"
     # 经济类：商业新闻媒体表
     start_urls = [
         "https://www.independent.ie/business",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         # 经济类列表页：只保留 business 频道下的文章详情页。
         links = response.css('a[href*="/business/"][href$=".html"]::attr(href)').getall()
+        has_valid_item_in_window = False
         for href in links:
             full_url = response.urljoin(href)
             if "/business/" not in full_url or not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
@@ -55,7 +61,8 @@ class IrelandIndependentSpider(IrelandBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

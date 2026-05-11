@@ -35,16 +35,23 @@ class OmanNewsSpider(OmanBaseSpider):
         "https://www.omannews.gov.om/topics/ar/7",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True})
+            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True}, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         links = response.css("a::attr(href)").getall()
+        has_valid_item_in_window = False
         for href in links:
             full_url = response.urljoin(href)
             if "/topics/ar/7/show/" not in full_url or not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
 
     def parse_detail(self, response):
@@ -56,7 +63,8 @@ class OmanNewsSpider(OmanBaseSpider):
             return
 
         publish_time = self._extract_publish_time(response)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

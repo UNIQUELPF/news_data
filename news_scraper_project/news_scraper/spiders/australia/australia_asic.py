@@ -21,9 +21,11 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
         "https://www.asic.gov.au/_data/mr2023/",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
         if self.full_scan or self.cutoff_date < datetime(2025, 1, 1):
             yield scrapy.Request(
                 "https://download.asic.gov.au/scripts/newsroom/mr-archive.json",
@@ -31,6 +33,9 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
             )
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         try:
             payload = json.loads(response.text)
         except Exception:
@@ -39,6 +44,7 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
         if isinstance(payload, dict):
             payload = payload.get("items") or payload.get("data") or []
 
+        has_valid_item_in_window = False
         for entry in payload:
             if not isinstance(entry, dict):
                 continue
@@ -47,16 +53,15 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
                 continue
             if full_url.startswith("/"):
                 full_url = response.urljoin(full_url)
-            if not self.should_process(full_url):
+            publish_time = self._extract_listing_publish_time(entry)
+            if not self.should_process(full_url, publish_time):
                 continue
             meta_type = self._clean_text(entry.get("metaType")).lower()
             if meta_type and meta_type != "media release":
                 continue
             if "/find-a-media-release/" not in full_url and "/newsroom/" not in full_url:
                 continue
-            publish_time = self._extract_listing_publish_time(entry)
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-                continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
@@ -75,7 +80,8 @@ class AustraliaAsicSpider(AustraliaBaseSpider):
             or response.css(".publish-date::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)

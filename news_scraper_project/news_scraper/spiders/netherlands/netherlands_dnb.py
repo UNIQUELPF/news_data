@@ -17,9 +17,9 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
     start_urls = ["data:,netherlands_dnb_start"]
     feed_url = "https://www.dnb.nl/en/rss/16451/6882"
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         xml_text = self._fetch_html(self.feed_url)
@@ -56,7 +56,7 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, ["main", "article", ".article-content", ".content"])

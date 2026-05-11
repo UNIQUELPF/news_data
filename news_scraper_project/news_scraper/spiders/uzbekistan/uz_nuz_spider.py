@@ -1,6 +1,10 @@
 import re
 from datetime import datetime
 
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from urllib.parse import urljoin
+
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -77,6 +81,49 @@ class UzNuzSpider(SmartSpider):
                 callback=self.parse,
                 meta={"page": next_page},
             )
+
+    def extract_content(self, response):
+        """Custom BS4 extraction: nuz.uz uses .td-post-content with large embedded style blocks."""
+        soup = BeautifulSoup(response.text, "lxml")
+        content_area = soup.select_one(".td-post-content")
+        if not content_area:
+            return super().extract_content(response)
+
+        for tag in content_area.find_all(
+            ["script", "style", "nav", "footer", "header", "aside", "form", "button", "iframe"]
+        ):
+            tag.decompose()
+
+        images = []
+        for img in content_area.find_all("img"):
+            src = img.get("src") or img.get("data-src") or img.get("data-original") or img.get("data-lazy-src")
+            if src:
+                alt = img.get("alt", "")
+                images.append({"url": urljoin(response.url, src), "alt": alt})
+
+        for img in content_area.find_all("img"):
+            src = img.get("src")
+            if src:
+                img["src"] = urljoin(response.url, src)
+            alt = img.get("alt", "")
+            img.attrs = {"src": img.get("src", ""), "alt": alt}
+
+        for a in content_area.find_all("a"):
+            href = a.get("href")
+            if href:
+                a["href"] = urljoin(response.url, href)
+            a.attrs = {"href": a.get("href", "#")}
+
+        content_cleaned = str(content_area)
+        content_markdown = md(content_cleaned, strip=["script", "style", "iframe", "object", "embed"])
+        content_plain = content_area.get_text(separator=" ", strip=True)
+
+        return {
+            "content_cleaned": content_cleaned.strip(),
+            "content_markdown": content_markdown.strip(),
+            "content_plain": content_plain.strip(),
+            "images": images,
+        }
 
     def parse_detail(self, response):
         """Parse article detail page using SmartSpider auto extraction."""

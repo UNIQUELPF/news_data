@@ -24,7 +24,7 @@ class AfricaBusinessDaySpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         # We use sitemap index and section indices to reliably pull everything
         urls = [
             'https://www.businessday.co.za/arc/outboundfeeds/sitemap-news-index/',

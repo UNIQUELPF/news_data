@@ -34,7 +34,7 @@ class BahrainCbbSpider(SmartSpider):
         {"mf-categories[]": "treasury-bills", "section": "government_securities"},
     ]
 
-    def start_requests(self):
+    async def start(self):
         for feed in self.feeds:
             yield self._build_ajax_request(feed, page=1)
 

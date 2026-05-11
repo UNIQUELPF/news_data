@@ -28,7 +28,7 @@ class EthiopiaReporterSpider(SmartSpider):
     # API endpoints
     base_api_url = 'https://www.thereporterethiopia.com/wp-json/wp/v2/posts?categories=1960&_embed=1&per_page=50&page={}'
 
-    def start_requests(self):
+    async def start(self):
         url = self.base_api_url.format(1)
         yield scrapy.Request(url, callback=self.parse_api, dont_filter=True, meta={'page': 1})
 
@@ -106,11 +106,10 @@ class EthiopiaReporterSpider(SmartSpider):
 
         if has_valid_item_in_window:
             page = response.meta.get('page', 1)
-            if page < 100:
-                next_page = page + 1
-                yield scrapy.Request(
-                    url=self.base_api_url.format(next_page),
-                    callback=self.parse_api,
-                    meta={'page': next_page},
-                    dont_filter=True
-                )
+            next_page = page + 1
+            yield scrapy.Request(
+                url=self.base_api_url.format(next_page),
+                callback=self.parse_api,
+                meta={'page': next_page},
+                dont_filter=True
+            )

@@ -37,14 +37,38 @@ class CanadaBaseSpider(SmartSpider):
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
         normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+
+        # Extract images via ContentEngine with og:image fallback
+        content_data = self.extract_content(response) or {}
+        images = content_data.get("images") or []
+        if not images:
+            meta_image = response.xpath("//meta[@property='og:image']/@content").get()
+            if meta_image:
+                images = [response.urljoin(meta_image)]
+
+        # Fall back to ContentEngine if spider's custom content extraction is too short
+        if len(content or "") < 200:
+            ce_plain = (content_data.get("content_plain") or "").strip()
+            if len(ce_plain) > len(content or ""):
+                content = ce_plain
+                content_cleaned = (content_data.get("content_cleaned") or ce_plain).strip()
+                content_markdown = (content_data.get("content_markdown") or ce_plain).strip()
+            else:
+                content_cleaned = content
+                content_markdown = content
+        else:
+            content_cleaned = content
+            content_markdown = content
+
         return {
             "url": response.url,
             "title": title,
             "raw_html": self._response_text(response),
             "content": content,
-            "content_cleaned": content,
-            "content_markdown": content,
+            "content_cleaned": content_cleaned,
+            "content_markdown": content_markdown,
             "content_plain": content,
+            "images": images,
             "publish_time": normalized_time,
             "author": author,
             "language": language or self.language,

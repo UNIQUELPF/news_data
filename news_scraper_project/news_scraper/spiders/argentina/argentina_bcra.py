@@ -1,12 +1,7 @@
 # 阿根廷bcra爬虫，负责抓取对应站点、机构或栏目内容。
 
-from datetime import datetime
-
-import dateparser
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 
 # 阿根廷政府/监管类来源
 # 站点：BCRA
@@ -24,6 +19,7 @@ class ArgentinaBcraSpider(SmartSpider):
     """
 
     name = "argentina_bcra"
+    strict_date_required = False
 
 
     country_code = "ARG"
@@ -35,6 +31,8 @@ class ArgentinaBcraSpider(SmartSpider):
     start_date = "2026-01-01"
     allowed_domains = ["bcra.gob.ar"]
 
+    fallback_content_selector = ".et_pb_post_content, .entry-content, .post-content, .inside-article, .site-main"
+
     start_urls = [
         "https://www.bcra.gob.ar/noticias/",
     ]
@@ -43,12 +41,17 @@ class ArgentinaBcraSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         article_links = response.css('a[href*="/noticia/"]::attr(href), a[href*="/noticias/"]::attr(href)').getall()
+
+        has_valid_item_in_window = False
 
         for href in article_links:
             full_url = response.urljoin(href)
@@ -56,81 +59,30 @@ class ArgentinaBcraSpider(SmartSpider):
                 continue
             if ("/noticia/" not in full_url and "/noticias/" not in full_url) or not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
-        next_page = response.css("a.next::attr(href), a[rel='next']::attr(href)").get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse_listing)
+        if has_valid_item_in_window:
+            next_page = response.css("a.next::attr(href), a[rel='next']::attr(href)").get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
 
     def parse_detail(self, response):
-        title = self._clean_text(
-            response.xpath("//meta[@property='og:title']/@content").get()
-            or response.css("h1::text").get()
-        )
-        if not title:
+        item = self.auto_parse_item(response)
+        if not item.get("title") or not item.get("content_plain"):
             return
 
-        publish_time = self._parse_datetime(
-            response.xpath("//meta[@property='article:published_time']/@content").get()
-            or response.css("time::attr(datetime), time::text").get()
-        )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response)
-        if not content:
-            content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
-        if not content:
-            return
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title.replace(" | BCRA", "").strip()
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
+        # Spider-specific overrides
+        item["title"] = item["title"].replace(" | BCRA", "").strip()
         item["author"] = "BCRA"
-        item["language"] = "es"
         item["section"] = "noticias"
-        item["scrape_time"] = datetime.now()
-        yield item
+        item["language"] = "es"
 
-    def _extract_content(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = (
-            soup.select_one(".entry-content")
-            or soup.select_one(".post-content")
-            or soup.select_one(".inside-article")
-            or soup.select_one(".site-main")
-        )
-        if not root:
-            return ""
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
-        for unwanted in root.select("script, style, nav, footer, header, aside, form, figure, .sharedaddy"):
-            unwanted.decompose()
-
-        parts = []
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 12:
-                continue
-            if text.startswith("miércoles,") or text.startswith("jueves,") or text.startswith("martes,"):
-                continue
-            if "Banco Central de la República Argentina" in text:
-                continue
-            if text not in parts:
-                parts.append(text)
-
-        return "\n\n".join(parts)
-
-    def _parse_datetime(self, value):
-        if not value:
-            return None
-        parsed = dateparser.parse(value, languages=["es"], settings={"TIMEZONE": "UTC"})
-        if not parsed:
-            return None
-        return parsed.replace(tzinfo=None)
-
-    def _clean_text(self, value):
-        if not value:
-            return ""
-        return " ".join(str(value).split()).strip()

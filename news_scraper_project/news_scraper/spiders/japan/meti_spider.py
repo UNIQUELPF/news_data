@@ -25,7 +25,7 @@ class MetiSpider(SmartSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-    def start_requests(self):
+    async def start(self):
         # 1. 抓取当前主页
         yield scrapy.Request(
             'https://www.meti.go.jp/press/index.html',

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -17,7 +18,9 @@ class ElnashraSpider(SmartSpider):
     source_timezone = 'Asia/Beirut'
 
     use_curl_cffi = True
-    fallback_content_selector = '.articleBody'
+    # .articleBody is the primary container; .news_body / .newscontainer
+    # are broader wrappers that also contain <p> article text.
+    fallback_content_selector = '.articleBody, .news_body, .newscontainer'
 
     allowed_domains = ["elnashra.com"]
 
@@ -35,11 +38,12 @@ class ElnashraSpider(SmartSpider):
         "DOWNLOAD_FAIL_ON_DATALOSS": False,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             url=self.base_list_url,
             callback=self.parse,
             meta={'page_num': 1},
+        dont_filter=True,
         )
 
     def parse(self, response):
@@ -118,18 +122,76 @@ class ElnashraSpider(SmartSpider):
                 dont_filter=True,
             )
 
+    def _extract_content(self, response):
+        """Extract article content via BS4 directly.
+
+        The site's Arabic content is often stripped by trafilatura's text-density heuristics.
+        BS4 direct extraction preserves all paragraphs.
+
+        Tries multiple selectors in order so a template change or partial redirect does not
+        cause the spider to fall through to trafilatura (which strips Arabic).
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        selectors = ['.boxescontainer', '.articleBody', '.news_body', '.newscontainer', '.body_container']
+        body = None
+        for sel in selectors:
+            candidate = soup.select_one(sel)
+            if candidate:
+                body = candidate
+                break
+        if not body:
+            return ''
+
+        for tag in body.find_all(['script', 'style', 'nav', 'footer', 'aside']):
+            tag.decompose()
+
+        parts = []
+        for node in body.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text:
+                parts.append(text)
+        return '\n\n'.join(parts)
+
     def parse_article(self, response):
-        item = self.auto_parse_item(
-            response,
-            title_xpath="//h1[@class='topTitle']//text()",
-        )
+        content = self._extract_content(response)
 
-        # Detail page h1 title is preferred over listing title (original behavior)
-        detail_title = response.css('h1.topTitle::text').get()
-        if detail_title:
-            item['title'] = detail_title.strip()
+        # Always use _extract_content() if it returned anything.
+        # ContentEngine strips Arabic, so we must NOT fall back to auto_parse_item
+        # unless BS4 extraction returned empty.
+        if content:
+            title = (response.css('h1.topTitle::text').get()
+                     or response.css('title::text').get()
+                     or response.meta.get('title_hint', '')).strip()
 
-        item['author'] = 'Elnashra'
-        item['section'] = 'Important News'
+            meta_image = response.xpath("//meta[@property='og:image']/@content").get()
+            images = [response.urljoin(meta_image)] if meta_image else []
+
+            publish_time = response.meta.get('publish_time_hint')
+
+            item = {
+                'url': response.url,
+                'title': title,
+                'content_plain': content,
+                'content_html': f'<div class="article-content">{content}</div>',
+                'publish_time': publish_time,
+                'images': images,
+                'raw_html': response.text,
+                'language': self.language,
+                'section': 'Important News',
+                'country_code': self.country_code,
+                'country': self.country,
+            }
+            item['author'] = 'Elnashra'
+        else:
+            item = self.auto_parse_item(
+                response,
+                title_xpath="//h1[@class='topTitle']//text()",
+            )
+            # Detail page h1 title is preferred over listing title (original behavior)
+            detail_title = response.css('h1.topTitle::text').get()
+            if detail_title:
+                item['title'] = detail_title.strip()
+            item['author'] = 'Elnashra'
+            item['section'] = 'Important News'
 
         yield item

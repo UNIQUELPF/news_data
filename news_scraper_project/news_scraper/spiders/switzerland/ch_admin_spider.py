@@ -35,7 +35,7 @@ class ChAdminSpider(SmartSpider):
             "&sort=DESC"
         )
         url = f"{self.base_api}?{params}&offset=0"
-        yield scrapy.Request(url=url, callback=self.parse_api)
+        yield scrapy.Request(url=url, callback=self.parse_api, dont_filter=True)
 
     def parse_api(self, response):
         try:

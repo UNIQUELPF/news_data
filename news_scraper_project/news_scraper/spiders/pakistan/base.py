@@ -6,7 +6,6 @@ from datetime import datetime
 import dateparser
 import psycopg2
 import scrapy
-from news_scraper.items import NewsItem
 from news_scraper.utils import get_incremental_state
 from pypdf import PdfReader
 
@@ -78,16 +77,24 @@ class PakistanBaseSpider(scrapy.Spider):
             return self.default_cutoff
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = author
-        item["language"] = language
-        item["section"] = section
-        item["scrape_time"] = datetime.now()
-        return item
+        images = self._extract_og_image(response)
+        return {
+            "url": response.url,
+            "title": title,
+            "content_plain": content,
+            "content": content,
+            "images": images,
+            "publish_time": publish_time or datetime.now(),
+            "author": author,
+            "language": language,
+            "section": section,
+        }
+
+    def _extract_og_image(self, response):
+        img = response.xpath("//meta[@property='og:image']/@content").get()
+        if img:
+            return [response.urljoin(img)]
+        return []
 
     def _clean_text(self, value):
         if not value:

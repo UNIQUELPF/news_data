@@ -16,9 +16,9 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
     allowed_domains = ["afm.nl", "www.afm.nl"]
     start_urls = ["https://www.afm.nl/en/sector/actueel"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -37,6 +37,8 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
             except Exception:
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+            if self._stop_pagination:
+                break
             if item:
                 yield item
 
@@ -54,7 +56,7 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en", "nl"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, ["main", "article", ".article", ".content"])

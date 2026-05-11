@@ -1,6 +1,7 @@
 import scrapy
 import re
 from datetime import datetime
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -12,7 +13,7 @@ class RoWallstreetSpider(SmartSpider):
     source_timezone = 'Europe/Bucharest'
     start_date = '2024-01-01'
     allowed_domains = ["www.wall-street.ro"]
-    fallback_content_selector = '.article-content'
+    fallback_content_selector = '.article-content, article, main'
 
     use_curl_cffi = True
     strict_date_required = False
@@ -43,10 +44,11 @@ class RoWallstreetSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://www.wall-street.ro/articol/economie-and-finante/index.html",
-            callback=self.parse
+            callback=self.parse,
+        dont_filter=True,
         )
 
     def parse(self, response):
@@ -84,6 +86,32 @@ class RoWallstreetSpider(SmartSpider):
             next_page_url = f"https://www.wall-street.ro/articol/economie-and-finante/index.html?page={current_page + 1}"
             yield scrapy.Request(next_page_url, callback=self.parse)
 
+    def _extract_content(self, response):
+        """Extract article content via CSS selectors (ContentEngine/trafilatura misses this site).
+
+        DOM structure observed:
+          article > .article-section > section > .article-content.main-container
+        The plain .article-content selector only matches the ~200-char intro paragraph,
+        not the full body. We target the main section/article instead.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Try the main content area inside article, from most to least specific
+        root_el = (soup.select_one('article > .article-section > section')
+                   or soup.select_one('.article-content.main-container')
+                   or soup.select_one('.article-section')
+                   or soup.select_one('article')
+                   or soup.select_one('main'))
+        if not root_el:
+            return ''
+        for t in root_el(['script', 'style', 'nav', 'footer', 'aside']):
+            t.decompose()
+        parts = []
+        for node in root_el.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 20:
+                parts.append(text)
+        return '\n\n'.join(parts)
+
     def parse_article(self, response):
         # Custom Romanian date parsing
         date_str = response.css('.article-meta .date::text').get()
@@ -110,7 +138,34 @@ class RoWallstreetSpider(SmartSpider):
             except Exception:
                 self.logger.warning(f"RO_DATE Parse failed: {date_str}")
 
-        item = self.auto_parse_item(response)
+        # Direct content extraction via CSS selector (ContentEngine/trafilatura misses this site)
+        content = self._extract_content(response)
+
+        if content:
+            title = (response.css('h1::text').get()
+                     or response.css('title::text').get()
+                     or response.meta.get('title_hint', '')).strip()
+
+            meta_image = response.xpath("//meta[@property='og:image']/@content").get()
+            images = [response.urljoin(meta_image)] if meta_image else []
+
+            item = {
+                'url': response.url,
+                'title': title,
+                'content_plain': content,
+                'content_html': f'<div class="article-content">{content}</div>',
+                'publish_time': pub_date,
+                'images': images,
+                'raw_html': response.text,
+                'language': self.language,
+                'section': 'Economy',
+                'country_code': self.country_code,
+                'country': self.country,
+            }
+        else:
+            # Fall back to ContentEngine auto_parse_item
+            item = self.auto_parse_item(response)
+
         item['publish_time'] = pub_date or item.get('publish_time')
         item['author'] = 'Wall-Street.ro'
         item['section'] = 'Economy'

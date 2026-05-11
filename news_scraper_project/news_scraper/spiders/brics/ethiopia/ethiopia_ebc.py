@@ -20,7 +20,7 @@ class EthiopiaEBCSpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         # CatId=3 is usually News
         url = "https://www.ebc.et/Home/CategorialNews?CatId=3"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
@@ -103,14 +103,13 @@ class EthiopiaEBCSpider(SmartSpider):
 
         if has_valid_item_in_window and new_urls_on_this_page > 0:
             page = response.meta.get('page', 1)
-            if page < 100: # Safety limit
-                next_page = page + 1
-                next_url = f"https://www.ebc.et/Home/CategorialNews?CatId=3&page={next_page}"
-                yield scrapy.Request(
-                    next_url, 
-                    callback=self.parse_list, 
-                    meta={'page': next_page, 'seen_urls': seen_urls}
-                )
+            next_page = page + 1
+            next_url = f"https://www.ebc.et/Home/CategorialNews?CatId=3&page={next_page}"
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_list,
+                meta={'page': next_page, 'seen_urls': seen_urls}
+            )
         else:
             if new_urls_on_this_page == 0:
                 self.logger.info(f"Duplicate page detected at page {response.meta.get('page', 1)}. Stopping pagination.")

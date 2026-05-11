@@ -39,6 +39,7 @@ class IndonesiaBisnisSpider(SmartSpider):
         
         new_links_found = 0
         valid_article_links = []
+        has_valid_item_in_window = False
 
         for link in set(links):
             if '/read/' in link:
@@ -47,7 +48,7 @@ class IndonesiaBisnisSpider(SmartSpider):
                 publish_time_hint = self._extract_date_from_url(full_url)
                 
                 # CRITICAL: Early stop if date is behind cutoff
-                if publish_time_hint and not self.full_scan:
+                if publish_time_hint:
                     # Use date objects for clean, timezone-independent comparison
                     hint_date = publish_time_hint.date()
                     cutoff_date = self.cutoff_date.date()
@@ -58,6 +59,7 @@ class IndonesiaBisnisSpider(SmartSpider):
 
                 if self.should_process(full_url, publish_time_hint):
                     valid_article_links.append((full_url, publish_time_hint))
+                    has_valid_item_in_window = True
 
         for full_url, time_hint in valid_article_links:
             new_links_found += 1
@@ -67,15 +69,7 @@ class IndonesiaBisnisSpider(SmartSpider):
                 meta={'publish_time_hint': time_hint}
             )
         
-        # Stop pagination if:
-        # 1. We didn't find any new links (incremental sync complete)
-        # 2. OR we encountered an article older than cutoff (time-based sync complete)
-        # 3. BUT if full_scan is on, keep going until no more links
-        should_continue = (new_links_found > 0)
-        if self.full_scan and valid_article_links:
-            should_continue = True
-            
-        if should_continue and current_page < 100:
+        if has_valid_item_in_window:
             next_page = current_page + 1
             next_url = f"https://www.bisnis.com/index?categoryId=43&page={next_page}"
             yield scrapy.Request(

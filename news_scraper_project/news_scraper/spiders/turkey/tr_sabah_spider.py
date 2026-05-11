@@ -29,7 +29,7 @@ class TrSabahSpider(SmartSpider):
     fallback_content_selector = ".newsDetailText"
 
     async def start(self):
-        yield scrapy.Request('https://www.sabah.com.tr/ekonomi', callback=self.parse, meta={'page': 1})
+        yield scrapy.Request('https://www.sabah.com.tr/ekonomi', callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
         # 提取文章链接

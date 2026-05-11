@@ -15,31 +15,24 @@ class IqElaphSpider(SmartSpider):
 
     api_url_tmpl = "https://api.elaph.com/v2/web/com/marticles/index/economics/{}"
 
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     fallback_content_selector = '.content-body'
 
-    # Browser-like headers matching the chrome120 impersonation used by CurlCffiMiddleware.
-    # Accept / Accept-Language / User-Agent are stripped by the middleware and set by curl_cffi.
+    # Standard browser-like headers for the API request
     api_headers = {
         "Referer": "https://elaph.com/",
         "Origin": "https://elaph.com",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
+        "Accept": "application/json, text/plain, */*",
     }
 
     custom_settings = {
-        "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
-        },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
         "CONCURRENT_REQUESTS": 2,
-        "DOWNLOAD_DELAY": 1
+        "DOWNLOAD_DELAY": 1,
+        "USER_AGENT": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.api_url_tmpl.format(1),
             headers=self.api_headers,
@@ -91,7 +84,6 @@ class IqElaphSpider(SmartSpider):
                     'publish_time_hint': pub_date_utc,
                     'section_hint': 'Economics',
                 },
-                dont_filter=self.full_scan,
             )
 
         if has_valid_item_in_window:

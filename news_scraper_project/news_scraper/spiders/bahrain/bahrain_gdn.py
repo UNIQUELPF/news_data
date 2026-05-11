@@ -21,30 +21,39 @@ class BahrainGdnSpider(BahrainBaseSpider):
         "https://www.gdnonline.com/Section/4/Bahrain-Business",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         business_blocks = response.css(
             ".business-news a[href*='/Details/']::attr(href), "
             ".category-business a[href*='/Details/']::attr(href), "
             "a[href*='/Details/'][href*='Bahrain-']::attr(href)"
         ).getall()
         hrefs = business_blocks or response.css("a[href*='/Details/']::attr(href)").getall()
+        has_valid_item_in_window = self.full_scan
         for href in hrefs:
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls:
+            if not self.should_process(full_url):
                 continue
             self.seen_urls.add(full_url)
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            has_valid_item_in_window = True
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         data = self._extract_article_schema(response)
         title = self._clean_text(
             (data or {}).get("headline")
             or response.xpath("//meta[@property='og:title']/@content").get()
-            or response.css(".penci-post-title::text, .entry-title::text").get()
+            or response.css("h1.entry-title::text, .penci-entry-title::text").get()
             or response.css("h1::text").get()
             or response.css("title::text").get()
         )
@@ -58,11 +67,14 @@ class BahrainGdnSpider(BahrainBaseSpider):
             or response.xpath("//meta[contains(@property, 'published')]/@content").get()
             or response.xpath("//meta[contains(@name, 'publish')]/@content").get()
             or response.xpath("//meta[@property='article:published_time']/@content").get()
+            or self._clean_text(response.css("time:first-of-type ::text").get())
+            or self._clean_text(response.css(".entry-date.published ::text").get())
             or self._clean_text(" ".join(response.css(".entry-meta ::text, .penci-post-meta ::text").getall()))
             or self._clean_text(" ".join(response.css("body ::text").getall()[:80])),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._clean_text((data or {}).get("articleBody")) or self._extract_content(response, title)
@@ -80,6 +92,13 @@ class BahrainGdnSpider(BahrainBaseSpider):
             language="en",
             section="business",
         )
+
+    def should_process(self, url, publish_time=None):
+        if self.full_scan:
+            return True
+        if publish_time and publish_time < self.cutoff_date:
+            return False
+        return url not in self.seen_urls
 
     def _extract_article_schema(self, response):
         for raw in response.css('script[type="application/ld+json"]::text').getall():

@@ -2,6 +2,7 @@ import scrapy
 import jdatetime
 import re
 from datetime import datetime
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 class IranDonyaSpider(SmartSpider):
@@ -90,6 +91,34 @@ class IranDonyaSpider(SmartSpider):
         except:
             return 1
 
+    def _extract_content(self, response):
+        """Extract article content from #news-page-article via BS4.
+
+        DOM structure:
+          .news-page-content > article#news-page-article > p (multiple)
+
+        The default fallback '.news-text' does NOT match anything on this site.
+        ContentEngine/trafilatura strips Persian text, so BS4 extraction
+        is essential for this spider.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root_el = (soup.select_one('#news-page-article')
+                   or soup.select_one('.news-page-content')
+                   or soup.select_one('.news-body')
+                   or soup.select_one('article'))
+        if not root_el:
+            return ''
+
+        for tag in root_el.find_all(['script', 'style', 'nav', 'footer', 'aside', 'header']):
+            tag.decompose()
+
+        parts = []
+        for node in root_el.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 5:
+                parts.append(text)
+        return '\n\n'.join(parts)
+
     def parse_detail(self, response):
         # Extract date first for should_process
         # Machine-readable time tag is preferred
@@ -97,7 +126,7 @@ class IranDonyaSpider(SmartSpider):
         publish_time = None
         if publish_time_str:
             publish_time = self.parse_date(publish_time_str)
-        
+
         if not publish_time:
             # Fallback to Persian date in text
             header_date_match = response.xpath('//*[contains(text(), "۱۴۰")]/text()').re(r'\d{4}/\d{2}/\d{2}')
@@ -116,32 +145,57 @@ class IranDonyaSpider(SmartSpider):
         if not self.should_process(response.url, publish_time):
             return
 
-        # Use auto_parse_item but provide some hints or overrides if needed
-        item = self.auto_parse_item(
-            response,
-            publish_time_xpath="//time[@itemprop='datepublished']/@datetime",
-            title_xpath="//h1/text()",
-        )
-        
-        # Override publish_time if we found it manually
-        if publish_time:
-            item['publish_time'] = publish_time
-            
-        # Ensure og:image is prioritized
-        og_image = response.xpath("//meta[@property='og:image']/@content").get()
-        if og_image:
-            if 'images' not in item or not item['images']:
-                item['images'] = [og_image]
-            elif og_image not in item['images']:
-                item['images'].insert(0, og_image)
+        # Custom BS4 extraction (the default .news-text fallback selector does not exist)
+        content = self._extract_content(response)
 
-        # Clean up images list to be pure strings
-        if 'images' in item and item['images']:
-            item['images'] = [img if isinstance(img, str) else img.get('url') for img in item['images'] if img]
+        if content and len(content) > 100:
+            title = (response.css('h1::text').get()
+                     or response.css('title::text').get()
+                     or response.meta.get('title_hint', '')).strip()
+
+            og_image = response.xpath("//meta[@property='og:image']/@content").get()
+            images = [response.urljoin(og_image)] if og_image else []
+
+            item = {
+                'url': response.url,
+                'title': title,
+                'content_plain': content,
+                'content_html': f'<div class="article-content">{content}</div>',
+                'publish_time': publish_time,
+                'images': images,
+                'raw_html': response.text,
+                'language': self.language,
+                'section': 'Economy',
+                'country_code': self.country_code,
+                'country': self.country,
+            }
+        else:
+            # Use auto_parse_item but provide some hints or overrides if needed
+            item = self.auto_parse_item(
+                response,
+                publish_time_xpath="//time[@itemprop='datepublished']/@datetime",
+                title_xpath="//h1/text()",
+            )
+
+            # Override publish_time if we found it manually
+            if publish_time:
+                item['publish_time'] = publish_time
+
+            # Ensure og:image is prioritized
+            og_image = response.xpath("//meta[@property='og:image']/@content").get()
+            if og_image:
+                if 'images' not in item or not item['images']:
+                    item['images'] = [og_image]
+                elif og_image not in item['images']:
+                    item['images'].insert(0, og_image)
+
+            # Clean up images list to be pure strings
+            if 'images' in item and item['images']:
+                item['images'] = [img if isinstance(img, str) else img.get('url') for img in item['images'] if img]
 
         item['author'] = 'Donya-e-Eqtesad'
         item['section'] = 'Economy'
-        
+
         yield item
 
     def _parse_persian_date(self, date_str):

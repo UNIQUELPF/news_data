@@ -15,9 +15,9 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
     country = '比利时'
     allowed_domains = ["belgium.be", "www.belgium.be"]
     start_urls = ["https://www.belgium.be/en/News/overview?f%5B0%5D=theme%3A56"]
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -48,7 +48,7 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
 
         node_text = self._clean_text(" ".join(response.css(".node ::text, main ::text").getall()[:120]))
         publish_time = self._parse_datetime(node_text, languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

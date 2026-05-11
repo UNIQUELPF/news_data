@@ -32,7 +32,7 @@ class IndiaEconomicTimesSpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         for section_name, msid in self.SECTIONS:
             # Lazyload URL format: lazyloadlistnew.cms?msid={msid}&curpg={page}&img=1
             list_url = f"https://economictimes.indiatimes.com/lazyloadlistnew.cms?msid={msid}&curpg=1&img=1"

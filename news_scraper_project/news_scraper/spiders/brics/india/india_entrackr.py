@@ -22,7 +22,7 @@ class IndiaEntrackrSpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         url = 'https://entrackr.com/news'
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 

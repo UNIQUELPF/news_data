@@ -1,4 +1,5 @@
 import scrapy
+from bs4 import BeautifulSoup
 from datetime import datetime
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -25,7 +26,7 @@ class UzAnhorSpider(SmartSpider):
     }
 
     use_curl_cffi = True
-    fallback_content_selector = ".entry-content"
+    fallback_content_selector = ".article__content, #article-content"
     strict_date_required = True
 
     async def start(self):
@@ -97,12 +98,45 @@ class UzAnhorSpider(SmartSpider):
                 meta={"page": next_page},
             )
 
+    def _extract_content(self, response):
+        """Extract article content via BS4 when ContentEngine returns nothing.
+
+        The article page is WordPress-based with content in div.article__content.
+        The .entry-content class (WordPress default) is not used by this theme.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root_el = (soup.select_one('.article__content')
+                   or soup.select_one('#article-content')
+                   or soup.select_one('.article__body'))
+        if not root_el:
+            self.logger.warning("Could not find article content container")
+            return ''
+        for t in root_el(['script', 'style', 'nav', 'footer', 'aside', 'button', 'form']):
+            t.decompose()
+        parts = []
+        for node in root_el.find_all(['p', 'h2', 'h3', 'li', 'blockquote']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 10:
+                parts.append(text)
+        extracted = '\n\n'.join(parts)
+        self.logger.info(f"BS4 extracted {len(extracted)} chars from article__content")
+        return extracted
+
     def parse_detail(self, response):
         """Parse article detail page using SmartSpider auto extraction."""
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text() | //*[contains(@class, 'entry-title')]/text()",
         )
+
+        # If ContentEngine returned empty or negligible content, use BS4 extraction
+        if not item.get('content_plain') or len(item['content_plain']) < 50:
+            content = self._extract_content(response)
+            if content:
+                item['content_plain'] = content
+                item['content_cleaned'] = f'<div>{content}</div>'
+                item['content_markdown'] = content
+                self.logger.info(f"Overrode empty ContentEngine result with BS4 extraction ({len(content)} chars)")
 
         item["author"] = "Anhor.uz Economy"
         item["section"] = "Economy"

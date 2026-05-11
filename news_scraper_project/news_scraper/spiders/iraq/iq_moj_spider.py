@@ -30,7 +30,7 @@ class IqMojSpider(SmartSpider):
         "DOWNLOAD_DELAY": 1
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             url="https://www.moj.gov.iq/news/",
             callback=self.parse,

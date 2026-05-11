@@ -12,12 +12,12 @@ class QatarQcbSpider(QatarBaseSpider):
     allowed_domains = []
     start_urls = ["https://www.qcb.gov.qa/en/News/Pages/default.aspx"]
 
-    def start_requests(self):
+    async def start(self):
         for suffix in ["10apr2.aspx", "september4.aspx", "6jan1.aspx", "16march1.aspx", "january2.aspx", "11july1.aspx"]:
             url = f"https://www.qcb.gov.qa/en/News/Pages/{suffix}"
             if not self.should_process(url):
                 continue
-            yield scrapy.Request(url, callback=self.parse_detail)
+            yield scrapy.Request(url, callback=self.parse_detail, dont_filter=True)
 
     def parse_detail(self, response):
         if "error.aspx" in response.url.lower():

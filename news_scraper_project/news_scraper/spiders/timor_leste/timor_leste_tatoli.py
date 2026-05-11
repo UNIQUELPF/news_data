@@ -16,27 +16,34 @@ class TimorLesteTatoliSpider(TimorLesteBaseSpider):
 
     country = '东帝汶'
     allowed_domains = ["en.tatoli.tl", "tatoli.tl"]
+    fallback_content_selector = "article"
     start_urls = ["https://en.tatoli.tl/"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         html = self._fetch_html(self.start_urls[0])
+        has_valid_item_in_window = False
         for full_url in sorted(set(re.findall(r"https://en\.tatoli\.tl/\d{4}/\d{2}/\d{2}/[^\"' ]+", html))):
             full_url = full_url.rstrip("/")
             if not self.should_process(full_url):
                 continue
             year_match = re.search(r"/(20\d{2})/", full_url)
-            if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
+            if year_match and int(year_match.group(1)) < self.cutoff_date.year:
                 continue
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+            if self._stop_pagination:
+                break
             if item:
+                has_valid_item_in_window = True
                 yield item
 
     def parse_detail(self, response):
@@ -53,7 +60,8 @@ class TimorLesteTatoliSpider(TimorLesteBaseSpider):
             or " ".join(response.css("body ::text").getall()[:100]),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
         content = self._extract_content(response, title)
         if not content:

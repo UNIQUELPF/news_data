@@ -25,7 +25,7 @@ class GrMinfinSpider(SmartSpider):
     # 财政部新闻大厅
     base_url = 'https://minfin.gov.gr/grafeio-typou/anakoinoseis-typou-el/page/{}/'
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.base_url.format(1),
             callback=self.parse,

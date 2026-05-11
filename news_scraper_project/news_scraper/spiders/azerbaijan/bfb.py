@@ -33,7 +33,7 @@ class BfbSpider(SmartSpider):
         'sentyabr': 9, 'oktyabr': 10, 'noyabr': 11, 'dekabr': 12
     }
 
-    fallback_content_selector = ".main_press_container, .post_content, article"
+    fallback_content_selector = ".main_press_container, .post_content, article, main"
 
     def parse(self, response):
         """Parses the press release list page."""

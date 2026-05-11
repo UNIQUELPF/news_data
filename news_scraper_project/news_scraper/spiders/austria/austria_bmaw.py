@@ -23,12 +23,18 @@ class AustriaBmawSpider(AustriaBaseSpider):
     start_urls = [
         "https://www.bmaw.gv.at/Presse/AktuellePressemeldungen.html",
     ]
+    fallback_content_selector = "article, main"
+    strict_date_required = False
 
-    def start_requests(self):
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+        has_valid_item_in_window = self.full_scan
         links = response.css('a[href*="/Presse/AktuellePressemeldungen/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
@@ -36,14 +42,22 @@ class AustriaBmawSpider(AustriaBaseSpider):
                 continue
             if not full_url.endswith(".html"):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
+
         archive_links = response.css('a[href*="/Presse/Archiv/"]::attr(href)').getall()
+        has_valid_item_in_window = self.full_scan
         for href in archive_links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_archive)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_archive(self, response):
         links = response.css('a[href*="/Presse/AktuellePressemeldungen/"]::attr(href), a[href*="/Presse/Archiv/"]::attr(href)').getall()
@@ -69,7 +83,8 @@ class AustriaBmawSpider(AustriaBaseSpider):
             or response.re_first(r"(\d{4}-\d{2}-\d{2})"),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

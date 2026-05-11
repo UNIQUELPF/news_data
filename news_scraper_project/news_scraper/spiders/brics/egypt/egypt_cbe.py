@@ -17,7 +17,7 @@ class EgyptCbeSpider(SmartSpider):
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".cbe-rich-text, .content, .details, article, .news-details, #main-content"
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.cbe.org.eg/sitemap.xml"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
 

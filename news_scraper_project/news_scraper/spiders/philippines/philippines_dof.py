@@ -18,9 +18,9 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
     allowed_domains = ["dof.gov.ph", "www.dof.gov.ph"]
     start_urls = ["https://www.dof.gov.ph/news/"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -59,12 +59,12 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
                 else ""
             )
             publish_time = self._parse_datetime(publish_text, languages=["en"])
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
 
             if not self.should_process(href):
                 continue
-            yield scrapy.Request(href, callback=self.parse_detail)
+            yield scrapy.Request(href, callback=self.parse_detail, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -80,7 +80,7 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
             or self._clean_text(" ".join(response.css("main ::text, article ::text").getall()[:120])),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, title)

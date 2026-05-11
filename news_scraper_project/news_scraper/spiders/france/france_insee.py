@@ -15,12 +15,13 @@ class FranceInseeSpider(FranceBaseSpider):
     country_code = 'FRA'
 
     country = '法国'
+    fallback_content_selector = "main, article"
     allowed_domains = ["insee.fr", "www.insee.fr"]
     start_urls = ["https://www.insee.fr/fr/accueil"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -55,7 +56,7 @@ class FranceInseeSpider(FranceBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["fr", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, title)
@@ -83,9 +84,9 @@ class FranceInseeSpider(FranceBaseSpider):
             unwanted.decompose()
         title_text = self._clean_text(title)
         parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
+        for node in root.find_all(["p", "li", "h2", "h3"], recursive=True):
             text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 35 or text == title_text:
+            if not text or len(text) < 20 or text == title_text:
                 continue
             if text.startswith("Source :") or text.startswith("Partager"):
                 continue

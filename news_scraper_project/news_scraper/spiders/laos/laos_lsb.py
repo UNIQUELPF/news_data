@@ -13,8 +13,8 @@ class LaosLsbSpider(LaosBaseSpider):
     allowed_domains = ["www.lsb.gov.la", "lsb.gov.la"]
     api_url = "https://www.lsb.gov.la/index.php?rest_route=/wp/v2/posts&per_page=12"
 
-    def start_requests(self):
-        yield scrapy.Request(self.api_url, callback=self.parse_api)
+    async def start(self):
+        yield scrapy.Request(self.api_url, callback=self.parse_api, dont_filter=True)
 
     def parse_api(self, response):
         try:
@@ -30,7 +30,7 @@ class LaosLsbSpider(LaosBaseSpider):
 
             publish_time = self._parse_datetime(post.get("date"), languages=["en"])
             if not self.should_process(url, publish_time):
-                continue
+                break
 
             title = self._clean_html(post.get("title", {}).get("rendered"))
             content = self._clean_html(post.get("content", {}).get("rendered"))

@@ -73,8 +73,9 @@ class IndiaGadgets360Spider(SmartSpider):
             base_url = response.meta.get('base_url')
             next_url = f"{base_url}?pagesize=20&page={next_page}&content_type=news&isAjax=1"
             yield scrapy.Request(
-                next_url, 
-                callback=self.parse_list, 
+                next_url,
+                callback=self.parse_list,
+                dont_filter=True,
                 meta={'page': next_page, 'base_url': base_url},
                 headers={'X-Requested-With': 'XMLHttpRequest'}
             )

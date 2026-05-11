@@ -28,7 +28,7 @@ class TrTbmmSpider(SmartSpider):
     fallback_content_selector = "div#haber-detay-aciklama"
 
     async def start(self):
-        yield scrapy.Request(self.base_url.format(0), callback=self.parse, meta={'page': 0})
+        yield scrapy.Request(self.base_url.format(0), callback=self.parse, meta={'page': 0}, dont_filter=True)
 
     def parse(self, response):
         # 精准匹配含有 Haber/Detay (新闻详情) 的 Id 链接

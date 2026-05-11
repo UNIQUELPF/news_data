@@ -55,7 +55,7 @@ class PortugalCMSpider(SmartSpider):
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1/text()",
+            title_xpath="//meta[@property='og:title']/@content",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
         item['author'] = 'Correio da Manhã'

@@ -15,9 +15,9 @@ class CambodiaNisSpider(CambodiaBaseSpider):
     start_urls = ["data:,cambodia_nis_start"]
     feed_url = "https://www.nis.gov.kh/en/feed/"
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         xml = self._fetch_html(self.feed_url)
@@ -33,7 +33,7 @@ class CambodiaNisSpider(CambodiaBaseSpider):
             )
             if not url or not title:
                 continue
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
             if not self.should_process(url):
                 continue
@@ -62,7 +62,7 @@ class CambodiaNisSpider(CambodiaBaseSpider):
         if not title:
             return
         publish_time = fallback_publish_time
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, ["main", ".site-content", "body"])
         if not content:

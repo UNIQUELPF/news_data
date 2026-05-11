@@ -33,7 +33,7 @@ class LebanonNnaSpider(SmartSpider):
         "DOWNLOAD_FAIL_ON_DATALOSS": False
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://backend.nna-leb.gov.lb/api/ar/news/latest?category_id=4&page=1",
             callback=self.parse_list,

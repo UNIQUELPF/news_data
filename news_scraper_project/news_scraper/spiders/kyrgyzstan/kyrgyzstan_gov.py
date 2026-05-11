@@ -20,9 +20,9 @@ class KyrgyzstanGovSpider(KyrgyzstanBaseSpider):
         "https://www.gov.kg/en/post/c/press",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         emitted = 0
@@ -56,7 +56,7 @@ class KyrgyzstanGovSpider(KyrgyzstanBaseSpider):
             self._extract_first_match(response.text, r"(\d{1,2}\s+[A-Za-zА-Яа-яЁё]+\s+\d{4})"),
             languages=["en", "ru"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, ["main"])

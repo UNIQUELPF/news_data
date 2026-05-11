@@ -3,6 +3,7 @@ import json
 import re
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -29,7 +30,7 @@ class GouvernementSpider(SmartSpider):
         "search.searchresults-content.html?format=json&page={}"
     )
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.base_url.format(1),
             callback=self.parse_list,
@@ -115,7 +116,60 @@ class GouvernementSpider(SmartSpider):
         else:
             self.logger.info(f"Reached cutoff or end of content at page {page}")
 
+    def _extract_content(self, response):
+        """Extract article content from all div.cmp-text blocks inside the main section.
+
+        DOM structure:
+          main > section.cmp-section (the second one, containing the article body)
+            > div.cmp-section__content > div.aem-GridColumn > div.cmp-text (multiple)
+
+        The default fallback 'div.cmp-text' only matches the first block (intro paragraph).
+        We concatenate all cmp-text blocks for the full article.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Find all cmp-text blocks inside main
+        text_blocks = soup.select('main div.cmp-text')
+        if not text_blocks:
+            return ''
+
+        parts = []
+        for block in text_blocks:
+            for tag in block.find_all(['script', 'style']):
+                tag.decompose()
+            text = block.get_text(separator=' ', strip=True)
+            if text:
+                parts.append(text)
+
+        return '\n\n'.join(parts)
+
     def parse_article(self, response):
-        item = self.auto_parse_item(response)
+        content = self._extract_content(response)
+
+        if content and len(content) > 100:
+            title = (response.css('h1::text').get()
+                     or response.css('title::text').get()
+                     or response.meta.get('title_hint', '')).strip()
+
+            meta_image = response.xpath("//meta[@property='og:image']/@content").get()
+            images = [response.urljoin(meta_image)] if meta_image else []
+
+            publish_time = response.meta.get('publish_time_hint')
+
+            item = {
+                'url': response.url,
+                'title': title,
+                'content_plain': content,
+                'content_html': f'<div class="article-content">{content}</div>',
+                'publish_time': publish_time,
+                'images': images,
+                'raw_html': response.text,
+                'language': self.language,
+                'section': response.meta.get('section_hint', 'news'),
+                'country_code': self.country_code,
+                'country': self.country,
+            }
+        else:
+            item = self.auto_parse_item(response)
+
         item['author'] = ''
         yield item

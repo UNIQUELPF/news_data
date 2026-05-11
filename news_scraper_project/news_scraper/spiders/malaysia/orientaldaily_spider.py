@@ -15,7 +15,7 @@ class OrientalDailySpider(SmartSpider):
     start_date = "2026-01-01"
     use_curl_cffi = True
 
-    fallback_content_selector = 'div.article'
+    fallback_content_selector = '[itemprop="articleBody"]'
 
     allowed_domains = ["orientaldaily.com.my"]
 

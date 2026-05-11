@@ -25,13 +25,14 @@ class UaeWamSpider(SmartSpider):
         'RANDOMIZE_DOWNLOAD_DELAY': True,
     }
 
-    def start_requests(self):
+    async def start(self):
         # WAM is API-based, so we bypass normal start_urls
         yield scrapy.Request(
             url=f"{self.list_url}?url=ar/list/latest-news",
             callback=self.parse_api_list,
             headers={"Accept": "application/json"},
-            meta={'page': 0}
+            meta={'page': 0},
+        dont_filter=True,
         )
 
     def parse_api_list(self, response):

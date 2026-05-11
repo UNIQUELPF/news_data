@@ -16,10 +16,15 @@ class KuwaitMociSpider(KuwaitBaseSpider):
     start_urls = ["https://www.moci.gov.kw/en/media/economic-newsletter/"]
 
     def parse(self, response):
-        for href in response.css("a[href*='/en/media/economic-newsletter/economic-']::attr(href)").getall():
-            url = response.urljoin(href)
-            if not self.should_process(url):
+        current_year = datetime.now().year
+        for href in response.css("a[href*='/en/media/economic-newsletter/']::attr(href)").getall():
+            year_match = re.search(r"(20\d{2})", href)
+            if not year_match:
                 continue
+            year = int(year_match.group(1))
+            if year < current_year:
+                continue
+            url = response.urljoin(href)
             yield scrapy.Request(url, callback=self.parse_year)
 
     def parse_year(self, response):
@@ -28,8 +33,6 @@ class KuwaitMociSpider(KuwaitBaseSpider):
 
         for href in response.css("a[href$='.pdf']::attr(href), a[href*='.pdf?']::attr(href)").getall():
             url = response.urljoin(href)
-            if not self.should_process(url):
-                continue
             yield scrapy.Request(url, callback=self.parse_pdf, cb_kwargs={"year": year})
 
     def parse_pdf(self, response, year=None):

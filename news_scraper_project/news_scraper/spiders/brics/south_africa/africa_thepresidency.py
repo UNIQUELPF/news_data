@@ -24,9 +24,9 @@ class AfricaThePresidencySpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.thepresidency.gov.za/speeches-statements-advisories?page=0"
-        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 0})
+        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 0}, dont_filter=True)
 
     def parse_list(self, response):
         articles = response.css('.ssa-grid-view-row, div.views-row, article, li.views-row')

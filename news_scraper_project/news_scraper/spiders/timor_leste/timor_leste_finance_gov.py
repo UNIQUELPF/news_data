@@ -17,16 +17,20 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
     verify_ssl = False
     api_url = "https://mofwebadmin.mof.gov.tl/api/publications"
     base_domain = "https://mofwebadmin.mof.gov.tl"
+    fallback_content_selector = "article, main"
 
-    def start_requests(self):
-        yield scrapy.Request("https://www.mof.gov.tl/", callback=self.parse_listing)
+    async def start(self):
+        yield scrapy.Request("https://www.mof.gov.tl/", callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         try:
             payload = self._fetch_json(self.api_url)
         except Exception:
             return
 
+        has_valid_item_in_window = False
         for row in payload.get("data", []):
             attrs = row.get("attributes", {})
             title = self._clean_text(attrs.get("title"))
@@ -36,8 +40,9 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 attrs.get("publishedAt") or attrs.get("updatedAt") or attrs.get("createdAt"),
                 languages=["en", "pt"],
             )
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-                continue
+            if not self.should_process(response.url, publish_time):
+                self._stop_pagination = True
+                break
             description = attrs.get("description") or ""
             links = re.findall(r'href="([^"]+\.pdf)"', description, flags=re.I)
             if not links:
@@ -46,6 +51,7 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 full_url = href if href.startswith("http") else f"{self.base_domain}{href}"
                 if not self.should_process(full_url):
                     continue
+                has_valid_item_in_window = True
                 yield scrapy.Request(
                     full_url,
                     callback=self.parse_pdf,

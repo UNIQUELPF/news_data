@@ -1,12 +1,10 @@
 # 阿根廷lanacion爬虫，负责抓取对应站点、机构或栏目内容。
 
-from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
 from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 
 # 阿根廷经济类来源
 # 站点：La Nacion
@@ -47,9 +45,9 @@ class ArgentinaLaNacionSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_feed)
+            yield scrapy.Request(url, callback=self.parse_feed, dont_filter=True)
 
     def parse_feed(self, response):
         # 直接从经济 RSS 读取标题、时间、正文和作者，绕开付费墙干扰。
@@ -61,7 +59,7 @@ class ArgentinaLaNacionSpider(SmartSpider):
                 continue
 
             publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
 
             title = self._clean_text(item.xpath("./title/text()").get())
@@ -76,16 +74,38 @@ class ArgentinaLaNacionSpider(SmartSpider):
                 item.xpath("./dc:creator/text()", namespaces={"dc": "http://purl.org/dc/elements/1.1/"}).get()
             ) or "La Nacion"
 
-            news_item = NewsItem()
-            news_item["url"] = url
-            news_item["title"] = title
-            news_item["content"] = content
-            news_item["publish_time"] = publish_time or datetime.now()
-            news_item["author"] = author
-            news_item["language"] = "es"
-            news_item["section"] = "economia"
-            news_item["scrape_time"] = datetime.now()
-            yield news_item
+            meta = {
+                "rss_title": title,
+                "rss_content": content,
+                "rss_publish_time": publish_time,
+                "rss_author": author,
+            }
+            yield scrapy.Request(url, callback=self.parse_detail, meta=meta)
+
+    def parse_detail(self, response):
+        item = self.auto_parse_item(response)
+        if not item.get("title"):
+            item["title"] = response.meta.get("rss_title")
+        if not item.get("content_plain"):
+            item["content_plain"] = response.meta.get("rss_content")
+        if not item.get("publish_time"):
+            item["publish_time"] = response.meta.get("rss_publish_time")
+
+        if not item.get("title") or not item.get("content_plain"):
+            return
+
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
+            return
+
+        # Spider-specific overrides
+        item["author"] = response.meta.get("rss_author", "La Nacion")
+        item["section"] = "economia"
+        item["language"] = "es"
+
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
     def _parse_rss_datetime(self, value):
         if not value:

@@ -1,16 +1,12 @@
 # 阿曼daily爬虫，负责抓取对应站点、机构或栏目内容。
 
+import re
+
 from bs4 import BeautifulSoup
 
 import scrapy
 
 from news_scraper.spiders.oman.base import OmanBaseSpider
-
-
-# 阿曼经济类来源
-# 站点：Oman Daily
-# 入库表：omn_oman_daily
-# 语言：阿拉伯语
 
 
 class OmanDailySpider(OmanBaseSpider):
@@ -23,29 +19,39 @@ class OmanDailySpider(OmanBaseSpider):
 
     name = "oman_daily"
 
-
     country_code = 'OMN'
-
 
     country = '阿曼'
     allowed_domains = ["omandaily.om", "www.omandaily.om"]
     start_urls = [
         "https://www.omandaily.om/morearticles/%D8%A7%D9%84%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF%D9%8A%D8%A9",
     ]
+    strict_date_required = False
 
-    def start_requests(self):
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True})
+            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True}, dont_filter=True)
 
     def parse_listing(self, response):
-        links = response.css("a::attr(href)").getall()
-        for href in links:
+        if self._stop_pagination:
+            return
+        for href in response.css("a::attr(href)").getall():
             full_url = response.urljoin(href)
             if "/%D8%A7%D9%84%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF%D9%8A%D8%A9/na/" not in full_url and "/الاقتصادية/na/" not in full_url:
                 continue
             if not self.should_process(full_url):
                 continue
             yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
+
+        if not self._stop_pagination:
+            current_pgno = int(re.search(r"pgno=(\d+)", response.url).group(1)) if "pgno=" in response.url else 1
+            next_pgno = current_pgno + 1
+            for a in response.css(".pagination a"):
+                href = a.css("::attr(href)").get()
+                if href and f"pgno={next_pgno}" in href:
+                    yield response.follow(href, callback=self.parse_listing, meta={"dont_verify_ssl": True})
+                    break
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -63,7 +69,8 @@ class OmanDailySpider(OmanBaseSpider):
             "".join(response.xpath("//body//text()[contains(., '2026') or contains(., '2025')][1]").getall()),
             languages=["ar"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
+            self._stop_pagination = True
             return
 
         yield self._build_item(

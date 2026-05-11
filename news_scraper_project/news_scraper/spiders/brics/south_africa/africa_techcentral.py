@@ -24,9 +24,9 @@ class AfricaTechCentralSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://techcentral.co.za/category/news/page/1/"
-        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1})
+        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1}, dont_filter=True)
 
     def parse_list(self, response):
         articles = response.css('article')

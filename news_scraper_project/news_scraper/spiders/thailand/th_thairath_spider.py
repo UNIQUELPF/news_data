@@ -2,6 +2,7 @@ import scrapy
 import json
 from datetime import datetime
 from scrapy.selector import Selector
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -30,7 +31,8 @@ class ThThairathSpider(SmartSpider):
         yield scrapy.Request(
             self.base_url.format(1),
             callback=self.parse,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse(self, response):
@@ -121,10 +123,9 @@ class ThThairathSpider(SmartSpider):
                 if not self.should_process(response.url, pub_time):
                     return
 
-                # Clean content from HTML
-                sel = Selector(text=content_html)
-                content_parts = [p.strip() for p in sel.css('p::text, div::text').getall() if p.strip()]
-                content = "\n\n".join(content_parts)
+                # Clean content from HTML: get ALL text, including nested elements
+                soup = BeautifulSoup(content_html, 'lxml')
+                content = soup.get_text(separator=' ', strip=True)
 
                 # Extract image
                 images = []

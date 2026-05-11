@@ -23,11 +23,12 @@ class MyanmarElevenSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             f"{self.start_urls[0]}?page=0",
             callback=self.parse_list,
-            meta={'page': 0}
+            meta={'page': 0},
+        dont_filter=True,
         )
 
     def parse_list(self, response):

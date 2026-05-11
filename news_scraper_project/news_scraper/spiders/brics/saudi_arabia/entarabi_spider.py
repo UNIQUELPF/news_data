@@ -21,7 +21,7 @@ class EntarabiSpider(SmartSpider):
         "RANDOMIZE_DOWNLOAD_DELAY": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://entarabi.com/wp-json/wp/v2/posts?page=1&per_page=100&_embed=1"
         yield scrapy.Request(
             url=url,

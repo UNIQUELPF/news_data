@@ -6,8 +6,6 @@ from datetime import datetime
 import dateparser
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 from pypdf import PdfReader
 
 # 阿尔及利亚政府/监管类来源
@@ -37,6 +35,8 @@ class AlgeriaCosobSpider(SmartSpider):
     start_date = "2026-01-01"
     allowed_domains = ["cosob.dz"]
 
+    fallback_content_selector = ".entry-content, article"
+
     start_urls = [
         "https://cosob.dz/category/actualites/",
     ]
@@ -45,13 +45,14 @@ class AlgeriaCosobSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         article_links = response.css("article a[href], .rtin-item a[href], .entry-title a[href]")
 
+        has_valid_item_in_window = False
         for link in article_links:
             href = link.attrib.get("href")
             if not href:
@@ -64,45 +65,40 @@ class AlgeriaCosobSpider(SmartSpider):
                 or "/author/" in full_url
             ):
                 continue
+            has_valid_item_in_window = True
             if full_url.lower().endswith(".pdf"):
-                yield scrapy.Request(full_url, callback=self.parse_pdf, cb_kwargs={"title": title})
+                yield scrapy.Request(full_url, callback=self.parse_pdf, cb_kwargs={"title": title}, dont_filter=self.full_scan)
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
-        if self.reached_cutoff:
+        if self._stop_pagination:
             return
 
-        next_page = response.css("a.next.page-numbers::attr(href), a[rel='next']::attr(href)").get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse_listing)
+        if has_valid_item_in_window:
+            next_page = response.css("a.next.page-numbers::attr(href), a[rel='next']::attr(href)").get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
 
     def parse_detail(self, response):
         if not isinstance(response, scrapy.http.TextResponse):
             return
 
-        title = self._clean_text(response.css("h1::text").get() or response.xpath("//meta[@property='og:title']/@content").get())
-        if not title:
+        item = self.auto_parse_item(response)
+        if not item.get("title") or not item.get("content_plain"):
             return
 
-        publish_time = self._extract_publish_time(response)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-            self.reached_cutoff = True
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response, title)
-        if not content:
-            return
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
+        # Spider-specific overrides
         item["author"] = "COSOB"
-        item["language"] = "fr"
         item["section"] = "actualites"
-        item["scrape_time"] = datetime.now()
-        yield item
+        item["language"] = "fr"
+
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
     def parse_pdf(self, response, title):
         content = self._extract_pdf_text(response.body)
@@ -110,46 +106,22 @@ class AlgeriaCosobSpider(SmartSpider):
             content = title
 
         publish_time = self._parse_datetime(title) or self._parse_datetime(response.url)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-            self.reached_cutoff = True
+        if publish_time and publish_time < self.cutoff_date:
+            self._stop_pagination = True
             return
 
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = "COSOB"
-        item["language"] = "fr"
-        item["section"] = "actualites"
-        item["scrape_time"] = datetime.now()
+        item = {
+            "url": response.url,
+            "title": title,
+            "content": content,
+            "content_plain": content,
+            "publish_time": publish_time or datetime.now(),
+            "author": "COSOB",
+            "language": "fr",
+            "section": "actualites",
+            "scrape_time": datetime.now(),
+        }
         yield item
-
-    def _extract_publish_time(self, response):
-        value = response.xpath("//meta[@property='article:published_time']/@content").get()
-        if not value:
-            value = self._clean_text(" ".join(response.css("article ::text").getall()[:40]))
-        return self._parse_datetime(value)
-
-    def _extract_content(self, response, title):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one(".entry-content") or soup.select_one("article")
-        if not root:
-            return ""
-
-        for unwanted in root.select("script, style, nav, footer, header, aside, form, figure, .share"):
-            unwanted.decompose()
-
-        parts = []
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 12:
-                continue
-            if text == title:
-                continue
-            if text not in parts:
-                parts.append(text)
-        return "\n\n".join(parts)
 
     def _parse_datetime(self, value):
         if not value:

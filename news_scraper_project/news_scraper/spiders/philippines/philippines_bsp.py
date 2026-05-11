@@ -17,12 +17,13 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
     api_base = "https://www.bsp.gov.ph/_api/web/lists/getbytitle('Media Releases and Advisories')/items"
     start_urls = [f"{api_base}?$select=ID,Title,PDate&$orderby=PDate desc&$top=20"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(
                 url,
                 callback=self.parse_listing,
                 headers={"Accept": "application/json;odata=verbose"},
+            dont_filter=True,
             )
 
     def parse_listing(self, response):
@@ -33,7 +34,7 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
             publish_time = self._parse_datetime(row.get("PDate"), languages=["en"])
             if not item_id or not title:
                 continue
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
 
             detail_url = (
@@ -44,7 +45,7 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
                 f"{self.api_base}({item_id})"
                 "?$select=Title,PDate,Content"
             )
-            if not self.should_process(detail_url):
+            if not self.should_process(detail_url, publish_time):
                 continue
             yield scrapy.Request(
                 api_url,
@@ -60,7 +61,7 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
             return
 
         publish_time = self._parse_datetime(row.get("PDate"), languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._clean_text(self._html_to_text(row.get("Content") or ""))

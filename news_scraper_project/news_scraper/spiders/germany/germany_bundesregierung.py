@@ -18,9 +18,9 @@ class GermanyBundesregierungSpider(GermanyBaseSpider):
     allowed_domains = ["bundesregierung.de", "www.bundesregierung.de"]
     start_urls = ["https://www.bundesregierung.de/breg-en/news"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -52,7 +52,7 @@ class GermanyBundesregierungSpider(GermanyBaseSpider):
             ),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

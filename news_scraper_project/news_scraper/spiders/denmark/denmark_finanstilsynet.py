@@ -20,9 +20,9 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
     allowed_domains = ["finanstilsynet.dk", "www.finanstilsynet.dk"]
     start_urls = ["https://www.finanstilsynet.dk/nyheder-og-presse/nyheder-og-pressemeddelelser"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html_text = self._fetch_html(self.start_urls[0])
@@ -68,7 +68,7 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             date_node = card.select_one("[data-date]")
             if date_node:
                 publish_time = self._parse_datetime(date_node.get("data-date"), languages=["da", "en"])
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
             try:
                 detail_html = self._fetch_html(full_url)
@@ -91,7 +91,7 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["da", "en"],
         )
-        if final_publish_time and not self.full_scan and final_publish_time < self.cutoff_date:
+        if final_publish_time and final_publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

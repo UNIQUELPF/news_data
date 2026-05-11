@@ -36,7 +36,7 @@ class CambodiaAkpSpider(CambodiaBaseSpider):
         text = self._clean_text(" ".join(response.css(".youtube-video *::text").getall()))
         match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2},\s+\d{4}", text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, [".youtube-video", "body"])
         if not content:

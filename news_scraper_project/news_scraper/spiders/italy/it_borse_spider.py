@@ -43,7 +43,7 @@ class ItBorseSpider(SmartSpider):
 
     fallback_content_selector = 'article.single-post__article'
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://www.borse.it/notizie",
             callback=self.parse,

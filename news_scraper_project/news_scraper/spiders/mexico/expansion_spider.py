@@ -23,11 +23,12 @@ class MexicoExpansionSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.start_urls[0],
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse_list(self, response):

@@ -16,12 +16,13 @@ class GermanyBundesbankSpider(GermanyBaseSpider):
     country_code = 'DEU'
 
     country = '德国'
+    fallback_content_selector = "main, main .richtext, .richtext"
     allowed_domains = ["bundesbank.de", "www.bundesbank.de"]
     start_urls = ["https://www.bundesbank.de/en/press/press-releases"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -63,7 +64,7 @@ class GermanyBundesbankSpider(GermanyBaseSpider):
             ),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)
@@ -82,15 +83,15 @@ class GermanyBundesbankSpider(GermanyBaseSpider):
 
     def _extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one(".richtext") or soup.select_one("main")
+        root = soup.select_one("main") or soup.select_one(".richtext")
         if not root:
             return ""
         for unwanted in root.select("script, style, nav, footer, header, aside, form"):
             unwanted.decompose()
         parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
+        for node in root.find_all(["p", "li", "h2", "h3"], recursive=True):
             text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 35:
+            if not text or len(text) < 20:
                 continue
             if text.startswith("Contact") or text.startswith("Download"):
                 continue

@@ -29,7 +29,7 @@ class TrHaberturkSpider(SmartSpider):
     fallback_content_selector = "article"
 
     async def start(self):
-        yield scrapy.Request(self.base_url.format(1), callback=self.parse, meta={'page': 1})
+        yield scrapy.Request(self.base_url.format(1), callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
         # 提取文章链接

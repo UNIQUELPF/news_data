@@ -26,7 +26,7 @@ class KyodoSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.start_urls[0],
             callback=self.parse_list,

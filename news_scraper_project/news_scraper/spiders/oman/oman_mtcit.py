@@ -24,6 +24,7 @@ class OmanMtcitSpider(OmanBaseSpider):
     """
 
     name = "oman_mtcit"
+    fallback_content_selector = "article, main"
 
 
     country_code = 'OMN'
@@ -35,17 +36,24 @@ class OmanMtcitSpider(OmanBaseSpider):
         "https://www.mtcit.gov.om/media-4/news-announcements-11/news-85",
     ]
 
-    def start_requests(self):
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True})
+            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True}, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         links = response.css("a::attr(href)").getall()
+        has_valid_item_in_window = self.full_scan
         for href in links:
             full_url = response.urljoin(href)
             if "/media-4/news-announcements-11/news-85/" not in full_url or not self.should_process(full_url):
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True})
+            has_valid_item_in_window = True
+            yield scrapy.Request(full_url, callback=self.parse_detail, meta={"dont_verify_ssl": True}, dont_filter=self.full_scan)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -56,7 +64,8 @@ class OmanMtcitSpider(OmanBaseSpider):
             return
 
         publish_time = self._extract_publish_time(response)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)
@@ -72,6 +81,13 @@ class OmanMtcitSpider(OmanBaseSpider):
             language="en",
             section="news",
         )
+
+    def should_process(self, url, publish_time=None):
+        if self.full_scan:
+            return True
+        if publish_time and publish_time < self.cutoff_date:
+            return False
+        return url not in self.seen_urls
 
     def _extract_publish_time(self, response):
         text = " ".join(response.xpath("//body//text()").getall())

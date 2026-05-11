@@ -39,12 +39,14 @@ class ReutersJPSpider(SmartSpider):
         },
     }
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         """解析首页 JSON 嵌入数据并触发 API 分页请求。"""
+        has_valid_item_in_window = False
+
         # 1. 模式 1: 初始页面嵌入的 window.Fusion.globalContent
         scripts = response.xpath(
             '//script[contains(text(), "window.Fusion.globalContent")]/text()'
@@ -62,6 +64,7 @@ class ReutersJPSpider(SmartSpider):
                         pub_time = self._extract_api_date(art)
                         if not self.should_process(url, pub_time):
                             continue
+                        has_valid_item_in_window = True
                         yield scrapy.Request(
                             url,
                             callback=self.parse_article,
@@ -71,32 +74,35 @@ class ReutersJPSpider(SmartSpider):
                 pass
 
         # 2. 模式 2: API 分页（偏移量从 28 开始，首屏约 28 条）
-        for offset in range(28, 500, 20):
-            query_obj = {
-                "arc-site": "reuters-japan",
-                "fetch_type": "collection",
-                "offset": offset,
-                "section_id": "/economy/",
-                "size": 20,
-                "website": "reuters-japan",
-            }
-            query_str = urllib.parse.quote(json.dumps(query_obj))
-            api_url = (
-                "https://jp.reuters.com/pf/api/v3/content/fetch/"
-                f"articles-by-section-alias-or-id-v1?query={query_str}"
-            )
-            yield scrapy.Request(api_url, callback=self.parse_api, dont_filter=True)
+        if has_valid_item_in_window:
+            for offset in range(28, 500, 20):
+                query_obj = {
+                    "arc-site": "reuters-japan",
+                    "fetch_type": "collection",
+                    "offset": offset,
+                    "section_id": "/economy/",
+                    "size": 20,
+                    "website": "reuters-japan",
+                }
+                query_str = urllib.parse.quote(json.dumps(query_obj))
+                api_url = (
+                    "https://jp.reuters.com/pf/api/v3/content/fetch/"
+                    f"articles-by-section-alias-or-id-v1?query={query_str}"
+                )
+                yield scrapy.Request(api_url, callback=self.parse_api, dont_filter=True)
 
     def parse_api(self, response):
         """解析 API 分页响应并产出文章请求。"""
         try:
             data = json.loads(response.text)
             articles = data.get('result', {}).get('articles', [])
+            has_valid_item_in_window = False
             for art in articles:
                 url = response.urljoin(art.get('canonical_url'))
                 pub_time = self._extract_api_date(art)
                 if not self.should_process(url, pub_time):
                     continue
+                has_valid_item_in_window = True
                 yield scrapy.Request(
                     url,
                     callback=self.parse_article,

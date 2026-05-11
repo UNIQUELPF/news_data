@@ -33,9 +33,9 @@ class OmanObserverSpider(OmanBaseSpider):
         "https://www.omanobserver.om/morearticles/business/economy",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True})
+            yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True}, dont_filter=True)
 
     def parse_listing(self, response):
         links = response.css('a[href*="/article/"]::attr(href)').getall()
@@ -62,7 +62,7 @@ class OmanObserverSpider(OmanBaseSpider):
             or response.xpath("//meta[@name='datePublished']/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

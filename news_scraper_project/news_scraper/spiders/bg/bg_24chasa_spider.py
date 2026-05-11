@@ -24,7 +24,7 @@ class Bg24chasaSpider(SmartSpider):
     use_curl_cffi = True
     
     # Precise selector: strictly locked to the article container including featured images
-    fallback_content_selector = "article.entry-content"
+    fallback_content_selector = "article.entry-content, div.entry-content, .single-post-content"
 
     async def start(self):
         """Initial requests entry point."""
@@ -85,10 +85,9 @@ class Bg24chasaSpider(SmartSpider):
                     current_page = int(response.url.split('page=')[-1])
                 except ValueError:
                     pass
-            
-            if current_page < 50: 
-                next_page_url = f"https://www.24chasa.bg/biznes/11764989?page={current_page + 1}"
-                yield scrapy.Request(next_page_url, callback=self.parse)
+
+            next_page_url = f"https://www.24chasa.bg/biznes/11764989?page={current_page + 1}"
+            yield scrapy.Request(next_page_url, callback=self.parse)
 
     def parse_detail(self, response):
         """Parses the article detail page using standardized SmartSpider extraction."""
@@ -98,9 +97,18 @@ class Bg24chasaSpider(SmartSpider):
             response,
             publish_time_xpath=".//article[contains(@class, 'entry-content')]//time[contains(@class, 'date') or contains(@class, 'time')]/text()"
         )
-        
+
+        # Custom bs4 extraction: try broader selectors if ContentEngine result is short
+        for sel in ['article.entry-content', 'div.entry-content', '.single-post-content', 'article']:
+            all_text = response.css(f'{sel} *::text').getall()
+            bs4_content = "\n\n".join([t.strip() for t in all_text if t.strip()])
+            if bs4_content and (not item.get('content_plain') or len(bs4_content) > len(item.get('content_plain', '')) + 500):
+                item['content_plain'] = bs4_content
+                self.logger.info(f"Used bs4 extraction from '{sel}' ({len(bs4_content)} chars) for {response.url}")
+                break
+
         # Override/Set specific fields
         item['author'] = "24 Chasa Bulgaria"
         item['section'] = "Business"
-        
+
         yield item

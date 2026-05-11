@@ -23,7 +23,7 @@ class IndiaCnbctv18Spider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         # Categories from user's network capture
         categories = [
             "technology", "economy", "auto",

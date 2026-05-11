@@ -18,9 +18,9 @@ class FinlandStatSpider(FinlandBaseSpider):
     allowed_domains = ["stat.fi", "www.stat.fi"]
     start_urls = ["https://stat.fi/en"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -55,7 +55,7 @@ class FinlandStatSpider(FinlandBaseSpider):
             or self._find_date(response.text),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

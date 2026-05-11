@@ -18,9 +18,9 @@ class DenmarkDstSpider(DenmarkBaseSpider):
     allowed_domains = ["dst.dk", "www.dst.dk"]
     start_urls = ["https://www.dst.dk/en/Statistik/udgivelser"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -37,7 +37,7 @@ class DenmarkDstSpider(DenmarkBaseSpider):
                 continue
             rel_text = self._clean_text(" ".join(row.select_one(".rel-type-date").stripped_strings)) if row.select_one(".rel-type-date") else ""
             publish_time = self._extract_publish_time(rel_text)
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
             try:
                 detail_html = self._fetch_html(full_url)
@@ -60,7 +60,7 @@ class DenmarkDstSpider(DenmarkBaseSpider):
         final_publish_time = publish_time or self._extract_publish_time(
             self._clean_text(" ".join(response.css("main ::text").getall()[:120]))
         )
-        if final_publish_time and not self.full_scan and final_publish_time < self.cutoff_date:
+        if final_publish_time and final_publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

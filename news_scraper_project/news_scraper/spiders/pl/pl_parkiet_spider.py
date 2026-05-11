@@ -29,7 +29,7 @@ class PlParkietSpider(SmartSpider):
         "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True}
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.start_urls[0],
             callback=self.parse,
@@ -45,7 +45,8 @@ class PlParkietSpider(SmartSpider):
                     PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
                     PageMethod("wait_for_timeout", 2000),
                 ]
-            }
+            },
+        dont_filter=True,
         )
 
     async def parse(self, response):
@@ -54,11 +55,14 @@ class PlParkietSpider(SmartSpider):
         links = response.css('a.contentLink::attr(href)').getall()
         unique_links = list(set(links))
 
+        has_valid_item_in_window = False
+
         for link in unique_links:
             if not link.startswith('http'):
                 link = "https://www.parkiet.com" + link
 
             if self.should_process(link):
+                has_valid_item_in_window = True
                 yield scrapy.Request(
                     link,
                     callback=self.parse_article,

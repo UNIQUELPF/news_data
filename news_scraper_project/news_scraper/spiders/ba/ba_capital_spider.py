@@ -32,11 +32,11 @@ class BaCapitalSpider(SmartSpider):
         """
         Parse listing page: https://capital.ba/category/privreda/
         """
-        # Precise main content area selector
-        articles = response.css('.posts-list .content, .archive-posts .content, .main-content .content')
-        
+        # Updated selector - site now uses SmartMag theme with article.l-post elements
+        articles = response.css('article.l-post')
+
         if not articles:
-            articles = response.xpath('//div[contains(@class, "content") and .//h2[contains(@class, "post-title")]]')
+            articles = response.css('article.grid-post')
 
         if not articles:
             self.logger.warning(f"No articles found in main area of {response.url}.")

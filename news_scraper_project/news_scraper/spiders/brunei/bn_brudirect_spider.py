@@ -1,5 +1,5 @@
 import scrapy
-import re
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 class BnBrudirectSpider(SmartSpider):
@@ -15,7 +15,7 @@ class BnBrudirectSpider(SmartSpider):
 
     base_url = 'https://brudirect.com/result.php?title=&category=national-headline&subcategory=&p={}'
 
-    fallback_content_selector = ".main-text"
+    fallback_content_selector = "div[class*=ExternalClass]"
 
     custom_settings = {
         'DOWNLOAD_DELAY': 2.0,
@@ -24,7 +24,7 @@ class BnBrudirectSpider(SmartSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.base_url.format(1),
             callback=self.parse_list,
@@ -72,6 +72,26 @@ class BnBrudirectSpider(SmartSpider):
             title_xpath="//div[contains(@class,'page-top')]//h2/text()",
             publish_time_xpath="//div[contains(@class,'sub')]//a[contains(@href,'daywise.php?date=')]/text()",
         )
+
+        # Custom bs4-based content extraction: BruDirect uses SharePoint-style
+        # ExternalClass divs inside .main-text. The thumbnail section (if present)
+        # has an iframe/empty paragraphs, so we extract from all ExternalClass
+        # divs and take only real text paragraphs. Always prefer ExternalClass
+        # content over ContentEngine output, as it is more targeted.
+        soup = BeautifulSoup(response.text, 'html.parser')
+        custom_parts = []
+        for ec in soup.select('div[class*="ExternalClass"]'):
+            for child in ec.find_all(['p', 'div'], recursive=True):
+                text = child.get_text(strip=True)
+                if text and len(text) > 15 and text not in custom_parts:
+                    custom_parts.append(text)
+        if custom_parts:
+            custom_content = '\n\n'.join(custom_parts)
+            # Always use ExternalClass content when found (it's more reliable)
+            item['content'] = custom_content
+            item['content_cleaned'] = custom_content
+            item['content_markdown'] = custom_content
+            item['content_plain'] = custom_content
 
         # Featured photo is outside .main-text, prepend it to images
         featured_img = response.css('.featured-photo img::attr(src)').get()

@@ -22,7 +22,7 @@ class FinewsCHSpider(SmartSpider):
     }
 
     async def start(self):
-        yield scrapy.Request('https://www.finews.com/news/english-news', callback=self.parse)
+        yield scrapy.Request('https://www.finews.com/news/english-news', callback=self.parse, dont_filter=True)
 
     def parse(self, response):
         if self._stop_pagination:

@@ -16,7 +16,7 @@ class EgyptArabfinanceSpider(SmartSpider):
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".details, .news-details, .news-content, .article-content"
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.arabfinance.com/en/news/newssinglecategory/2"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 

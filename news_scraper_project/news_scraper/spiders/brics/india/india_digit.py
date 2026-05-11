@@ -27,7 +27,7 @@ class IndiaDigitSpider(SmartSpider):
     ajax_url = "https://www.digit.in/wp-admin/admin-ajax.php"
     posts_per_page = 12
 
-    def start_requests(self):
+    async def start(self):
         # Step 1: Fetch the main news page to extract the security nonce (filternonce)
         yield scrapy.Request(
             "https://www.digit.in/news/", 

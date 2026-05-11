@@ -26,7 +26,7 @@ class AfricaIolSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield self.make_api_request(page=1)
 
     def make_api_request(self, page):

@@ -16,32 +16,41 @@ class GermanyBafinSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["bafin.de", "www.bafin.de"]
-    start_urls = ["https://www.bafin.de/EN/DieBaFin/Presse/03_Pressemitteilungen/liste_pressemitteilungen_node_en.html"]
 
-    def start_requests(self):
+    fallback_content_selector = "#content, main, article"
+
+    start_urls = [
+        "https://www.bafin.de/EN/die-bafin/aktuelles-presse/presse-social-media/pressemitteilungen/pressemitteilungen_node_en.html",
+    ]
+
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
+        if self._stop_pagination:
+            return
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        has_valid_item_in_window = self.full_scan
+
         for link in soup.select("a[href]"):
+            if self._stop_pagination:
+                break
             href = link.get("href") or ""
             if "SharedDocs/Veroeffentlichungen/EN/Pressemitteilung/" not in href:
                 continue
             full_url = response.urljoin(href.split(";")[0].split("?")[0])
             if not self.should_process(full_url):
                 continue
-            year_match = re.search(r"/(20\d{2})/", full_url)
-            if year_match and not self.full_scan and int(year_match.group(1)) < self.cutoff_date.year:
-                continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
-                continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                yield item
+
+            has_valid_item_in_window = True
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
+
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -53,13 +62,14 @@ class GermanyBafinSpider(GermanyBaseSpider):
             return
 
         publish_time = self._parse_datetime(
-            self._clean_text(
-                response.xpath("//time/@datetime").get()
-                or " ".join(response.xpath("//div[@id='content']//text()").getall()[:80])
-            ),
+            response.css("span.c-topline__element::text").get()
+            or response.xpath("//meta[@property='article:published_time']/@content").get()
+            or response.xpath("//time/@datetime").get()
+            or " ".join(response.xpath("//div[@id='content']//text()").getall()[:80]),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)
@@ -78,10 +88,16 @@ class GermanyBafinSpider(GermanyBaseSpider):
 
     def _extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one("#content .wrapperText") or soup.select_one("#content") or soup.select_one("main")
+        # Prefer main over #content to avoid breadcrumbs in the extracted content
+        root = soup.select_one("main") or soup.select_one("#content") or soup.select_one("article")
         if not root:
             return ""
-        for unwanted in root.select("script, style, nav, footer, header, aside, form, .wrapperRating, .sectionRelated"):
+        for unwanted in root.select(
+            "script, style, nav, footer, header, aside, form, "
+            ".wrapperRating, .sectionRelated, "
+            ".l-article__related, .l-article__author, .l-content-breadcrumb, .c-intro, "
+            ".c-related, .c-teaser-contact"
+        ):
             unwanted.decompose()
         parts = []
         for node in root.find_all(["p", "li"], recursive=True):

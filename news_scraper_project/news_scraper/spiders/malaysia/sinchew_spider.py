@@ -36,7 +36,7 @@ class SinchewSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.API_URL.format(page=1),
             callback=self.parse_list,
@@ -123,7 +123,7 @@ class SinchewSpider(SmartSpider):
 
         # Date filter (manual since strict_date_required=False)
         publish_time = item.get('publish_time')
-        if publish_time and not self.full_scan:
+        if publish_time:
             if publish_time < self.cutoff_date:
                 self.logger.info(f"Reached date cutoff {self.cutoff_date} at {response.url}")
                 return

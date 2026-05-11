@@ -17,10 +17,11 @@ class TimorLesteGovPortalSpider(TimorLesteBaseSpider):
     country = '东帝汶'
     allowed_domains = ["timor-leste.gov.tl"]
     start_urls = ["https://timor-leste.gov.tl/"]
+    strict_date_required = False
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
@@ -49,7 +50,7 @@ class TimorLesteGovPortalSpider(TimorLesteBaseSpider):
             self._clean_text(" ".join(response.css(".date::text, .tit::text, body ::text").getall()[:80])),
             languages=["pt", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, title)
         if not content:

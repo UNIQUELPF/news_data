@@ -16,7 +16,7 @@ class USAArsTechnicaSpider(SmartSpider):
     allowed_domains = ['arstechnica.com']
     strict_date_required = True
     use_curl_cffi = True
-    fallback_content_selector = ".article-content, div[itemprop='articleBody']"
+    fallback_content_selector = ".post-content, .post-content-double, div[itemprop='articleBody']"
 
     start_urls = ['https://arstechnica.com/']
 
@@ -30,12 +30,12 @@ class USAArsTechnicaSpider(SmartSpider):
         yield scrapy.Request(self.start_urls[0], callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
-        articles = response.css('li.article h2 a::attr(href)').getall()
-        featured = response.css('header.article h2 a::attr(href)').getall()
+        # Site redesigned - articles are now card-grid elements
+        articles = response.css('article[id^="card-"] > a[href*="/20"]::attr(href)').getall()
 
         has_valid_item_in_window = False
-        for link in set(articles + featured):
-            if not link or not link.startswith('https') or '/20' not in link:
+        for link in set(articles):
+            if not link or not link.startswith('https'):
                 continue
 
             # Extract date from URL pattern: /2026/03/15/title/
@@ -58,21 +58,20 @@ class USAArsTechnicaSpider(SmartSpider):
             meta = {}
             if publish_time:
                 meta['publish_time_hint'] = publish_time
-            yield scrapy.Request(link, callback=self.parse_detail, meta=meta)
+            yield scrapy.Request(link, callback=self.parse_detail, meta=meta, dont_filter=self.full_scan)
 
         # Circuit breaker: when articles are too old, stop pagination
         if has_valid_item_in_window:
-            current_page = response.meta.get('page', 1)
-            next_page = current_page + 1
-            next_url = f"{self.start_urls[0]}page/{next_page}/"
-            yield scrapy.Request(next_url, callback=self.parse, meta={'page': next_page})
+            next_link = response.css('a.post-navigation-link::attr(href)').get()
+            if next_link:
+                yield scrapy.Request(next_link, callback=self.parse, meta={'page': response.meta.get('page', 1) + 1})
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
 
         # ContentEngine fallback: Ars Technica specific cleaning
         if not item.get('content_plain'):
-            content_html = response.css('.article-content').get() or response.css('div[itemprop="articleBody"]').get()
+            content_html = response.css('.post-content').get() or response.css('.article-content').get() or response.css('div[itemprop="articleBody"]').get()
             if content_html:
                 soup = BeautifulSoup(content_html, 'html.parser')
                 for tag in soup(['script', 'style', 'aside', 'footer', 'div.ad-wrapper', 'div.gallery-popover-image']):

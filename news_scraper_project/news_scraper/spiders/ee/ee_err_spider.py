@@ -33,7 +33,7 @@ class EeErrSpider(SmartSpider):
 
     fallback_content_selector = 'article.prime, div.body'
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://news.err.ee/k/business",
             callback=self.parse,

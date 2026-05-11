@@ -18,13 +18,18 @@ class FranceFinanceGovSpider(FranceBaseSpider):
     allowed_domains = ["presse.economie.gouv.fr", "economie.gouv.fr"]
     start_urls = ["https://presse.economie.gouv.fr/"]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         html = self._fetch_html(self.start_urls[0])
         soup = BeautifulSoup(html, "html.parser")
+        has_valid_item_in_window = False
         for link in soup.select("a[href]"):
             href = (link.get("href") or "").strip()
             if not href.startswith("https://presse.economie.gouv.fr/") and not href.startswith("/"):
@@ -45,6 +50,7 @@ class FranceFinanceGovSpider(FranceBaseSpider):
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
             if item:
+                has_valid_item_in_window = True
                 yield item
 
     def parse_detail(self, response):
@@ -64,9 +70,8 @@ class FranceFinanceGovSpider(FranceBaseSpider):
             or response.css("time::attr(datetime)").get(),
             languages=["fr", "en"],
         )
-        if not publish_time:
-            return
-        if not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)
@@ -94,9 +99,9 @@ class FranceFinanceGovSpider(FranceBaseSpider):
             unwanted.decompose()
         title_text = self._clean_text(title)
         parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
+        for node in root.find_all(["p", "li", "h2", "h3"], recursive=True):
             text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 35 or text == title_text:
+            if not text or len(text) < 20 or text == title_text:
                 continue
             if text.startswith("Publié le") or text.startswith("Partager"):
                 continue

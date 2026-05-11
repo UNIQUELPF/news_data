@@ -30,6 +30,7 @@ class ZakonSpider(SmartSpider):
 
     custom_settings = {
         'PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT': 60000,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
     }
 
     def parse_russian_date(self, date_str):
@@ -59,7 +60,7 @@ class ZakonSpider(SmartSpider):
 
         return None
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.zakon.kz/finansy/"
         yield scrapy.Request(
             url,
@@ -96,6 +97,8 @@ class ZakonSpider(SmartSpider):
                 links = soup.select('a.newscard_link')
                 self.logger.debug(f"Found {len(links)} newscard_link elements")
 
+                has_valid_item_in_window = False
+
                 for link in links:
                     title_el = link.select_one('.newscard__title')
                     date_el = link.select_one('.newscard__dateline')
@@ -121,6 +124,8 @@ class ZakonSpider(SmartSpider):
                             break
                         continue
 
+                    has_valid_item_in_window = True
+
                     # Yield immediately while the Playwright page is alive
                     yield scrapy.Request(
                         full_url,
@@ -131,6 +136,9 @@ class ZakonSpider(SmartSpider):
                         },
                         dont_filter=self.full_scan,
                     )
+
+                if not has_valid_item_in_window:
+                    break
 
                 attempts += 1
                 self.logger.info(f"Scroll attempt {attempts}: collected items from this window")
@@ -151,5 +159,10 @@ class ZakonSpider(SmartSpider):
 
         item['author'] = "Zakon.kz"
         item['section'] = "Finansy"
+
+        # Circuit breaker: stop if article is too old or already scraped
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
 
         yield item

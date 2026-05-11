@@ -15,7 +15,11 @@ class EgyptYoum7Spider(SmartSpider):
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = "#articleBody, .articleCont, .article-content"
 
-    def start_requests(self):
+    custom_settings = {
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
+    }
+
+    async def start(self):
         url = "https://www.youm7.com/Section/%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF-%D9%88%D8%A8%D9%88%D8%B1%D8%B5%D8%A9/297/1"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 
@@ -68,9 +72,8 @@ class EgyptYoum7Spider(SmartSpider):
 
         if has_valid_item_in_window:
             page = response.meta.get('page', 1) + 1
-            if page < 300: # Safety cap
-                next_url = f"https://www.youm7.com/Section/%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF-%D9%88%D8%A8%D9%88%D8%B1%D8%B5%D8%A9/297/{page}"
-                yield scrapy.Request(next_url, callback=self.parse_list, dont_filter=True, meta={'page': page})
+            next_url = f"https://www.youm7.com/Section/%D8%A7%D9%82%D8%AA%D8%B5%D8%A7%D8%AF-%D9%88%D8%A8%D9%88%D8%B1%D8%B5%D8%A9/297/{page}"
+            yield scrapy.Request(next_url, callback=self.parse_list, dont_filter=True, meta={'page': page})
 
     def parse_detail(self, response):
         item = self.auto_parse_item(
@@ -79,7 +82,12 @@ class EgyptYoum7Spider(SmartSpider):
         )
         if not item:
             return
-            
+
+        # Circuit breaker: stop pagination if article is too old or already scraped
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
+
         featured_image = response.xpath("//meta[@property='og:image']/@content").get()
         if featured_image:
             current_images = item.get('images') or []

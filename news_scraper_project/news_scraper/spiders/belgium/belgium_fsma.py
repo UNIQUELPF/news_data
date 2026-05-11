@@ -16,14 +16,19 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
     allowed_domains = ["fsma.be", "www.fsma.be"]
     start_urls = ["https://www.fsma.be/en/news-articles"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        for href in response.css("a[href^='/en/news/']::attr(href)").getall():
+        for container in response.css('article, .node, .views-row, .teaser, li'):
+            href = container.css('a[href^="/en/news/"]::attr(href)').get()
+            if not href:
+                continue
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            date_str = container.css('time::attr(datetime)').get()
+            publish_time = self._parse_datetime(date_str, languages=["en"]) if date_str else None
+            if not self.should_process(full_url, publish_time):
                 continue
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
@@ -38,7 +43,7 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
 
         article_text = self._clean_text(" ".join(response.css("article ::text").getall()[:120]))
         publish_time = self._parse_datetime(article_text, languages=["en"])
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

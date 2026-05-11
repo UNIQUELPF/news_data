@@ -30,9 +30,9 @@ class IrelandIrishTimesSpider(IrelandBaseSpider):
         "https://www.irishtimes.com/business/",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         # 经济类列表页：只保留带具体年月日路径的文章，排除栏目分页。
@@ -59,7 +59,7 @@ class IrelandIrishTimesSpider(IrelandBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

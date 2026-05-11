@@ -14,19 +14,23 @@ class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
 
     country = '芬兰'
     allowed_domains = ["finanssivalvonta.fi", "www.finanssivalvonta.fi"]
+    fallback_content_selector = "main, article, .page-content"
     start_urls = [
         "https://www.finanssivalvonta.fi/en/publications-and-press-releases/news-releases/2025/",
         "https://www.finanssivalvonta.fi/en/publications-and-press-releases/news-releases/2026/",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(response.url)
         soup = BeautifulSoup(html, "html.parser")
+        has_valid_item_in_window = False
         for link in soup.select("a[href]"):
+            if self._stop_pagination:
+                break
             href = (link.get("href") or "").strip()
             if not href.startswith("/en/publications-and-press-releases/news-releases/"):
                 continue
@@ -39,6 +43,7 @@ class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
                 continue
             if not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
@@ -61,7 +66,8 @@ class FinlandFinanssivalvontaSpider(FinlandBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

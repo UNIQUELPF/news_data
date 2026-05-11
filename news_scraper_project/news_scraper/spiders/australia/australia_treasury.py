@@ -20,18 +20,32 @@ class AustraliaTreasurySpider(AustraliaBaseSpider):
         "https://treasury.gov.au/publication",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        for href in response.css('a[href*="/publication/"]::attr(href)').getall():
+        if self._stop_pagination:
+            return
+        has_valid_item_in_window = self.full_scan
+        for row in response.css('.views-row'):
+            href = row.css('a[href*="/publication/"]::attr(href)').get()
+            if not href:
+                continue
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            date_str = row.css('time.datetime::attr(datetime)').get()
+            publish_time = self._parse_datetime(date_str, languages=["en"]) if date_str else None
+            if not self.should_process(full_url, publish_time):
                 continue
             if not self._should_fetch_url(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -49,7 +63,8 @@ class AustraliaTreasurySpider(AustraliaBaseSpider):
             or response.css(".published-date::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)

@@ -17,13 +17,16 @@ class KoreaKrxSpider(KoreaBaseSpider):
     country = '韩国'
     allowed_domains = ["global.krx.co.kr"]
     board_id = "GLB0501070000"
+    fallback_content_selector = "main, .board_view, .view_cont"
     start_urls = ["http://global.krx.co.kr/board/GLB0501070000/bbs"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         list_response = requests.post(
             f"http://global.krx.co.kr/board/{self.board_id}/list",
             data={
@@ -40,6 +43,7 @@ class KoreaKrxSpider(KoreaBaseSpider):
         )
         list_response.raise_for_status()
         soup = BeautifulSoup(list_response.text, "html.parser")
+        has_valid_item_in_window = False
         for link in soup.select("ul.datalist a[data-view]"):
             seq = self._clean_text(link.get("data-view"))
             title = self._clean_text(link.get_text(" ", strip=True))
@@ -49,11 +53,12 @@ class KoreaKrxSpider(KoreaBaseSpider):
             if not seq or not title:
                 continue
             publish_time = self._parse_datetime(date_text, languages=["en"])
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
             url = f"http://global.krx.co.kr/board/{self.board_id}/view?bbsSeq={seq}"
             if not self.should_process(url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(
                 url,
                 callback=self.parse_detail,
@@ -89,7 +94,8 @@ class KoreaKrxSpider(KoreaBaseSpider):
             return
 
         publish_time = response.meta.get("list_date")
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         textarea = detail_soup.select_one("textarea[name='contn']")

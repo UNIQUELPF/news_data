@@ -24,7 +24,7 @@ class QatarInvestSpider(QatarBaseSpider):
                 continue
             if not self.should_process(url):
                 continue
-            yield scrapy.Request(url, callback=self.parse_detail)
+            yield scrapy.Request(url, callback=self.parse_detail, dont_filter=self.full_scan)
             emitted += 1
             if emitted >= 12:
                 return

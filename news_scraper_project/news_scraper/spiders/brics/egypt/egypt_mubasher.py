@@ -17,7 +17,7 @@ class EgyptMubasherSpider(SmartSpider):
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".article-body, .md-news-details__content, article, .the-news"
 
-    def start_requests(self):
+    async def start(self):
         url = "https://english.mubasher.info/news/sa/now/latest"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 
@@ -56,15 +56,11 @@ class EgyptMubasherSpider(SmartSpider):
                     meta_dict['playwright'] = True
                 yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
 
-        if has_valid_item_in_window:
+        if has_valid_item_in_window and not self._stop_pagination:
             page = response.meta.get('page', 1)
-            num_pages_match = re.search(r'window\.midata\.numPages\s*=\s*(\d+)', raw_html)
-            max_pages = int(num_pages_match.group(1)) if num_pages_match else 100
-
-            if page < max_pages:
-                next_page = page + 1
-                next_url = f"https://english.mubasher.info/news/sa/now/latest//{next_page}"
-                yield scrapy.Request(next_url, callback=self.parse_list, dont_filter=True, meta={'page': next_page})
+            next_page = page + 1
+            next_url = f"https://english.mubasher.info/news/sa/now/latest//{next_page}"
+            yield scrapy.Request(next_url, callback=self.parse_list, dont_filter=True, meta={'page': next_page})
 
     def parse_detail(self, response):
         raw_html = response.text
@@ -119,6 +115,7 @@ class EgyptMubasherSpider(SmartSpider):
             item['content'] = content
 
         if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
+            self._stop_pagination = True
             return
 
         featured_image = response.xpath("//meta[@property='og:image']/@content").get()

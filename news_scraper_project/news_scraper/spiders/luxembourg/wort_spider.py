@@ -23,11 +23,12 @@ class WortSpider(SmartSpider):
 
     allowed_domains = ["wort.lu"]
 
+    use_curl_cffi = True
+
     custom_settings = {
         'DOWNLOAD_DELAY': 0.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        # Site forces SSO silent login 302s if it detects a standard browser UA on API endpoints.
-        'USER_AGENT': "python-requests/2.31.0",
+        'USER_AGENT': "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     }
 
     fallback_content_selector = 'article'
@@ -36,7 +37,7 @@ class WortSpider(SmartSpider):
         super().__init__(*args, **kwargs)
         self.limit = 30
 
-    def start_requests(self):
+    async def start(self):
         url = f"https://www.wort.lu/api/cook/neueste/?offset=0&count={self.limit}"
         yield scrapy.Request(
             url=url,
@@ -97,7 +98,6 @@ class WortSpider(SmartSpider):
                     "section_hint": section,
                     "author_hint": authors if authors else "Luxemburger Wort",
                 },
-                dont_filter=self.full_scan,
             )
 
         # Pagination: continue if we found valid items and the page was full

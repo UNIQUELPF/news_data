@@ -41,7 +41,8 @@ class UkComputerweeklySpider(SmartSpider):
             yield scrapy.Request(
                 jina_url,
                 callback=self.parse_jina,
-                meta={"original_url": self.target_url}
+                meta={"original_url": self.target_url},
+            dont_filter=True,
             )
 
     def parse_jina(self, response):

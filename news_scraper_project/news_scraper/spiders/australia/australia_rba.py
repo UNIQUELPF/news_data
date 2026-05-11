@@ -21,9 +21,9 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
         "https://www.rba.gov.au/speeches/",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         for href in response.css("a::attr(href)").getall():
@@ -52,7 +52,7 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
             or response.css(".date::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response, title)

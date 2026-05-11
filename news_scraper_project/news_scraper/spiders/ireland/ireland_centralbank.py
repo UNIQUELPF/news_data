@@ -23,22 +23,28 @@ class IrelandCentralBankSpider(IrelandBaseSpider):
 
     country = '爱尔兰'
     allowed_domains = ["centralbank.ie", "www.centralbank.ie"]
+    fallback_content_selector = "article, main"
     # 政府/监管类：中央银行官方新闻与监管信息表
     start_urls = [
         "https://www.centralbank.ie/news-media/press-releases",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         # 政府/监管类列表页：抓新闻稿列表中的 article 详情页。
         links = response.css('a[href*="/news/article/"]::attr(href)').getall()
+        has_valid_item_in_window = False
         for href in links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
         next_page = response.css('a[aria-label="Next page"]::attr(href), a[href*="/news-media/press-releases/"]::attr(href)').getall()
@@ -62,7 +68,8 @@ class IrelandCentralBankSpider(IrelandBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

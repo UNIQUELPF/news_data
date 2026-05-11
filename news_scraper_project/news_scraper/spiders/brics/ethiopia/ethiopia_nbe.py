@@ -19,13 +19,13 @@ class EthiopiaNBESpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://nbe.gov.et/all-news/"
         yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
 
     def parse_list(self, response):
-        # Elementor typically uses these classes for posts
-        cards = response.css('article, .elementor-post')
+        # Elementor loop grid uses e-loop-item containers
+        cards = response.css('div.e-loop-item')
         if not cards:
             self.logger.warning(f"No article cards found on {response.url}. Stopping to avoid undated crawl.")
             return
@@ -38,20 +38,20 @@ class EthiopiaNBESpider(SmartSpider):
                 
             url = response.urljoin(link_el)
             
-            # Try to extract date from the card
-            date_text = card.css('.elementor-post-date::text, .elementor-post-info__item--type-date::text, time::attr(datetime)').get()
-            
+            # Try to extract date from the card - Elementor loop grid
+            date_text = card.css('.elementor-post-date::text, .elementor-post-info__item--type-date::text, time::attr(datetime), .elementor-headline-title::text, .elementor-widget-heading .elementor-headline-title::text').get()
+
             publish_time = None
             if date_text:
                 import dateparser
                 publish_time = dateparser.parse(date_text, settings={'TIMEZONE': 'UTC'})
-            
+
             publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
 
             if self.should_process(url, publish_time_utc):
                 has_valid_item_in_window = True
                 meta_dict = {'publish_time_hint': publish_time_utc}
-                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict, dont_filter=self.full_scan)
 
         if has_valid_item_in_window:
             pagination = response.css('a.page-numbers::attr(href)').getall()

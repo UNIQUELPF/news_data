@@ -23,12 +23,16 @@ class AustriaTrendSpider(AustriaBaseSpider):
     start_urls = [
         "https://www.trend.at/unternehmen",
     ]
+    strict_date_required = False
 
-    def start_requests(self):
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         links = response.css('a[href*="trend.at/unternehmen/"]::attr(href), a[href*="trend.at/finanzen/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
@@ -38,9 +42,10 @@ class AustriaTrendSpider(AustriaBaseSpider):
                 continue
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
-        next_page = response.css("a[rel='next']::attr(href)").get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse_listing)
+        if not self._stop_pagination:
+            next_page = response.css("a[rel='next']::attr(href)").get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -56,7 +61,8 @@ class AustriaTrendSpider(AustriaBaseSpider):
             or response.xpath("//time/text()").get(),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

@@ -85,7 +85,7 @@ class NewsCNSpider(scrapy.Spider):
             self.logger.error(f"Failed to check URL existence for {channel}: {e}")
             return False
 
-    def start_requests(self):
+    async def start(self):
         for channel, config in self.CHANNELS.items():
             cutoff_date_str = self.channel_cutoffs[channel]
             is_first_run = (cutoff_date_str < datetime.now().strftime("%Y%m%d"))

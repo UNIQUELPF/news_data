@@ -1,13 +1,9 @@
 # 阿尔及利亚aps爬虫，负责抓取对应站点、机构或栏目内容。
 
 import re
-from datetime import datetime
 
-import dateparser
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 
 # 阿尔及利亚经济类来源
 # 站点：APS
@@ -32,6 +28,7 @@ class AlgeriaApsSpider(SmartSpider):
 
     country = "阿尔及利亚"
     language = "en"
+    strict_date_required = False
     source_timezone = "Africa/Algiers"
     start_date = "2026-01-01"
     allowed_domains = ["aps.dz"]
@@ -42,153 +39,74 @@ class AlgeriaApsSpider(SmartSpider):
         "https://www.aps.dz/economie/banque-et-finances",
     ]
 
+    fallback_content_selector = "article, main article, [itemprop='articleBody'], .article-content, .item-content, .entry-content, .post-content, .content, main"
+
     # 首次抓取的默认时间边界；后续会优先使用数据库里的最新时间做增量。
 
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         # APS 列表页先收集文章链接，再继续找下一页。
         article_links = response.xpath(
             '//a[contains(@href, "/economie/banque-et-finances/")]/@href'
         ).getall()
 
+        has_valid_item_in_window = False
         unique_links = []
         for href in article_links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             unique_links.append(full_url)
 
         for article_url in unique_links:
             yield scrapy.Request(article_url, callback=self.parse_detail)
 
-        if self.reached_cutoff:
+        if self._stop_pagination:
             return
 
-        next_page = response.xpath(
-            '//a[contains(@href, "/economie/banque-et-finances?start=")]/@href'
-        ).get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse_listing)
-            return
+        if has_valid_item_in_window:
+            next_page = response.xpath(
+                '//a[contains(@href, "/economie/banque-et-finances?start=")]/@href'
+            ).get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
+                return
 
-        pager_links = response.xpath(
-            '//a[contains(@href, "/economie/banque-et-finances")]/@href'
-        ).getall()
-        next_url = self._pick_next_page(response.url, pager_links)
-        if next_url:
-            yield scrapy.Request(response.urljoin(next_url), callback=self.parse_listing)
+            pager_links = response.xpath(
+                '//a[contains(@href, "/economie/banque-et-finances")]/@href'
+            ).getall()
+            next_url = self._pick_next_page(response.url, pager_links)
+            if next_url:
+                yield scrapy.Request(response.urljoin(next_url), callback=self.parse_listing)
 
     def parse_detail(self, response):
-        # 详情页提取标题、时间和正文，组装成统一的 NewsItem。
-        title = self._extract_title(response)
-        if not title:
+        item = self.auto_parse_item(response)
+        if not item.get("title") or not item.get("content_plain"):
             return
 
-        publish_time = self._extract_publish_time(response)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-            self.reached_cutoff = True
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response)
-        if not content:
-            return
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
+        # Spider-specific overrides
         item["author"] = "APS"
-        item["language"] = "ar"
         item["section"] = "banque-et-finances"
-        item["scrape_time"] = datetime.now()
-        yield item
+        item["language"] = "ar"
 
-    def _extract_title(self, response):
-        title = response.css("h1::text").get()
-        if title:
-            return self._clean_text(title)
-
-        title = response.xpath("//meta[@property='og:title']/@content").get()
-        if title:
-            return self._clean_text(title.split("|")[0])
-
-        return ""
-
-    def _extract_publish_time(self, response):
-        raw_date = response.css("time::text").get()
-        if not raw_date:
-            raw_date = response.xpath("//meta[@property='article:published_time']/@content").get()
-        if not raw_date:
-            raw_date = response.xpath(
-                "//h1/following::*[self::div or self::p or self::span][1]//text()"
-            ).get()
-
-        return self._parse_arabic_date(raw_date)
-
-    def _extract_content(self, response):
-        # APS 页面结构并不完全稳定，这里按多个正文容器顺序兜底提取。
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        selectors = [
-            "article",
-            "main article",
-            "[itemprop='articleBody']",
-            ".article-content",
-            ".item-content",
-            ".entry-content",
-            ".post-content",
-            ".content",
-            "main",
-        ]
-
-        root = None
-        for selector in selectors:
-            root = soup.select_one(selector)
-            if root and root.get_text(" ", strip=True):
-                break
-
-        if not root:
-            root = soup.body
-        if not root:
-            return ""
-
-        for unwanted in root.select(
-            "script, style, nav, footer, header, form, aside, .related, .social, .share"
-        ):
-            unwanted.decompose()
-
-        title = self._extract_title(response)
-        title_text = self._clean_text(title)
-
-        paragraphs = []
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text:
-                continue
-            if text == title_text:
-                continue
-            if text.lower() in ("related articles", "follow us", "most read"):
-                continue
-            if len(text) < 15:
-                continue
-            if text not in paragraphs:
-                paragraphs.append(text)
-
-        if paragraphs:
-            return "\n\n".join(paragraphs)
-
-        meta_desc = response.xpath("//meta[@property='og:description']/@content").get()
-        if not meta_desc:
-            meta_desc = response.xpath("//meta[@name='description']/@content").get()
-        return self._clean_text(meta_desc or "")
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
     def _pick_next_page(self, current_url, hrefs):
         current_start = self._extract_start_offset(current_url)
@@ -213,36 +131,3 @@ class AlgeriaApsSpider(SmartSpider):
             return int(match.group(1))
         return 0 if "banque-et-finances" in (url or "") else None
 
-    def _parse_arabic_date(self, value):
-        if not value:
-            return None
-
-        iso_match = re.search(
-            r"(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?",
-            value,
-        )
-        if iso_match:
-            year, month, day, hour, minute, second = iso_match.groups()
-            return datetime(
-                int(year),
-                int(month),
-                int(day),
-                int(hour),
-                int(minute),
-                int(second or 0),
-            )
-
-        parsed = dateparser.parse(
-            self._clean_text(value),
-            languages=["ar", "fr"],
-            settings={"TIMEZONE": "UTC"},
-        )
-        if not parsed:
-            return None
-        return parsed.replace(tzinfo=None)
-
-    def _clean_text(self, value):
-        if not value:
-            return ""
-        value = re.sub(r"\s+", " ", value)
-        return value.strip()

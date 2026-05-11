@@ -15,9 +15,9 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
     start_urls = ["data:,canada_bank_of_canada_start"]
     list_url = "https://www.bankofcanada.ca/press/announcements/"
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         html = self._fetch_html(self.list_url)
@@ -62,7 +62,7 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get()
             or response.xpath("//meta[@name='publication_date']/@content").get()
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, ["main", "article"])
         if not content:

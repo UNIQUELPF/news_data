@@ -31,7 +31,8 @@ class SwissinfoSpider(SmartSpider):
         yield scrapy.Request(
             'https://www.swissinfo.ch/eng/latest-news/',
             callback=self.parse,
-            meta=self._playwright_meta()
+            meta=self._playwright_meta(),
+        dont_filter=True,
         )
 
     def parse(self, response):

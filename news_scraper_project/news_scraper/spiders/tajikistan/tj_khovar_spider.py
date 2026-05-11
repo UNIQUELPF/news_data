@@ -84,11 +84,14 @@ class TjKhovarSpider(SmartSpider):
             return
 
         item = self.auto_parse_item(response)
-        if not item.get('content_plain'):
-            paragraphs = response.css('.shortcode-content p::text').getall()
-            content = "\n\n".join([p.strip() for p in paragraphs if p.strip()])
-            if content:
-                item['content_plain'] = content
+
+        # Always do bs4 full-text extraction from .shortcode-content
+        all_text_nodes = response.css('.shortcode-content *::text').getall()
+        bs4_content = "\n\n".join([t.strip() for t in all_text_nodes if t.strip()])
+        if bs4_content:
+            if not item.get('content_plain') or len(bs4_content) > len(item.get('content_plain', '')):
+                item['content_plain'] = bs4_content
+                self.logger.info(f"Used bs4 full-text extraction ({len(bs4_content)} chars) instead of ContentEngine ({len(item.get('content_plain', ''))} chars)")
 
         author = 'AMIT «Ховар»'
         item['author'] = author

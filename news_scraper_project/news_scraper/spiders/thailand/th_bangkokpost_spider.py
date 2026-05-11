@@ -35,7 +35,8 @@ class ThBangkokpostSpider(SmartSpider):
                 "playwright_include_page": True,
                 "playwright_page_init_callback": self.block_resources,
             },
-            callback=self.parse
+            callback=self.parse,
+        dont_filter=True,
         )
 
     async def block_resources(self, page, request):

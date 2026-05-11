@@ -52,7 +52,7 @@ class LPGovSpider(SmartSpider):
                 pass
         return None
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.FormRequest(
             url="https://www.lp.gov.lb/Webservice.asmx/GetNews",
             formdata={"pageNumber": "1"},

@@ -17,7 +17,7 @@ class KoreaMoefSpider(KoreaBaseSpider):
     rss_url = "http://english.moef.go.kr/pc/engmosfrss.do?boardCd=N0001"
     start_urls = [rss_url]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_feed, dont_filter=True)
 
@@ -49,12 +49,15 @@ class KoreaMoefSpider(KoreaBaseSpider):
                 continue
             if "boardCd=N0001" not in url:
                 continue
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if publish_time and publish_time < self.cutoff_date:
                 continue
             if not self.should_process(url):
                 continue
+            # Fetch detail page for full content (RSS description is too short)
+            detail_html = self._fetch_html(url)
+            detail_response = self._make_response(url, detail_html) if detail_html else response.replace(url=url)
             yield self._build_item(
-                response=response.replace(url=url),
+                response=detail_response,
                 title=title,
                 content=description or title,
                 publish_time=publish_time,

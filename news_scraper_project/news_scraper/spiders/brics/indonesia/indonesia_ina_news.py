@@ -35,7 +35,8 @@ class IndonesiaInaNewsSpider(SmartSpider):
         
         new_links_found = 0
         seen_urls = set()
-        
+        has_valid_item_in_window = False
+
         for card in cards:
             link = card.xpath(".//a[contains(@href, '/ina-in-the-news/')]/@href").get()
             if not link:
@@ -54,7 +55,7 @@ class IndonesiaInaNewsSpider(SmartSpider):
             publish_time_hint = self.parse_date(list_date_str) if list_date_str else None
             
             # CRITICAL: Early stop if date is behind cutoff
-            if publish_time_hint and not self.full_scan:
+            if publish_time_hint:
                 if publish_time_hint.date() < self.cutoff_date.date():
                     self.logger.info(f"STOPPING: Article date {publish_time_hint.date()} is older than cutoff {self.cutoff_date.date()}. URL: {full_url}")
                     continue
@@ -62,6 +63,7 @@ class IndonesiaInaNewsSpider(SmartSpider):
             # Check if we should process
             if self.should_process(full_url, publish_time_hint):
                 new_links_found += 1
+                has_valid_item_in_window = True
                 yield scrapy.Request(
                     full_url, 
                     callback=self.parse_detail,

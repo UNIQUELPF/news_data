@@ -43,6 +43,7 @@ class USAReutersSpider(SmartSpider):
                         PageMethod('wait_for_timeout', 2000),
                     ],
                 },
+            dont_filter=True,
             )
 
     def parse_section_page(self, response):

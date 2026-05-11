@@ -22,7 +22,7 @@ class IndiaMoneycontrolSpider(SmartSpider):
     fallback_content_selector = "#contentdata, .page_left_wrapper, .content_wrapper, .article_desc"
 
     custom_settings = {
-        "CONCURRENT_REQUESTS": 2,
+        "CONCURRENT_REQUESTS": 1,
         "DOWNLOAD_DELAY": 1.0,
         "AUTOTHROTTLE_ENABLED": True,
         "DEFAULT_REQUEST_HEADERS": {
@@ -44,6 +44,8 @@ class IndiaMoneycontrolSpider(SmartSpider):
         )
 
     def parse_list(self, response):
+        if self._stop_pagination:
+            return
         current_page = response.meta.get('current_page', 1)
         # Extract links from the economy news list
         links = response.css('.fleft a::attr(href), #left-container a::attr(href), .article_title a::attr(href)').getall()
@@ -68,18 +70,21 @@ class IndiaMoneycontrolSpider(SmartSpider):
                 if link.endswith('.html') and '/page-' not in link:
                     valid_article_links.add(response.urljoin(link))
 
+        has_valid_item_in_window = False
+
         for full_url in valid_article_links:
             if self.should_process(full_url, None):
+                has_valid_item_in_window = True
                 new_links_found += 1
                 yield scrapy.Request(
-                    full_url, 
+                    full_url,
                     callback=self.parse_detail,
                     headers=self.custom_settings.get("DEFAULT_REQUEST_HEADERS", {})
                 )
-        
+
         # Logic: If we found new valid articles on this page, or we are in full_scan mode,
         # we proceed to the next page.
-        if (new_links_found > 0) or (self.full_scan and valid_article_links):
+        if has_valid_item_in_window or (self.full_scan and valid_article_links):
             next_page = current_page + 1
             next_url = f"https://www.moneycontrol.com/news/business/economy/page-{next_page}/"
             self.logger.info(f"Continuing to page {next_page}...")
@@ -111,7 +116,8 @@ class IndiaMoneycontrolSpider(SmartSpider):
                 item['images'].insert(0, og_image)
 
         # Stop if older than cutoff
-        if not self.full_scan and item['publish_time'] and item['publish_time'] < self.cutoff_date:
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
             return
 
         item['author'] = response.css('.article_author::text, .article_author span::text').get() or "Moneycontrol Staff"

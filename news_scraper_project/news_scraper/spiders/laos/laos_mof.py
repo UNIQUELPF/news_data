@@ -17,11 +17,13 @@ class LaosMofSpider(LaosBaseSpider):
         "https://soe.mof.gov.la/news",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse)
+            yield scrapy.Request(url, callback=self.parse, dont_filter=True)
 
     def parse(self, response):
+        if self._stop_pagination:
+            return
         emitted = 0
         for href in response.css("a[href*='news_detail/']::attr(href), a[href*='/news/']::attr(href)").getall():
             url = response.urljoin(href)
@@ -29,7 +31,7 @@ class LaosMofSpider(LaosBaseSpider):
                 continue
             if "/news" not in url:
                 continue
-            yield scrapy.Request(url, callback=self.parse_detail)
+            yield scrapy.Request(url, callback=self.parse_detail, dont_filter=self.full_scan)
             emitted += 1
             if emitted >= 15:
                 return
@@ -47,6 +49,7 @@ class LaosMofSpider(LaosBaseSpider):
         match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b|\b\d{4}-\d{2}-\d{2}\b", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
         if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, ["article", "main", ".content", ".entry-content", ".news-detail"])

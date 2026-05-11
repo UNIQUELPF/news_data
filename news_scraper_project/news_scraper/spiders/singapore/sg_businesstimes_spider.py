@@ -17,6 +17,7 @@ class SgBusinessTimesSpider(SmartSpider):
     # 商业时报隐藏的分页 API (v1)
     api_url = 'https://www.businesstimes.com.sg/_plat/api/v1/articles/sections?size=20&sections=singapore_economy-policy&page={}'
     use_curl_cffi = True
+    _next_page_yielded = False
 
     async def start(self):
         yield scrapy.Request(
@@ -56,7 +57,6 @@ class SgBusinessTimesSpider(SmartSpider):
             return
 
         current_page = response.meta.get('page', 1)
-        valid_items = 0
 
         for item in items:
             article_data = item.get('articleData', {})
@@ -77,22 +77,11 @@ class SgBusinessTimesSpider(SmartSpider):
                 pub_date = pub_date.replace(tzinfo=None)
 
             if self.should_process(href, pub_date):
-                valid_items += 1
                 yield response.follow(
                     href,
                     self.parse_article,
-                    meta={'publish_time_hint': pub_date}
+                    meta={'publish_time_hint': pub_date, 'from_page': current_page}
                 )
-
-        # 翻页推进
-        if valid_items > 0:
-            next_page = current_page + 1
-            yield scrapy.Request(
-                self.api_url.format(next_page),
-                callback=self.parse,
-                meta={'page': next_page},
-                dont_filter=True
-            )
 
     def parse_article(self, response):
         item = self.auto_parse_item(
@@ -104,5 +93,18 @@ class SgBusinessTimesSpider(SmartSpider):
             return
         item['author'] = 'Business Times SG'
         item['section'] = 'Economy & Policy'
+
+        # Defer next API page request to here, so _stop_pagination takes effect first
+        from_page = response.meta.get('from_page')
+        if from_page is not None and not self._next_page_yielded:
+            self._next_page_yielded = True
+            next_page = from_page + 1
+            yield scrapy.Request(
+                self.api_url.format(next_page),
+                callback=self.parse,
+                meta={'page': next_page},
+                dont_filter=True
+            )
+
         if item.get('content_plain') and len(item['content_plain']) > 50:
             yield item

@@ -35,7 +35,7 @@ class ItIlsole24oreSpider(SmartSpider):
         "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 60000 * 5,
     }
 
-    def start_requests(self):
+    async def start(self):
         """Launch listing pages with JS 'Load More' pagination controlled by cutoff_date."""
         if self.cutoff_date:
             target_date_str = self.cutoff_date.strftime('%Y-%m-%dT%H:%M:%SZ')

@@ -1,6 +1,7 @@
 # 阿联酋fxnewstoday爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 from datetime import datetime
 import re
@@ -13,10 +14,11 @@ class UaeFxNewsTodaySpider(SmartSpider):
     language = 'ar'
     source_timezone = 'Asia/Dubai' # UAE Time
     use_curl_cffi = True
-    
+
     # Selective selectors for FX News Today
+    # .desc-text is the main content container (Arabic text)
     fallback_content_selector = ".desc-text, .article-content, .content-article"
-    
+
     allowed_domains = ["fxnewstoday.ae"]
 
     custom_settings = {
@@ -28,9 +30,9 @@ class UaeFxNewsTodaySpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.fxnewstoday.ae/latest-news"
-        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1})
+        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1}, dont_filter=True)
 
     def parse_list(self, response):
         # Use CSS for article discovery
@@ -80,23 +82,80 @@ class UaeFxNewsTodaySpider(SmartSpider):
             title_xpath="//h1//text()",
             publish_time_xpath="//time/@datetime"
         )
-        
+
+        # Override content with BS4 extraction for Arabic text
+        # ContentEngine strips Arabic, so we need direct HTML extraction
+        bs4_content = self._extract_content(response)
+        if bs4_content:
+            item['content_plain'] = bs4_content
+
         # Override metadata if list page had better info
         if response.meta.get('publish_time') and not item.get('publish_time'):
             item['publish_time'] = response.meta['publish_time']
-            
+
         # Ensure image is captured for financial news
         if not item.get('images'):
             og_image = response.xpath("//meta[@property='og:image']/@content").get()
             if og_image:
                 item['images'] = [response.urljoin(og_image)]
-        
+
         # Force language and country
         item['language'] = self.language
         item['country'] = self.country
         item['section'] = 'Latest News'
-        
+
         yield item
+
+    def _extract_content(self, response):
+        """Extract article content via BS4, preserving Arabic text.
+
+        ContentEngine/trafilatura strips Arabic text, so we use BS4
+        direct extraction to preserve all paragraphs.
+
+        The site's article detail pages stack multiple articles vertically.
+        This method finds the first h1 (the target article) and extracts
+        paragraphs from its parent container.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        for tag in soup.find_all(['script', 'style', 'nav', 'footer', 'aside', 'header']):
+            tag.decompose()
+
+        # Try known content selectors first (forward-compat)
+        for selector in ['.desc-text', '.w-full.md\:w-3\/4', '.article-content', '.content-article',
+                         '.entry-content', '.post-content', '.article-body']:
+            root = soup.select_one(selector)
+            if root:
+                parts = []
+                for node in root.find_all(['p', 'h2', 'h3', 'li']):
+                    text = node.get_text(strip=True)
+                    if text and len(text) > 5:
+                        parts.append(text)
+                if parts:
+                    return '\n\n'.join(parts)
+
+        # h1-based extraction: find the first h1 and get paragraphs
+        # from its parent container (targets the primary article)
+        h1 = soup.find('h1')
+        if h1:
+            parent = h1.find_parent()
+            parts = []
+            for node in parent.find_all(['p']):
+                text = node.get_text(strip=True)
+                if text and len(text) > 20:
+                    parts.append(text)
+            if parts:
+                return '\n\n'.join(parts)
+
+        # Ultimate fallback: collect all substantial paragraphs
+        body = soup.find('body') or soup
+        parts = []
+        for node in body.find_all('p'):
+            text = node.get_text(strip=True)
+            if text and len(text) > 30:
+                parts.append(text)
+
+        return '\n\n'.join(parts) if parts else ''
 
     def _extract_date_from_text(self, text):
         if not text:

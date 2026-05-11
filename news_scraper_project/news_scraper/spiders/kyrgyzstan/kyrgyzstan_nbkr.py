@@ -21,9 +21,9 @@ class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
         "https://www.nbkr.kg/index1.jsp?item=2546&lang=ENG",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         emitted = 0
@@ -57,7 +57,7 @@ class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
             self._extract_first_match(title, r"(\d{2}\.\d{2}\.\d{4})"),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_pdf_text(response.url)

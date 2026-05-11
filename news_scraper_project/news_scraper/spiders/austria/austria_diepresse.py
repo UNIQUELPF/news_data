@@ -26,24 +26,38 @@ class AustriaDiePresseSpider(AustriaBaseSpider):
         "https://www.diepresse.com/wirtschaft",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        links = response.css('a[href*="diepresse.com/"]::attr(href)').getall()
+        if self._stop_pagination:
+            return
+
+        # 列表页链接为相对路径, 格式: /数字/article-slug
+        links = response.css('a[href^="/"]::attr(href)').getall()
+        has_valid_item_in_window = False
+
         for href in links:
             full_url = response.urljoin(href)
+            if not re.search(r"/\d+/", full_url):
+                continue
             if not self.should_process(full_url):
                 continue
-            if not full_url.startswith("https://www.diepresse.com/"):
-                continue
-            if not re.search(r"https://www\.diepresse\.com/\d+/", full_url):
-                continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
+        if not has_valid_item_in_window:
+            self.logger.info(f"No valid items found in window on {response.url}")
+
     def parse_detail(self, response):
-        section_path = response.xpath("//meta[@name='section-path']/@content").get() or ""
+        section_path = (
+            response.xpath("//meta[@name='kt:section-path']/@content").get()
+            or response.xpath("//meta[@name='section-path']/@content").get()
+            or ""
+        )
         if "/wirtschaft/" not in section_path:
             return
 
@@ -55,12 +69,15 @@ class AustriaDiePresseSpider(AustriaBaseSpider):
             return
 
         publish_time = self._parse_datetime(
-            response.xpath("//meta[@property='article:published_time']/@content").get()
+            response.xpath("//meta[@name='article:published_time']/@content").get()
+            or response.xpath("//meta[@property='article:published_time']/@content").get()
             or response.xpath("//time/@datetime").get()
             or response.xpath("//time/text()").get(),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

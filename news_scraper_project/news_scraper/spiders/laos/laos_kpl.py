@@ -12,13 +12,23 @@ class LaosKplSpider(LaosBaseSpider):
     country_code = 'LAO'
 
     allowed_domains = ["kpl.gov.la", "www.kpl.gov.la"]
-    start_urls = ["https://kpl.gov.la/En/"]
+    start_urls = [
+        "https://kpl.gov.la/En/News.aspx?cat=10",
+        "https://kpl.gov.la/En/News.aspx?cat=9",
+    ]
 
     def parse(self, response):
         emitted = 0
-        for href in response.css("a[href*='detail.aspx']::attr(href)").getall():
+        for li in response.css('ul.news-story li'):
+            href = li.css('a[href*="detail.aspx"]::attr(href)').get()
+            if not href:
+                continue
             url = response.urljoin(href)
-            if "/En/" not in url or not self.should_process(url):
+            if "/En/" not in url:
+                continue
+            date_str = li.css('p.uk-text-small.uk-text-muted::text').get()
+            publish_time = self._parse_datetime(date_str, languages=["en"]) if date_str else None
+            if not self.should_process(url, publish_time):
                 continue
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1

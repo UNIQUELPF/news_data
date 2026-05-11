@@ -17,9 +17,9 @@ class CanadaIsedSpider(CanadaBaseSpider):
         "?dept=departmentofindustry&sort=publishedDate&orderBy=desc&publishedDate>=2020-08-09&pick=10"
     )
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         payload = self._fetch_json(self.api_url)
@@ -30,7 +30,7 @@ class CanadaIsedSpider(CanadaBaseSpider):
             publish_time = self._parse_datetime(entry.get("publishedDate"))
             if not url or not title:
                 continue
-            if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+            if not self.should_process(url, publish_time):
                 continue
             detail_html = self._fetch_html(url)
             item = next(
@@ -57,7 +57,7 @@ class CanadaIsedSpider(CanadaBaseSpider):
             response.xpath("//time/@datetime").get()
             or response.xpath("//meta[@name='dcterms.issued']/@content").get()
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
         content = self._extract_content(response, ["main"])
         if not content:

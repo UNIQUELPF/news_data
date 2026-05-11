@@ -29,7 +29,8 @@ class ThNationthailandSpider(SmartSpider):
         yield scrapy.Request(
             self.base_api_url.format(1),
             callback=self.parse,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse(self, response):

@@ -26,9 +26,9 @@ class UaeMubasherSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         url = "https://www.mubasher.info/news/sa/now/latest"
-        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1})
+        yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1}, dont_filter=True)
 
     def parse_list(self, response):
         # The main card container that includes both the metadata and the visible date

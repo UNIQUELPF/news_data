@@ -51,7 +51,7 @@ class SgZaobaoSpider(SmartSpider):
             return
 
         current_page = response.meta.get('page', 1)
-        valid_items = 0
+        has_valid_item_in_window = False
 
         for art in articles:
             href = art.get('href')
@@ -65,12 +65,12 @@ class SgZaobaoSpider(SmartSpider):
             if not self.should_process(href, pub_date):
                 continue
 
-            valid_items += 1
+            has_valid_item_in_window = True
             full_url = response.urljoin(href)
             yield response.follow(full_url, self.parse_article)
 
-        # 继续翻页 API
-        if valid_items > 0 and current_page < 200:
+        # 继续翻页 API (circuit breaker: 仅在当前页有有效文章时翻页)
+        if has_valid_item_in_window:
             next_page = current_page + 1
             yield scrapy.Request(
                 self.api_url.format(next_page),

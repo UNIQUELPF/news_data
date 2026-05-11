@@ -17,21 +17,41 @@ class BahrainEdbSpider(BahrainBaseSpider):
     country = '巴林'
     allowed_domains = ["bahrainedb.com", "www.bahrainedb.com"]
     target_table = "bhr_edb"
+
+    fallback_content_selector = "article, main"
+
     start_urls = [
         "https://www.bahrainedb.com/latest-news",
     ]
 
-    def start_requests(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._stop_pagination = False
+
+    def should_process(self, url, publish_time=None):
+        if self.full_scan:
+            return True
+        if publish_time and publish_time < self.cutoff_date:
+            return False
+        return url not in self.seen_urls
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+        has_valid_item_in_window = False
         for href in response.css("a[href*='/latest-news/']::attr(href)").getall():
             full_url = response.urljoin(href)
-            if full_url in self.seen_urls or full_url.rstrip("/") == self.start_urls[0].rstrip("/"):
+            if not self.should_process(full_url) or full_url.rstrip("/") == self.start_urls[0].rstrip("/"):
                 continue
             self.seen_urls.add(full_url)
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         data = self._extract_article_schema(response)
@@ -49,7 +69,8 @@ class BahrainEdbSpider(BahrainBaseSpider):
             or response.xpath("//meta[contains(@property, 'published')]/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._clean_text((data or {}).get("articleBody")) or self._extract_content(response, title)
@@ -101,4 +122,3 @@ class BahrainEdbSpider(BahrainBaseSpider):
             if text not in parts:
                 parts.append(text)
         return "\n\n".join(parts)
-

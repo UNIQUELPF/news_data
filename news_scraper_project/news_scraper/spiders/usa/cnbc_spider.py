@@ -39,7 +39,7 @@ class USACNBCSpider(SmartSpider):
     async def start(self):
         for url in self.section_urls:
             section_name = url.strip('/').split('/')[-1]
-            yield scrapy.Request(url, callback=self.parse, meta={'section_hint': url})
+            yield scrapy.Request(url, callback=self.parse, meta={'section_hint': url}, dont_filter=True)
 
     def parse(self, response):
         if self._stop_pagination:
@@ -87,7 +87,8 @@ class USACNBCSpider(SmartSpider):
         # CNBC GraphQL pagination placeholder
         if has_valid_item_in_window:
             section_name = section_hint.strip('/').split('/')[-1]
-            yield from self.request_api_page(section_name, offset=30)
+            for req in (self.request_api_page(section_name, offset=30) or []):
+                yield req
 
     def request_api_page(self, section_name, offset):
         """CNBC GraphQL pagination placeholder - implement with actual API endpoint when available."""
@@ -96,23 +97,26 @@ class USACNBCSpider(SmartSpider):
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
 
-        # ContentEngine fallback: CNBC specific cleaning
-        if not item.get('content_plain'):
-            content_parts = []
-            body = response.css('.ArticleBody-articleBody')
-            if not body:
-                body = response.css('div.group')
+        # ContentEngine fallback: CNBC specific cleaning.
+        # Always extract from .ArticleBody-articleBody and use whichever content is longer.
+        fallback_parts = []
+        body = response.css('.ArticleBody-articleBody')
+        if not body:
+            body = response.css('div.group')
 
-            if body:
-                soup = BeautifulSoup(body.get(), 'html.parser')
-                for tag in soup(['script', 'style', 'aside', 'button', 'nav']):
-                    tag.decompose()
-                for p in soup.find_all(['p', 'div']):
-                    text = p.get_text().strip()
-                    if len(text) > 40:
-                        content_parts.append(text)
-            if content_parts:
-                item['content_plain'] = '\n\n'.join(content_parts)
+        if body:
+            soup = BeautifulSoup(body.get(), 'html.parser')
+            for tag in soup(['script', 'style', 'aside', 'button', 'nav']):
+                tag.decompose()
+            for p in soup.find_all(['p', 'div']):
+                text = p.get_text().strip()
+                if len(text) > 40:
+                    fallback_parts.append(text)
+
+        fallback_text = '\n\n'.join(fallback_parts) if fallback_parts else ''
+        existing_text = item.get('content_plain', '') or ''
+        if len(fallback_text) > len(existing_text):
+            item['content_plain'] = fallback_text
 
         item['author'] = response.css('a.Author-authorName::text').get() or 'CNBC'
         item['section'] = response.meta.get('section_hint', 'USA Business')

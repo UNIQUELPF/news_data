@@ -23,12 +23,13 @@ class MexicoInfobaeSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         url = f"{self.start_urls[0]}?page=1"
         yield scrapy.Request(
             url,
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse_list(self, response):

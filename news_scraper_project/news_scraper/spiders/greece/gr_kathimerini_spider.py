@@ -31,7 +31,7 @@ class GrKathimeriniSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_list, dont_filter=True, meta={'page': 1})
 

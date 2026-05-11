@@ -3,6 +3,7 @@ import json
 import re
 
 import scrapy
+from scrapy_playwright.page import PageMethod
 
 from news_scraper.spiders.laos.base import LaosBaseSpider
 
@@ -15,13 +16,82 @@ class LaosLaotianTimesSpider(LaosBaseSpider):
     allowed_domains = ["laotiantimes.com", "www.laotiantimes.com"]
     start_urls = ["https://laotiantimes.com/category/business/"]
 
+    # Anubis anti-bot requires a real browser; Playwright handles the
+    # proof-of-work challenge (~10s on the first request). After that
+    # the auth cookie persists in the shared Playwright context and
+    # subsequent requests load the real page immediately.
+    playwright = True
+    use_curl_cffi = True
+
+    fallback_content_selector = "article, main"
+
+    custom_settings = {
+        "DOWNLOAD_DELAY": 1.0,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
+        "CONCURRENT_REQUESTS": 2,
+    }
+
+    async def start(self):
+        yield scrapy.Request(
+            self.start_urls[0],
+            callback=self.parse,
+            meta={
+                "playwright": True,
+                "playwright_context": "laotiantimes",
+                "playwright_page_methods": [
+                    # Wait for the Anubis proof-of-work challenge to finish
+                    PageMethod(
+                        "wait_for_function",
+                        "() => document.title !== \"Making sure you're not a bot!\"",
+                        timeout=45000,
+                    ),
+                ],
+            },
+            dont_filter=True,
+        )
+
     def parse(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        urls = sorted(set(re.findall(r"https://laotiantimes\.com/\d{4}/\d{2}/\d{2}/[a-z0-9\-]+/?", html)))
-        for url in urls[:15]:
+        # --- Sanity check: if Anubis challenge was not solved, bail out ---
+        if "Making sure you're not a bot!" in (response.css("title::text").get() or ""):
+            self.logger.error("Anubis challenge not solved; aborting.")
+            self._stop_pagination = True
+            return
+
+        links = response.css(
+            'a[href*="laotiantimes.com"]::attr(href), '
+            'a[href*="laotiantimes.com/2"]::attr(href)'
+        ).getall()
+
+        if not links:
+            html = response.text
+            links = sorted(set(re.findall(
+                r"https://(?:www\.)?laotiantimes\.com/\d{4}/\d{2}/\d{2}/[a-z0-9\-]+/?",
+                html
+            )))
+
+        has_valid_item_in_window = False
+        seen = set()
+        for url in links:
+            if url in seen:
+                continue
+            seen.add(url)
+            if not url.startswith("http"):
+                continue
             if not self.should_process(url):
                 continue
-            yield scrapy.Request(url, callback=self.parse_detail)
+            has_valid_item_in_window = True
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                meta={
+                    "playwright": True,
+                    "playwright_context": "laotiantimes",
+                },
+                dont_filter=self.full_scan,
+            )
+
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         schema = self._extract_article_schema(response)
@@ -39,6 +109,7 @@ class LaosLaotianTimesSpider(LaosBaseSpider):
             languages=["en"],
         )
         if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._clean_text((schema or {}).get("articleBody")) or self._extract_content(

@@ -3,6 +3,7 @@
 import scrapy
 import re
 from datetime import datetime
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -94,13 +95,57 @@ class DanasSpider(SmartSpider):
             self.logger.error(f"Error parsing date {date_str}: {e}")
         return None
 
+    def _extract_content(self, response):
+        """Extract article content from .post-content via BS4."""
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root = soup.select_one('.post-content')
+        if not root:
+            return ''
+
+        for tag in root.find_all(['script', 'style', 'nav', 'footer', 'aside']):
+            tag.decompose()
+
+        parts = []
+        for node in root.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 5:
+                parts.append(text)
+        return '\n\n'.join(parts)
+
     def parse_detail(self, response):
-        """Parses the article detail page."""
-        item = self.auto_parse_item(
-            response,
-            title_xpath="//h1/text()",
-        )
-        item['author'] = 'Danas.rs'
-        item['section'] = 'Vesti/Ekonomija'
-        if item.get('content_plain') and len(item['content_plain']) > 50:
-            yield item
+        """Parses the article detail page with BS4 content extraction."""
+        content = self._extract_content(response)
+
+        if content and len(content) > 50:
+            title = (response.css('h1::text').get()
+                     or response.css('title::text').get()
+                     or response.meta.get('title_hint', '')).strip()
+
+            og_image = response.xpath("//meta[@property='og:image']/@content").get()
+            images = [response.urljoin(og_image)] if og_image else []
+
+            publish_time = response.meta.get('publish_time_hint')
+
+            item = {
+                'url': response.url,
+                'title': title,
+                'content_plain': content,
+                'content_html': f'<div class="article-content">{content}</div>',
+                'publish_time': publish_time,
+                'images': images,
+                'raw_html': response.text,
+                'language': self.language,
+                'section': 'Vesti/Ekonomija',
+                'country_code': self.country_code,
+                'country': self.country,
+            }
+            item['author'] = 'Danas.rs'
+        else:
+            item = self.auto_parse_item(
+                response,
+                title_xpath="//h1/text()",
+            )
+            item['author'] = 'Danas.rs'
+            item['section'] = 'Vesti/Ekonomija'
+
+        yield item

@@ -27,10 +27,11 @@ class IrelandIrishExaminerSpider(IrelandBaseSpider):
     start_urls = [
         "https://www.irishexaminer.com/business/",
     ]
+    strict_date_required = False
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         # 经济类列表页：抓 business 频道下带 arid 标识的文章。
@@ -58,7 +59,7 @@ class IrelandIrishExaminerSpider(IrelandBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
 
         content = self._extract_content(response)

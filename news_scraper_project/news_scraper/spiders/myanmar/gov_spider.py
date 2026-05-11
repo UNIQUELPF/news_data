@@ -23,13 +23,14 @@ class MyanmarGovSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         base_param = "?_com_liferay_asset_publisher_web_portlet_AssetPublisherPortlet_INSTANCE_idasset354_cur="
         url = f"{self.start_urls[0]}{base_param}1"
         yield scrapy.Request(
             url,
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse_list(self, response):

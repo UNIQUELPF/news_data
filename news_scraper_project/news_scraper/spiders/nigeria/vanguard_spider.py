@@ -23,11 +23,12 @@ class NigeriaVanguardSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             'https://www.vanguardngr.com/category/business/',
             callback=self.parse_list,
-            meta={'page': 1}
+            meta={'page': 1},
+        dont_filter=True,
         )
 
     def parse_list(self, response):

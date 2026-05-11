@@ -61,8 +61,8 @@ class ContentEngine:
                 extracted_soup = BeautifulSoup(extracted_html or '', 'lxml')
                 extracted_img_count = len(extracted_soup.find_all('img'))
                 
-                if raw_img_count > 0 and extracted_img_count == 0:
-                    logger.info(f"Trafilatura stripped all images. Switching to Fidelity Mode for {base_url}")
+                if raw_img_count > 0 and extracted_img_count < raw_img_count:
+                    logger.info(f"Trafilatura stripped {raw_img_count - extracted_img_count}/{raw_img_count} images. Switching to Fidelity Mode for {base_url}")
                     use_fidelity_mode = True
 
             # 3. Execution based on mode

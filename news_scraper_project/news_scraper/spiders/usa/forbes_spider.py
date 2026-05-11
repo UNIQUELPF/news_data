@@ -28,7 +28,7 @@ class USAForbesSpider(SmartSpider):
     }
 
     async def start(self):
-        yield scrapy.Request(self.start_urls[0], callback=self.parse)
+        yield scrapy.Request(self.start_urls[0], callback=self.parse, dont_filter=True)
 
     def parse(self, response):
         """Parse the Forbes listing HTML page, then trigger API pagination."""
@@ -66,7 +66,8 @@ class USAForbesSpider(SmartSpider):
 
         # Trigger API pagination for deeper historical articles
         if has_valid_item_in_window:
-            yield from self.request_api(start=0)
+            for req in (self.request_api(start=0) or []):
+                yield req
 
     def request_api(self, start):
         """Forbes simple-data API request with offset-based pagination."""
@@ -130,7 +131,8 @@ class USAForbesSpider(SmartSpider):
             # Continue pagination if articles are still within the window
             next_start = response.meta['start'] + 50
             if has_valid_item_in_window:
-                yield from self.request_api(next_start)
+                for req in (self.request_api(next_start) or []):
+                    yield req
         except Exception as e:
             self.logger.error(f"Forbes API error: {e}")
 

@@ -1,12 +1,11 @@
 # 阿尔及利亚sonatrach爬虫，负责抓取对应站点、机构或栏目内容。
 
-from datetime import datetime
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from urllib.parse import urljoin
 
-import dateparser
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 
 # 阿尔及利亚官方企业类来源
 # 站点：Sonatrach
@@ -35,6 +34,8 @@ class AlgeriaSonatrachSpider(SmartSpider):
     start_date = "2026-01-01"
     allowed_domains = ["sonatrach.com"]
 
+    fallback_content_selector = ".entry-content, article, main"
+
     start_urls = [
         "https://sonatrach.com/en/category/press-releases/",
     ]
@@ -43,81 +44,90 @@ class AlgeriaSonatrachSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
         article_links = response.css("article a::attr(href), .entry-title a::attr(href), h2 a::attr(href)").getall()
 
+        has_valid_item_in_window = False
         for href in article_links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url) or "/category/" in full_url or "/wp-content/uploads/" in full_url:
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            has_valid_item_in_window = True
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
-        if self.reached_cutoff:
+        if self._stop_pagination:
             return
 
-        next_page = response.css("a.next.page-numbers::attr(href), a[rel='next']::attr(href)").get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse_listing)
+        if has_valid_item_in_window:
+            next_page = response.css("a.next.page-numbers::attr(href), a[rel='next']::attr(href)").get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
+
+    def extract_content(self, response):
+        """Custom BS4 extraction: sonatrach uses .entry-content.clear with astra theme."""
+        soup = BeautifulSoup(response.text, "lxml")
+        content_area = soup.select_one(".entry-content.clear")
+        if not content_area:
+            return super().extract_content(response)
+
+        for tag in content_area.find_all(
+            ["script", "style", "nav", "footer", "header", "aside", "form", "button", "iframe"]
+        ):
+            tag.decompose()
+
+        # Collect images
+        images = []
+        for img in content_area.find_all("img"):
+            src = img.get("src") or img.get("data-src") or img.get("data-original") or img.get("data-lazy-src")
+            if src:
+                alt = img.get("alt", "")
+                images.append({"url": urljoin(response.url, src), "alt": alt})
+
+        # Normalize images
+        for img in content_area.find_all("img"):
+            src = img.get("src")
+            if src:
+                img["src"] = urljoin(response.url, src)
+            alt = img.get("alt", "")
+            img.attrs = {"src": img.get("src", ""), "alt": alt}
+
+        # Normalize links
+        for a in content_area.find_all("a"):
+            href = a.get("href")
+            if href:
+                a["href"] = urljoin(response.url, href)
+            a.attrs = {"href": a.get("href", "#")}
+
+        content_cleaned = str(content_area)
+        content_markdown = md(content_cleaned, strip=["script", "style", "iframe", "object", "embed"])
+        content_plain = content_area.get_text(separator=" ", strip=True)
+
+        return {
+            "content_cleaned": content_cleaned.strip(),
+            "content_markdown": content_markdown.strip(),
+            "content_plain": content_plain.strip(),
+            "images": images,
+        }
 
     def parse_detail(self, response):
-        title = self._clean_text(response.css("h1::text").get() or response.xpath("//meta[@property='og:title']/@content").get())
-        if not title:
+        item = self.auto_parse_item(response)
+        if not item.get("title") or not item.get("content_plain"):
             return
 
-        publish_time = self._parse_datetime(response.xpath("//meta[@property='article:published_time']/@content").get())
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-            self.reached_cutoff = True
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response)
-        if not content:
-            return
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
+        # Spider-specific overrides
         item["author"] = "Sonatrach"
-        item["language"] = "en"
         item["section"] = "press-releases"
-        item["scrape_time"] = datetime.now()
-        yield item
+        item["language"] = "en"
 
-    def _extract_content(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one(".entry-content") or soup.select_one("article") or soup.select_one("main")
-        if not root:
-            return ""
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
-        for unwanted in root.select("script, style, nav, footer, header, aside, form, figure, .share, .post-categories"):
-            unwanted.decompose()
-
-        parts = []
-        title = self._clean_text(response.css("h1::text").get())
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 12:
-                continue
-            if text == title or text.lower() == "read more...":
-                continue
-            if text not in parts:
-                parts.append(text)
-        return "\n\n".join(parts)
-
-    def _parse_datetime(self, value):
-        if not value:
-            return None
-        parsed = dateparser.parse(value, languages=["en"], settings={"TIMEZONE": "UTC"})
-        if not parsed:
-            return None
-        return parsed.replace(tzinfo=None)
-
-    def _clean_text(self, value):
-        if not value:
-            return ""
-        return " ".join(str(value).split()).strip()

@@ -17,25 +17,36 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
     start_urls = ["data:,netherlands_cbs_start"]
     feed_url = "https://www.cbs.nl/en-gb/rss-feeds/economie"
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+
         xml_text = self._fetch_html(self.feed_url)
         soup = BeautifulSoup(xml_text, "xml")
+        has_valid_item_in_window = False
         for node in soup.find_all("item"):
             full_url = self._clean_text((node.link.text if node.link else "")).split("?")[0]
             if "/en-gb/news/" not in full_url:
                 continue
-            if not self.should_process(full_url):
+            pubDate_text = node.pubDate.text if node.pubDate else None
+            publish_time = self._parse_datetime(pubDate_text, languages=["en"]) if pubDate_text else None
+            if not self.should_process(full_url, publish_time):
                 continue
+            if self._stop_pagination:
+                break
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
             if item:
+                has_valid_item_in_window = True
                 yield item
 
     def parse_detail(self, response):
@@ -52,7 +63,8 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:100])),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, ["main", "article", ".content", ".article"])

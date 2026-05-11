@@ -19,9 +19,11 @@ class LaosBolSpider(LaosBaseSpider):
         "https://www.bol.gov.la/en/fileupload/29-05-2024_1716971673.pdf",
     ]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            if not self.should_process(url):
+            match = re.search(r"(\d{2})-(\d{2})-(\d{4})", url)
+            publish_time = datetime.strptime(match.group(0), "%d-%m-%Y") if match else None
+            if not self.should_process(url, publish_time):
                 continue
             pdf_bytes = self._fetch_pdf(url)
             if not pdf_bytes:

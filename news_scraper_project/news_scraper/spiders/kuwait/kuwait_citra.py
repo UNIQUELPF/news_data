@@ -1,5 +1,4 @@
 # 科威特通信与信息技术监管局爬虫，抓取英文监管新闻。
-import re
 
 import scrapy
 
@@ -13,6 +12,7 @@ class KuwaitCitraSpider(KuwaitBaseSpider):
 
     allowed_domains = []
     start_urls = ["https://www.citra.gov.kw/sites/en/Pages/NewsEvents.aspx"]
+    fallback_content_selector = '.news-details'
 
     def parse(self, response):
         emitted = 0
@@ -20,27 +20,22 @@ class KuwaitCitraSpider(KuwaitBaseSpider):
             url = response.urljoin(href)
             if not self.should_process(url):
                 continue
-            yield scrapy.Request(url, callback=self.parse_detail)
+            yield scrapy.Request(url, callback=self.parse_detail, dont_filter=self.full_scan)
             emitted += 1
             if emitted >= 12:
                 return
 
     def parse_detail(self, response):
-        content = self._extract_content(response, [".news-details", "main", ".content"])
-        if not content:
-            return
-
-        title = self._clean_text(
-            response.css("title::text").get()
-            or response.xpath("//meta[@property='og:title']/@content").get()
+        item = self.auto_parse_item(
+            response,
+            title_xpath="//h2[1]/text()",
+            publish_time_xpath="//p[@class='news-date']/text()",
         )
-        if not title:
-            title = content.split(". ", 1)[0][:180]
 
-        page_text = self._clean_text(" ".join(response.css(".news-details *::text").getall()))
-        match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}", page_text)
-        publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if not self.should_process(response.url, publish_time):
+        if not self.should_process(response.url, item.get('publish_time')):
             return
 
-        yield self._build_item(response, title, content, publish_time, "CITRA", "en", "regulator")
+        item['author'] = 'CITRA'
+        item['section'] = 'regulator'
+
+        yield item

@@ -37,7 +37,7 @@ class MalaysiakiniSpider(SmartSpider):
     API_URL = "https://www.malaysiakini.com/api/en/latest/news/{}?limit=50"
     MAX_PAGES = 500
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.API_URL.format(1),
             callback=self.parse_list,

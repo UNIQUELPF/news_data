@@ -23,7 +23,7 @@ class TjPresidentSpider(SmartSpider):
         self._requested_pages = set()
 
     async def start(self):
-        yield scrapy.Request(self.base_list_url.format(1), callback=self.parse, meta={'page': 1})
+        yield scrapy.Request(self.base_list_url.format(1), callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
         try:

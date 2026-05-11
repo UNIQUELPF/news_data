@@ -28,8 +28,8 @@ class SgMasSpider(SmartSpider):
         "DOWNLOAD_DELAY": 1
     }
 
-    def start_requests(self):
-        yield scrapy.Request(self.api_url.format(0), meta={"start": 0})
+    async def start(self):
+        yield scrapy.Request(self.api_url.format(0), meta={"start": 0}, dont_filter=True)
 
     def parse(self, response):
         try:
@@ -44,7 +44,7 @@ class SgMasSpider(SmartSpider):
         if not docs:
             return
 
-        valid_items_in_page = 0
+        has_valid_item_in_window = False
         for doc in docs:
             path = doc.get("page_url_s")
             date_str = doc.get("mas_date_tdt")
@@ -62,7 +62,7 @@ class SgMasSpider(SmartSpider):
                 pub_date = pub_date.replace(tzinfo=None)
 
             if self.should_process(path, pub_date):
-                valid_items_in_page += 1
+                has_valid_item_in_window = True
                 yield response.follow(
                     path,
                     self.parse_article,
@@ -70,7 +70,7 @@ class SgMasSpider(SmartSpider):
                 )
 
         # 只要当前页有在时间窗口内的文章，继续翻页
-        if valid_items_in_page > 0:
+        if has_valid_item_in_window:
             next_start = response.meta.get("start", 0) + 20
             yield scrapy.Request(
                 self.api_url.format(next_start),
@@ -82,7 +82,7 @@ class SgMasSpider(SmartSpider):
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1/text()",
+            title_xpath="//meta[@property='og:title']/@content",
         )
         item['author'] = "Monetary Authority of Singapore (MAS)"
         item['section'] = response.url.split("/")[4] if len(response.url.split("/")) > 4 else "Finance"

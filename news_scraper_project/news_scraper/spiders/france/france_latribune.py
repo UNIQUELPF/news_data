@@ -18,12 +18,17 @@ class FranceLaTribuneSpider(FranceBaseSpider):
     allowed_domains = ["latribune.fr", "www.latribune.fr"]
     start_urls = ["https://www.latribune.fr/economie-2/"]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         html = self._fetch_html(self.start_urls[0])
+        has_valid_item_in_window = False
         urls = sorted(set(re.findall(r'/article/economie(?:/[a-z0-9\-]+)*/\d+/[a-z0-9\-]+', html)))
         for href in urls:
             full_url = response.urljoin(href)
@@ -35,6 +40,7 @@ class FranceLaTribuneSpider(FranceBaseSpider):
                 continue
             item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
             if item:
+                has_valid_item_in_window = True
                 yield item
 
     def parse_detail(self, response):
@@ -52,7 +58,8 @@ class FranceLaTribuneSpider(FranceBaseSpider):
             or self._clean_text(" ".join(response.css("main ::text").getall()[:120])),
             languages=["fr", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)
@@ -80,9 +87,9 @@ class FranceLaTribuneSpider(FranceBaseSpider):
             unwanted.decompose()
         title_text = self._clean_text(title)
         parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
+        for node in root.find_all(["p", "li", "h2", "h3"], recursive=True):
             text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 35 or text == title_text:
+            if not text or len(text) < 20 or text == title_text:
                 continue
             if text.startswith("Partager") or text.startswith("Votre email"):
                 continue

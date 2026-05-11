@@ -25,7 +25,7 @@ class ItMefSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.list_url,
             callback=self.parse_list,

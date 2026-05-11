@@ -1,12 +1,7 @@
 # 阿尔及利亚dzair tube爬虫，负责抓取对应站点、机构或栏目内容。
 
-from datetime import datetime
-
-import dateparser
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
-from bs4 import BeautifulSoup
-from news_scraper.items import NewsItem
 
 # 阿尔及利亚经济类来源
 # 站点：Dzair Tube
@@ -36,6 +31,8 @@ class AlgeriaDzairTubeSpider(SmartSpider):
     allowed_domains = ["dzair-tube.dz"]
     # 当前 spider 对应的数据库表名。
 
+    fallback_content_selector = ".entry-content, article"
+
     # 从经济栏目入口页开始抓取。
     start_urls = [
         "https://www.dzair-tube.dz/economie/",
@@ -47,108 +44,53 @@ class AlgeriaDzairTubeSpider(SmartSpider):
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, meta={"page": 1})
+            yield scrapy.Request(url, callback=self.parse_listing, meta={"page": 1}, dont_filter=True)
 
     def parse_listing(self, response):
         # Dzair Tube 的经济栏目是 WordPress 结构，列表页取文章链接并继续翻页。
         article_links = response.css("h2 a::attr(href)").getall()
 
+        has_valid_item_in_window = False
         unique_links = []
         for href in article_links:
             full_url = response.urljoin(href)
             if "/economie/page/" in full_url or not self.should_process(full_url):
                 continue
+            has_valid_item_in_window = True
             unique_links.append(full_url)
 
         for article_url in unique_links:
-            yield scrapy.Request(article_url, callback=self.parse_detail)
+            yield scrapy.Request(article_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
-        if self.reached_cutoff:
+        if self._stop_pagination:
             return
 
-        next_page = response.css("a.next.page-numbers::attr(href), link[rel='next']::attr(href)").get()
-        if next_page:
-            next_page_num = response.meta.get("page", 1) + 1
-            yield response.follow(next_page, callback=self.parse_listing, meta={"page": next_page_num})
+        if has_valid_item_in_window:
+            next_page = response.css("a.next.page-numbers::attr(href), link[rel='next']::attr(href)").get()
+            if next_page:
+                next_page_num = response.meta.get("page", 1) + 1
+                yield response.follow(next_page, callback=self.parse_listing, meta={"page": next_page_num})
 
     def parse_detail(self, response):
-        # 详情页提取标题、时间、作者和正文，整理为统一字段。
-        title = self._clean_text(response.css("h1::text").get())
-        if not title:
-            title = self._clean_text(response.xpath("//meta[@property='og:title']/@content").get())
-        if not title:
+        item = self.auto_parse_item(response)
+        if not item.get("title") or not item.get("content_plain"):
             return
 
-        publish_time = self._extract_publish_time(response)
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
-            self.reached_cutoff = True
+        publish_time = item.get("publish_time")
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response)
-        if not content:
-            return
-
-        author = self._clean_text(response.xpath("//*[contains(text(), 'بقلم:')]/text()").get())
-        if "بقلم:" in author:
+        # Spider-specific overrides
+        author = response.xpath("//*[contains(text(), 'بقلم:')]/text()").get()
+        if author and "بقلم:" in author:
             author = author.split("بقلم:", 1)[1].strip()
-        if not author:
-            author = "Dzair Tube"
-
-        item = NewsItem()
-        item["url"] = response.url
-        item["title"] = title
-        item["content"] = content
-        item["publish_time"] = publish_time or datetime.now()
-        item["author"] = author
-        item["language"] = "ar"
+        item["author"] = author or "Dzair Tube"
         item["section"] = "economie"
-        item["scrape_time"] = datetime.now()
-        yield item
+        item["language"] = "ar"
 
-    def _extract_publish_time(self, response):
-        value = response.xpath("//meta[@property='article:published_time']/@content").get()
-        if not value:
-            value = self._clean_text(" ".join(response.css("article ::text").getall()[:40]))
-        if not value:
-            return None
+        if len(item.get("content_plain", "")) > 100:
+            yield item
 
-        parsed = dateparser.parse(value, languages=["ar", "fr"], settings={"TIMEZONE": "UTC"})
-        if not parsed:
-            return None
-        return parsed.replace(tzinfo=None)
-
-    def _extract_content(self, response):
-        # 正文优先走 entry-content，找不到时退回 article 容器。
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one(".entry-content") or soup.select_one("article")
-        if not root:
-            return ""
-
-        for unwanted in root.select(
-            "script, style, nav, footer, header, form, aside, figure, .share, .social, .tags"
-        ):
-            unwanted.decompose()
-
-        parts = []
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text:
-                continue
-            if len(text) < 20:
-                continue
-            if text in parts:
-                continue
-            parts.append(text)
-
-        if parts:
-            return "\n\n".join(parts)
-
-        fallback = response.xpath("//meta[@property='og:description']/@content").get()
-        return self._clean_text(fallback)
-
-    def _clean_text(self, value):
-        if not value:
-            return ""
-        return " ".join(value.split()).strip()

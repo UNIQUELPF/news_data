@@ -49,7 +49,7 @@ class HrIndexSpider(SmartSpider):
 
     fallback_content_selector = '.text'
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(
                 url,
@@ -188,7 +188,7 @@ class HrIndexSpider(SmartSpider):
         """
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1/text()",
+            title_xpath="//meta[@property='og:title']/@content",
             publish_time_xpath="//span[contains(@class,'publish-date')]/text()",
         )
 

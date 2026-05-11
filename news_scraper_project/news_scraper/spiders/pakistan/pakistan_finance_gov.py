@@ -1,5 +1,8 @@
 # 巴基斯坦finance gov爬虫，负责抓取对应站点、机构或栏目内容。
 
+import re
+from datetime import datetime
+
 from bs4 import BeautifulSoup
 
 import scrapy
@@ -15,16 +18,46 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
     country = '巴基斯坦'
     allowed_domains = ["finance.gov.pk", "www.finance.gov.pk"]
     target_table = "pak_finance_gov"
+
+    fallback_content_selector = "article, main"
+
     start_urls = [
         "https://www.finance.gov.pk/press_releases.html",
         "https://www.finance.gov.pk/updates.html",
     ]
 
-    def start_requests(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._stop_pagination = False
+
+    def _extract_date_from_text(self, text):
+        """Extract date from PDF URL like Pr-28-Apr-2026.pdf or title with date in parentheses.
+        Falls back to dateparser if regex doesn't match."""
+        if not text:
+            return None
+        match = re.search(r'(\d{1,2}-[A-Za-z]{3}-\d{4})', text)
+        if match:
+            try:
+                return datetime.strptime(match.group(1), "%d-%b-%Y")
+            except ValueError:
+                pass
+        return self._parse_datetime(text, languages=["en"])
+
+    def should_process(self, url, publish_time=None):
+        if self.full_scan:
+            return True
+        if publish_time and publish_time < self.cutoff_date:
+            return False
+        return url not in self.seen_urls
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
+        has_valid_item_in_window = False
         for link in response.css("a[href]"):
             href = link.attrib.get("href")
             title = self._clean_text(link.xpath("normalize-space()").get())
@@ -46,11 +79,12 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
             self.seen_urls.add(full_url)
             if lower_url.endswith(".pdf"):
                 item_title = title or full_url.rsplit("/", 1)[-1]
-                publish_time = self._parse_datetime(item_title, languages=["en"])
+                publish_time = self._extract_date_from_text(item_title)
                 if not publish_time:
-                    publish_time = self._parse_datetime(full_url, languages=["en"])
-                if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+                    publish_time = self._extract_date_from_text(full_url)
+                if publish_time and publish_time < self.cutoff_date:
                     continue
+                has_valid_item_in_window = True
                 yield scrapy.Request(
                     full_url,
                     callback=self.parse_pdf,
@@ -61,7 +95,10 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
             if lower_url.endswith((".xls", ".xlsx", ".doc", ".docx", ".zip")):
                 continue
 
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         if not hasattr(response, "text"):
@@ -81,7 +118,8 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
             or response.xpath("//text()[contains(., 'Date')]/following::text()[1]").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response, title)

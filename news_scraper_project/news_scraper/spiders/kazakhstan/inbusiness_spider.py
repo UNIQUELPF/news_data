@@ -50,7 +50,7 @@ class InBusinessSpider(SmartSpider):
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
-    def start_requests(self):
+    async def start(self):
         for category, path in self.SECTIONS.items():
             url = self.BASE_URL + path
             yield scrapy.Request(
@@ -64,7 +64,8 @@ class InBusinessSpider(SmartSpider):
                         PageMethod('wait_for_timeout', 2000),
                         PageMethod('wait_for_selector', 'a[href^="/ru/news/"]', timeout=20000)
                     ]
-                }
+                },
+            dont_filter=True,
             )
 
     def parse_list(self, response):

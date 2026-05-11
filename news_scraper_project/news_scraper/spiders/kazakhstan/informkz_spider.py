@@ -1,6 +1,7 @@
 # 哈萨克斯坦informkz spider爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -14,7 +15,7 @@ class InformKzSpider(SmartSpider):
     dateparser_settings = {'languages': ['ru']}
 
     allowed_domains = ['inform.kz']
-    fallback_content_selector = '.article__body-text'
+    fallback_content_selector = '.article__content'
 
     # 经济板块列表页
     base_url = 'https://www.inform.kz/category/ekonomika_s1?page={}'
@@ -24,7 +25,7 @@ class InformKzSpider(SmartSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.base_url.format(1),
             meta={
@@ -106,11 +107,44 @@ class InformKzSpider(SmartSpider):
                 }
             )
 
+    def _extract_content(self, response):
+        """Extract article content via BS4 when ContentEngine returns nothing.
+
+        The article content is inside div.article__content within .article__body.
+        The .article__body-text class does not exist on the actual page.
+        """
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root_el = (soup.select_one('.article__body .article__content')
+                   or soup.select_one('.article__content')
+                   or soup.select_one('.article__body'))
+        if not root_el:
+            self.logger.warning("Could not find article content container")
+            return ''
+        for t in root_el(['script', 'style', 'nav', 'footer', 'aside', 'button', 'form']):
+            t.decompose()
+        parts = []
+        for node in root_el.find_all(['p', 'h2', 'h3', 'li', 'blockquote']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 10:
+                parts.append(text)
+        extracted = '\n\n'.join(parts)
+        self.logger.info(f"BS4 extracted {len(extracted)} chars from article__content")
+        return extracted
+
     def parse_detail(self, response):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1//text()",
         )
+
+        # If ContentEngine returned empty or negligible content, use BS4 extraction
+        if not item.get('content_plain') or len(item['content_plain']) < 50:
+            content = self._extract_content(response)
+            if content:
+                item['content_plain'] = content
+                item['content_cleaned'] = f'<div>{content}</div>'
+                item['content_markdown'] = content
+                self.logger.info(f"Overrode empty ContentEngine result with BS4 extraction ({len(content)} chars)")
 
         if not self.should_process(response.url, item.get('publish_time')):
             return

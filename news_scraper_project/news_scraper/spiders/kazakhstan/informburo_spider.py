@@ -35,7 +35,7 @@ class InformburoSpider(SmartSpider):
                 return None
         return None
 
-    def start_requests(self):
+    async def start(self):
         url = "https://informburo.kz/"
         yield scrapy.Request(
             url,

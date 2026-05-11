@@ -1,4 +1,6 @@
-# 比利时economie gov爬虫，负责抓取对应站点、机构或栏目内容。
+# 比利时economie gov爬虫，使用 newsroom 站点抓取经济新闻。
+# 旧站点 economie.fgov.be 有 TSPD 保护，改用 news.economie.fgov.be (pr.co 平台)。
+# pr.co 平台的列表页直接包含结构化日期，无需 JS 渲染。
 
 from bs4 import BeautifulSoup
 
@@ -13,63 +15,73 @@ class BelgiumEconomieGovSpider(BelgiumBaseSpider):
     country_code = 'BEL'
 
     country = '比利时'
-    allowed_domains = ["economie.fgov.be"]
-    start_urls = ["https://economie.fgov.be/en/news"]
+    allowed_domains = ["news.economie.fgov.be"]
+    start_urls = ["https://news.economie.fgov.be/fr/releases/"]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        for href in response.css("a[href^='/en/news/']::attr(href)").getall():
-            full_url = response.urljoin(href)
-            if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or not self.should_process(full_url):
+        if self._stop_pagination:
+            return
+        soup = BeautifulSoup(response.text, "html.parser")
+        has_valid_item_in_window = False
+        for item in soup.select("li.article__item"):
+            href = item.select_one(".article__title a")
+            if not href:
                 continue
+            full_url = response.urljoin(href.get("href"))
+            time_tag = item.select_one("time.c-card__time")
+            publish_time = None
+            if time_tag:
+                dt = time_tag.get("datetime")
+                if dt:
+                    publish_time = self._parse_datetime(dt, languages=["fr", "en"])
+            if not self.should_process(full_url, publish_time):
+                continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
+
+        if not self._stop_pagination:
+            next_page = response.css("a[href*='?page='][rel='next']::attr(href)").get()
+            if not next_page:
+                next_page = response.css("a[href*='?page=']::attr(href)").get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse_listing)
 
     def parse_detail(self, response):
         title = self._clean_text(
-            response.css("h1::text").get()
-            or response.xpath("//meta[@property='og:title']/@content").get()
+            response.xpath("//meta[@property='og:title']/@content").get()
+            or response.css("h1::text").get()
             or response.css("title::text").get()
         )
         if not title:
             return
 
         publish_time = self._parse_datetime(
-            self._clean_text(" ".join(response.css("main ::text").getall()[:120])),
-            languages=["en"],
+            response.xpath("//meta[@property='article:published_time']/@content").get()
+            or response.css("time[datetime]::attr(datetime)").get(),
+            languages=["fr", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
-        content = self._extract_content(response)
+        content = self._extract_content(response, ["article", ".c-textholder", "main"])
         if not content:
             return
 
         yield self._build_item(
             response=response,
-            title=title,
+            title=title.strip().replace(" | FOD Economie Newsroom", "").replace(" | SPF Economie Newsroom", ""),
             content=content,
             publish_time=publish_time,
-            author="FPS Economy",
-            language="en",
+            author="FPS Economy Belgium",
+            language="fr",
             section="economy",
         )
-
-    def _extract_content(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one(".field--name-body") or soup.select_one("article") or soup.select_one(".node")
-        if not root:
-            return ""
-        for unwanted in root.select("script, style, nav, footer, header, aside, form"):
-            unwanted.decompose()
-        parts = []
-        for node in root.find_all(["p", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 25 or text.startswith("Last update"):
-                continue
-            if text not in parts:
-                parts.append(text)
-        return "\n\n".join(parts)
-

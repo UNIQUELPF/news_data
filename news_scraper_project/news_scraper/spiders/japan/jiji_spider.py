@@ -27,7 +27,7 @@ class JijiSpider(SmartSpider):
         }
     }
 
-    def start_requests(self):
+    async def start(self):
         # 模式 1: Archive 回溯
         # offset 0: 当月, 1: 前月, 2: 前々月
         archives = [

@@ -1,4 +1,7 @@
 # 加拿大统计局爬虫，抓取 The Daily 统计发布。
+import re
+from datetime import datetime
+
 import scrapy
 
 from news_scraper.spiders.canada.base import CanadaBaseSpider
@@ -17,7 +20,14 @@ class CanadaStatcanSpider(CanadaBaseSpider):
         emitted = 0
         for href in response.css('a[href*="/daily-quotidien/"]::attr(href)').getall():
             url = response.urljoin(href)
-            if not self.should_process(url):
+            date_match = re.search(r"/daily-quotidien/(\d{2})(\d{2})(\d{2})/", url)
+            publish_time = None
+            if date_match:
+                try:
+                    publish_time = datetime.strptime(f"20{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}", "%Y%m%d")
+                except ValueError:
+                    pass
+            if not self.should_process(url, publish_time):
                 continue
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
@@ -36,7 +46,7 @@ class CanadaStatcanSpider(CanadaBaseSpider):
             response.xpath("//meta[@name='dcterms.issued']/@content").get()
             or response.xpath("//meta[@name='dcterms.modified']/@content").get()
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, ["main"])
         if not content:

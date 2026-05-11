@@ -12,6 +12,7 @@ class CambodiaTaxSpider(CambodiaBaseSpider):
     country_code = 'KHM'
 
     country = '柬埔寨'
+    fallback_content_selector = ".page-panel-inner, .main-content-wrapper"
     allowed_domains = []
     start_urls = ["https://www.tax.gov.kh/en"]
 
@@ -27,16 +28,15 @@ class CambodiaTaxSpider(CambodiaBaseSpider):
                 return
 
     def parse_detail(self, response):
-        page_text = self._clean_text(" ".join(response.css(".article-container *::text").getall()))
+        page_text = self._clean_text(" ".join(response.css(".page-panel-inner *::text").getall()))
         title = self._clean_text(
             response.css(".title-header::text").get()
             or response.css("title::text").get()
         )
         match = re.search(r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if publish_time and publish_time < self.cutoff_date:
+            self._stop_pagination = True
             return
-        content = self._extract_content(response, [".article-container", ".content"])
-        if not content:
-            return
+        content = self._extract_content(response, [".page-panel-inner", ".main-content-wrapper", ".content"])
         yield self._build_item(response, title, content, publish_time, "General Department of Taxation", "en", "tax")

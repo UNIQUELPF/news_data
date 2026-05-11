@@ -23,7 +23,7 @@ class BrazilIBGESpider(SmartSpider):
     }
     fallback_content_selector = "article.item-page"
 
-    def start_requests(self):
+    async def start(self):
         url = "https://agenciadenoticias.ibge.gov.br/agencia-noticias.html?start=0"
         yield scrapy.Request(url=url, callback=self.parse_list, dont_filter=True, meta={"start_index": 0})
 

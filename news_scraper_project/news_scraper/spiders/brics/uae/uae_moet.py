@@ -1,6 +1,7 @@
 # 阿联酋moet爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 from datetime import datetime
 import re
@@ -13,10 +14,10 @@ class UaeMoetSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Asia/Dubai'
     use_curl_cffi = True
-    
+
     # Selective selectors for Ministry of Economy
     fallback_content_selector = ".news_detail, .content_area, [class*='content-spacious']"
-    
+
     allowed_domains = ["moet.gov.ae"]
 
     custom_settings = {
@@ -101,8 +102,30 @@ class UaeMoetSpider(SmartSpider):
             title_xpath="//span[contains(@class, 'asset-title')]//text() | //h1[not(contains(@class, 'hide-accessible'))]//text()",
             publish_time_xpath="//div[contains(@class, 'date') and not(contains(@class, 'hidden'))]//text()"
         )
-        
+
+        # Use BS4 extraction for reliable content from .news_detail
+        bs4_content = self._extract_content(response)
+        if bs4_content:
+            item['content_plain'] = bs4_content
+
         item['author'] = "Ministry of Economy"
         item['section'] = "News"
-        
+
         yield item
+
+    def _extract_content(self, response):
+        """Extract article content from .news_detail via BS4."""
+        soup = BeautifulSoup(response.text, 'html.parser')
+        root = soup.select_one('.news_detail') or soup.select_one('.content_area')
+        if not root:
+            return ''
+
+        for tag in root.find_all(['script', 'style', 'nav', 'footer', 'aside']):
+            tag.decompose()
+
+        parts = []
+        for node in root.find_all(['p', 'h2', 'h3', 'li']):
+            text = node.get_text(strip=True)
+            if text and len(text) > 5:
+                parts.append(text)
+        return '\n\n'.join(parts)

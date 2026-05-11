@@ -1,5 +1,7 @@
 # 奥地利oenb爬虫，负责抓取对应站点、机构或栏目内容。
 
+import re
+
 from bs4 import BeautifulSoup
 
 import scrapy
@@ -24,17 +26,32 @@ class AustriaOenbSpider(AustriaBaseSpider):
         "https://www.oenb.at/Presse.html",
     ]
 
-    def start_requests(self):
+    fallback_content_selector = "article, main"
+
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         links = response.css('a[href*="/Presse/Pressearchiv/"]::attr(href)').getall()
+        has_valid_item_in_window = self.full_scan
         for href in links:
             full_url = response.urljoin(href)
-            if not full_url.endswith(".html") or not self.should_process(full_url):
+            if not full_url.endswith(".html"):
                 continue
+            date_match = re.search(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html", full_url)
+            publish_time = None
+            if date_match:
+                publish_time = self._parse_datetime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", languages=["de", "en"])
+            if not self.should_process(full_url, publish_time):
+                continue
+            has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
         archive_page = response.css('a[href*="/Presse/Pressearchiv.html"]::attr(href)').get()
         if archive_page:
@@ -43,10 +60,18 @@ class AustriaOenbSpider(AustriaBaseSpider):
                 yield scrapy.Request(full_archive, callback=self.parse_archive)
 
     def parse_archive(self, response):
+        if self._stop_pagination:
+            return
         links = response.css('a[href*="/Presse/Pressearchiv/"]::attr(href)').getall()
         for href in links:
             full_url = response.urljoin(href)
-            if not full_url.endswith(".html") or not self.should_process(full_url):
+            if not full_url.endswith(".html"):
+                continue
+            date_match = re.search(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html", full_url)
+            publish_time = None
+            if date_match:
+                publish_time = self._parse_datetime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", languages=["de", "en"])
+            if not self.should_process(full_url, publish_time):
                 continue
             yield scrapy.Request(full_url, callback=self.parse_detail)
 
@@ -65,7 +90,8 @@ class AustriaOenbSpider(AustriaBaseSpider):
             or response.re_first(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html"),
             languages=["de", "en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

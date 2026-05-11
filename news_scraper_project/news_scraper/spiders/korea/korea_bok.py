@@ -18,7 +18,7 @@ class KoreaBokSpider(KoreaBaseSpider):
     list_url = "https://www.bok.or.kr/eng/singl/newsDataEng/listCont.do"
     start_urls = ["https://www.bok.or.kr/eng/singl/newsDataEng/list.do?menuNo=400423"]
 
-    def start_requests(self):
+    async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
@@ -55,18 +55,28 @@ class KoreaBokSpider(KoreaBaseSpider):
                     continue
 
                 publish_time = self._parse_datetime(date_text, languages=["en"])
-                if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+                if publish_time and publish_time < self.cutoff_date:
                     continue
 
                 page_has_new = True
                 url = urljoin("https://www.bok.or.kr", href)
                 if not self.should_process(url):
                     continue
-                content = self._fetch_detail_content(url)
-                if not content:
+                detail_html = self._fetch_detail_html(url)
+                if not detail_html:
                     continue
+                detail_response = self._make_response(url, detail_html)
+                soup = BeautifulSoup(detail_html, "html.parser")
+                content_node = soup.select_one(".bd-view .content")
+                content = self._html_to_text(str(content_node)) if content_node else ""
+                if not content:
+                    content = self._clean_text(
+                        soup.select_one("meta[property='og:description']").get("content", "")
+                        if soup.select_one("meta[property='og:description']")
+                        else ""
+                    )
                 yield self._build_item(
-                    response=response.replace(url=url),
+                    response=detail_response,
                     title=title,
                     content=content,
                     publish_time=publish_time,
@@ -75,10 +85,10 @@ class KoreaBokSpider(KoreaBaseSpider):
                     section="economy",
                 )
 
-            if not page_has_new and not self.full_scan:
+            if not page_has_new:
                 break
 
-    def _fetch_detail_content(self, url):
+    def _fetch_detail_html(self, url):
         detail_response = requests.get(
             url,
             impersonate="chrome124",
@@ -86,17 +96,7 @@ class KoreaBokSpider(KoreaBaseSpider):
             headers={"User-Agent": self.settings.get("USER_AGENT")},
         )
         detail_response.raise_for_status()
-        soup = BeautifulSoup(detail_response.text, "html.parser")
-
-        content_node = soup.select_one(".bd-view .content")
-        content = self._html_to_text(str(content_node)) if content_node else ""
-        if not content:
-            content = self._clean_text(
-                soup.select_one("meta[property='og:description']").get("content", "")
-                if soup.select_one("meta[property='og:description']")
-                else ""
-            )
-        return content
+        return detail_response.text
 
     def _fetch_listing(self, page_index):
         response = requests.post(

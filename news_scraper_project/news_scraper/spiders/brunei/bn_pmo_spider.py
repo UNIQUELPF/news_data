@@ -22,7 +22,7 @@ class BnPmoSpider(SmartSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             self.base_url.format(1),
             callback=self.parse_list,

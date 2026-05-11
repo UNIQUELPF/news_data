@@ -17,6 +17,7 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
 
     name = "ireland_finance_gov"
 
+    fallback_content_selector = "article, main"
 
     country_code = 'IRL'
 
@@ -28,13 +29,17 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
         "https://www.gov.ie/en/department-of-finance/",
     ]
 
-    def start_requests(self):
+    async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
+        if self._stop_pagination:
+            return
         # 政府类列表页：只保留财政部自己的新闻稿和出版物链接。
         links = response.css("a::attr(href)").getall()
+        has_valid_item_in_window = self.full_scan
         for href in links:
             full_url = response.urljoin(href)
             if "/department-of-finance/" not in full_url:
@@ -43,7 +48,10 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
                 continue
             if not self.should_process(full_url):
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            has_valid_item_in_window = True
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
+        if not has_valid_item_in_window:
+            self._stop_pagination = True
 
     def parse_detail(self, response):
         # 政府类详情页：正文通常在 main 容器中，按官方发布时间做增量。
@@ -59,7 +67,8 @@ class IrelandFinanceGovSpider(IrelandBaseSpider):
             or response.css("time::attr(datetime), time::text").get(),
             languages=["en"],
         )
-        if publish_time and not self.full_scan and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
+            self._stop_pagination = True
             return
 
         content = self._extract_content(response)

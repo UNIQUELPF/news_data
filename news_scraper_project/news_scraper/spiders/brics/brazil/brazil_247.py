@@ -25,7 +25,7 @@ class Brazil247Spider(SitemapSpider, SmartSpider):
     def __init__(self, *args, **kwargs):
         super(Brazil247Spider, self).__init__(*args, **kwargs)
 
-    def start_requests(self):
+    async def start(self):
         for url in self.sitemap_urls:
             yield scrapy.Request(url, self._parse_sitemap, dont_filter=True)
 

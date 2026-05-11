@@ -27,10 +27,11 @@ class NzMbieSpider(SmartSpider):
         "DOWNLOAD_DELAY": 1
     }
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(
             "https://www.mbie.govt.nz/about/news?start=0",
-            meta={'start': 0}
+            meta={'start': 0},
+        dont_filter=True,
         )
 
     def parse(self, response):

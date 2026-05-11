@@ -20,6 +20,7 @@ class SgChannelNewsAsiaSpider(SmartSpider):
     algolia_index = 'cnarevamp-ezrqv5hx'
 
     use_curl_cffi = True
+    _next_page_yielded = False
 
     custom_settings = {
         'DOWNLOADER_MIDDLEWARES': {
@@ -60,7 +61,6 @@ class SgChannelNewsAsiaSpider(SmartSpider):
             return
 
         current_page = response.meta.get('page', 0)
-        valid_count = 0
 
         for hit in hits:
             href = hit.get('link_absolute')
@@ -68,20 +68,25 @@ class SgChannelNewsAsiaSpider(SmartSpider):
 
             if href and ts:
                 pub_date = datetime.fromtimestamp(int(ts))
-                # V2: 使用 should_process 替代 filter_date
                 if self.should_process(href, pub_date):
-                    valid_count += 1
-                    yield scrapy.Request(href, self.parse_article, meta={'publish_time_hint': pub_date})
-
-        if valid_count > 0:
-            yield self.get_algolia_request(current_page + 1)
+                    yield scrapy.Request(href, self.parse_article, meta={'publish_time_hint': pub_date, 'from_page': current_page})
 
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
         )
+        if not self.should_process(response.url, item.get('publish_time')):
+            self._stop_pagination = True
+            return
         item['author'] = 'Channel News Asia'
         item['section'] = response.url.split('/')[3] if len(response.url.split('/')) > 3 else 'Unknown'
+
+        # Defer next API page request to here, so _stop_pagination takes effect first
+        from_page = response.meta.get('from_page')
+        if from_page is not None and not self._next_page_yielded:
+            self._next_page_yielded = True
+            yield self.get_algolia_request(from_page + 1)
+
         if item.get('content_plain') and len(item['content_plain']) > 50:
             yield item
