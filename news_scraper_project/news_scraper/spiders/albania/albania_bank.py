@@ -44,7 +44,7 @@ class AlbaniaBankSpider(SmartSpider):
             url = response.urljoin(title_node.attrib.get('href'))
             
             # Parse date for early stopping
-            dt_local = dateparser.parse(date_str, languages=['sq', 'en'])
+            dt_local = dateparser.parse(date_str, languages=['sq', 'en'], settings={'DATE_ORDER': 'DMY'})
             publish_time = self.parse_to_utc(dt_local)
             
             if not self.should_process(url, publish_time):

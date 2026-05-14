@@ -17,6 +17,7 @@ class USAFedSpider(SmartSpider):
     strict_date_required = True
     use_curl_cffi = True
     fallback_content_selector = "#article, div.col-xs-12"
+    dateparser_settings = {"DATE_ORDER": "MDY"}
 
     start_urls = ['https://www.federalreserve.gov/json/ne-press.json']
     base_url = 'https://www.federalreserve.gov/'

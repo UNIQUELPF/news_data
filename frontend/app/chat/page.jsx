@@ -1,0 +1,258 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useChat } from "../../hooks/useChat";
+import SidebarNav from "../../components/SidebarNav";
+import AppHeader from "../../components/AppHeader";
+import "../globals.css";
+
+function ChatSidebar({ sessions, activeSessionId, onSelect, onNew, onDelete, isCollapsed, onToggleCollapse }) {
+  if (isCollapsed) {
+    return (
+      <div style={{ width: '60px', background: '#0e2c4f', borderRight: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+        <button onClick={onToggleCollapse} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', marginBottom: '20px' }}>
+          ▶
+        </button>
+        <button onClick={onNew} style={{ background: '#2457d6', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '50%', width: '36px', height: '36px', fontSize: '20px' }}>
+          +
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: '260px', background: '#0e2c4f', borderRight: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <h3 style={{ margin: 0, color: '#fff', fontSize: '16px' }}>历史会话</h3>
+        <button onClick={onToggleCollapse} style={{ background: 'none', border: 'none', color: '#6f8298', cursor: 'pointer' }}>
+          ◀
+        </button>
+      </div>
+      <div style={{ padding: '20px' }}>
+        <button onClick={onNew} style={{ width: '100%', padding: '12px', background: '#2457d6', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <span>+</span> 新会话
+        </button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px' }}>
+        {sessions.map(s => (
+          <div 
+            key={s.id} 
+            onClick={() => onSelect(s.id)}
+            style={{ 
+              padding: '12px', 
+              margin: '0 10px 8px', 
+              borderRadius: '8px', 
+              cursor: 'pointer',
+              background: activeSessionId === s.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              color: activeSessionId === s.id ? '#fff' : '#6f8298'
+            }}
+          >
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{s.title}</span>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(s.id); }} style={{ background: 'none', border: 'none', color: '#6f8298', cursor: 'pointer', padding: '0 4px' }}>
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatMessage({ msg }) {
+  const isUser = msg.role === 'user';
+  
+  return (
+    <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexDirection: isUser ? 'row-reverse' : 'row' }}>
+      <div style={{ 
+        width: '40px', height: '40px', borderRadius: '50%', flexShrink: 0,
+        background: isUser ? '#2457d6' : '#18324b',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '20px'
+      }}>
+        {isUser ? 'U' : '🤖'}
+      </div>
+      <div style={{ maxWidth: '70%', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+        {msg.think_content && (
+          <div style={{ 
+            padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: '#8b9eb3', fontSize: '14px',
+            borderLeft: '4px solid #efc94c', whiteSpace: 'pre-wrap'
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#a0aec0' }}>思考过程：</div>
+            {msg.think_content}
+          </div>
+        )}
+        <div style={{ 
+          padding: '16px', borderRadius: '12px',
+          background: isUser ? '#2457d6' : '#18324b', color: '#fff',
+          borderTopRightRadius: isUser ? '0' : '12px',
+          borderTopLeftRadius: isUser ? '12px' : '0',
+          lineHeight: '1.6'
+        }} className="markdown-body">
+          {isUser ? (
+            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+          )}
+        </div>
+        {msg.context_article_ids && msg.context_article_ids.length > 0 && (
+          <div style={{ fontSize: '12px', color: '#6f8298', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            参考来源: 
+            {msg.context_article_ids.map(id => (
+              <a key={id} href={`/?article=${id}`} target="_blank" style={{ color: '#efc94c', textDecoration: 'none' }}>
+                [文章 {id}]
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+import { useRouter } from "next/navigation";
+import { getToken } from "../../lib/auth";
+
+export default function ChatPage() {
+  const router = useRouter();
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      router.push("/login");
+    } else {
+      setIsAuthChecking(false);
+    }
+  }, [router]);
+
+  const {
+    sessions, activeSessionId, setActiveSessionId,
+    messages, isLoading, thinkMode, setThinkMode,
+    sendMessage, createSession, deleteSession
+  } = useChat();
+
+  const [input, setInput] = useState('');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+    sendMessage(input);
+    setInput('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  if (isAuthChecking) {
+    return <div style={{ background: '#0e2c4f', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>加载中...</div>;
+  }
+
+  return (
+    <main className="shell">
+      <AppHeader title="政经小助手" subtitle="基于全球政治经济数据库的智能问答助手" />
+      
+      <div className="main-grid" style={{ overflow: 'hidden' }}>
+        <SidebarNav />
+        
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <ChatSidebar 
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSelect={setActiveSessionId}
+            onNew={createSession}
+            onDelete={deleteSession}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          />
+          
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#091e36', position: 'relative' }}>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '40px 10%' }}>
+              {messages.length === 0 ? (
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6f8298' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>🤖</div>
+                  <h2>我是政经小助手</h2>
+                  <p>您可以问我关于全球政治、经济、央行政策等任何问题。</p>
+                </div>
+              ) : (
+                messages.map(msg => <ChatMessage key={msg.id} msg={msg} />)
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div style={{ padding: '20px 10%', background: 'linear-gradient(180deg, rgba(9,30,54,0) 0%, #091e36 20%)' }}>
+              <div style={{ background: '#18324b', borderRadius: '16px', padding: '12px 16px', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="发送消息..."
+                  disabled={isLoading}
+                  style={{ 
+                    width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', 
+                    resize: 'none', outline: 'none', maxHeight: '200px', minHeight: '44px' 
+                  }}
+                  rows={1}
+                  onInput={(e) => {
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '16px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: thinkMode ? '#efc94c' : '#6f8298', cursor: 'pointer', fontSize: '14px' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={thinkMode} 
+                        onChange={(e) => setThinkMode(e.target.checked)} 
+                        style={{ display: 'none' }}
+                      />
+                      <div style={{ width: '32px', height: '18px', background: thinkMode ? '#efc94c' : 'rgba(255,255,255,0.2)', borderRadius: '10px', position: 'relative', transition: 'all 0.3s' }}>
+                        <div style={{ width: '14px', height: '14px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: thinkMode ? '16px' : '2px', transition: 'all 0.3s' }} />
+                      </div>
+                      深度思考
+                    </label>
+                  </div>
+                  <button 
+                    onClick={handleSubmit} 
+                    disabled={!input.trim() || isLoading}
+                    style={{ 
+                      background: input.trim() && !isLoading ? '#2457d6' : 'rgba(255,255,255,0.1)', 
+                      color: input.trim() && !isLoading ? '#fff' : '#6f8298',
+                      border: 'none', borderRadius: '8px', padding: '8px 16px', cursor: input.trim() && !isLoading ? 'pointer' : 'not-allowed',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    发送
+                  </button>
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', color: '#4a5568', fontSize: '12px', marginTop: '12px' }}>
+                内容由 AI 生成，可能存在错误，请核实参考资料。
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}

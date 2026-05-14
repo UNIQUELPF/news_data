@@ -21,6 +21,7 @@ def ensure_pipeline_task_runs_table():
                 requested_by TEXT,
                 request_ip TEXT,
                 user_agent TEXT,
+                parent_task_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -29,6 +30,7 @@ def ensure_pipeline_task_runs_table():
         cursor.execute("ALTER TABLE pipeline_task_runs ADD COLUMN IF NOT EXISTS requested_by TEXT")
         cursor.execute("ALTER TABLE pipeline_task_runs ADD COLUMN IF NOT EXISTS request_ip TEXT")
         cursor.execute("ALTER TABLE pipeline_task_runs ADD COLUMN IF NOT EXISTS user_agent TEXT")
+        cursor.execute("ALTER TABLE pipeline_task_runs ADD COLUMN IF NOT EXISTS parent_task_id TEXT")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_task_type ON pipeline_task_runs(task_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_state ON pipeline_task_runs(state)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_created_at ON pipeline_task_runs(created_at DESC)")

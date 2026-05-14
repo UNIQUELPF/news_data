@@ -25,6 +25,9 @@ class SmartSpider(scrapy.Spider):
     # Default start date if DB is empty
     default_start_date = None
 
+    # Global dateparser settings (DMY is standard for most non-US sites)
+    dateparser_settings = {"DATE_ORDER": "DMY"}
+
     # When True, should_process() returns False if no publish_time is provided.
     # This ensures pagination stops when date extraction fails on a listing page.
     # Defaults to True to enforce the skill guideline: no date = no crawl, no pagination.
@@ -159,9 +162,9 @@ class SmartSpider(scrapy.Spider):
             return None
         try:
             import dateparser
-            # We don't use strict timezone settings here to allow dateparser 
-            # to detect the format naturally. parse_to_utc handles the rest.
-            parsed = dateparser.parse(date_str)
+            # Ensure we respect the DATE_ORDER (default DMY) defined in the class
+            settings = getattr(self, 'dateparser_settings', None)
+            parsed = dateparser.parse(date_str, settings=settings)
             if parsed:
                 return self.parse_to_utc(parsed)
         except Exception as e:

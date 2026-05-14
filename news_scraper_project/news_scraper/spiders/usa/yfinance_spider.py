@@ -5,6 +5,7 @@ from news_scraper.spiders.smart_spider import SmartSpider
 
 
 class USAYFinanceSpider(SmartSpider):
+    dateparser_settings = {"DATE_ORDER": "MDY"}
     name = 'usa_yfinance'
     source_timezone = 'America/New_York'
 

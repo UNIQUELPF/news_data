@@ -17,6 +17,7 @@ class USAReutersSpider(SmartSpider):
     strict_date_required = True
     use_curl_cffi = True
     fallback_content_selector = "div[data-testid='article-body'], .article-body__content"
+    dateparser_settings = {"DATE_ORDER": "MDY"}
 
     section_urls = {
         'business/finance': 'https://www.reuters.com/business/finance/',

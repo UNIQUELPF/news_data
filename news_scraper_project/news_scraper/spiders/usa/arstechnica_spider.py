@@ -6,6 +6,7 @@ from news_scraper.spiders.smart_spider import SmartSpider
 
 
 class USAArsTechnicaSpider(SmartSpider):
+    dateparser_settings = {"DATE_ORDER": "MDY"}
     name = 'usa_arstechnica'
     source_timezone = 'America/New_York'
 

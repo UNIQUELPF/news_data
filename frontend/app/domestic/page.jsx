@@ -1,5 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { getToken } from "../../lib/auth";
 import AppHeader from "../../components/AppHeader";
 import ArticleDetail from "../../components/ArticleDetail";
 import ArticlesTable from "../../components/ArticlesTable";
@@ -10,6 +13,18 @@ import { useArticleSearch } from "../../hooks/useArticleSearch";
 const DOMESTIC_CATEGORY_OPTIONS = ["政治", "经济", "军事", "法规", "科技", "社会", "环境"];
 
 export default function DomesticPage() {
+  const router = useRouter();
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      router.push("/login");
+    } else {
+      setIsAuthChecking(false);
+    }
+  }, [router]);
+
   const {
     articles,
     error,
@@ -29,6 +44,10 @@ export default function DomesticPage() {
     setSelectedArticle,
     updateFilter
   } = useArticleSearch({ fixedCountry: "中国", fixedCountryCode: "CHN" });
+
+  if (isAuthChecking) {
+    return <div style={{ background: '#0e2c4f', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>加载中...</div>;
+  }
 
   return (
     <main className="shell">

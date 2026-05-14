@@ -104,7 +104,7 @@ class AlgeriaBankOfAlgeriaSpider(SmartSpider):
     def _parse_datetime(self, value):
         if not value:
             return None
-        parsed = dateparser.parse(value, languages=["fr"], settings={"TIMEZONE": "UTC"})
+        parsed = dateparser.parse(value, languages=["fr"], settings={"TIMEZONE": "UTC", "DATE_ORDER": "DMY"})
         if not parsed:
             return None
         return parsed.replace(tzinfo=None)

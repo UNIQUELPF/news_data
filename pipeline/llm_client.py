@@ -54,6 +54,10 @@ def get_llm_base_url() -> str:
     return _strip_trailing_slash(os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
 
 
+def get_embedding_base_url() -> str:
+    return _strip_trailing_slash(os.getenv("EMBEDDING_BASE_URL") or get_llm_base_url())
+
+
 def get_translation_runtime_status() -> dict[str, Any]:
     enabled = is_llm_enabled()
     return {
@@ -351,7 +355,7 @@ def _embed_texts_openai(texts: list[str]) -> tuple[list[list[float]], str]:
     }
     with httpx.Client(timeout=120.0) as client:
         response = client.post(
-            f"{get_llm_base_url()}/embeddings",
+            f"{get_embedding_base_url()}/embeddings",
             headers=_get_headers(),
             json=payload,
         )

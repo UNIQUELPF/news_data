@@ -27,6 +27,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -78,6 +79,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -124,6 +126,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -170,6 +173,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -211,14 +215,40 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
 
+  migration:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: news_migration
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && python scripts/init_scheduler.py"
+    volumes:
+      - .:/app
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/news_scraper_project
+      POSTGRES_DB: scrapy_db
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
     container_name: news_api
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - .:/app
@@ -237,6 +267,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-4.1-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       DEMO_EMBEDDING_MODEL: ${DEMO_EMBEDDING_MODEL:-demo-semantic-v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
@@ -245,6 +276,16 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
       QDRANT_URL: http://qdrant:6333
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+      CHAT_MODEL: ${CHAT_MODEL:-deepseek-v4-flash}
+      CHAT_THINK_MODEL: ${CHAT_THINK_MODEL:-deepseek-v4-pro}
+      CHAT_RAG_TOP_K: ${CHAT_RAG_TOP_K:-5}
     ports:
       - "8000:8000"
     healthcheck:
@@ -300,6 +341,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  embedding-service:
+    image: michaelf34/infinity:latest
+    container_name: news_embedding_service
+    command: v2 --model-id ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3} --port 7997 --device ${LOCAL_EMBEDDING_DEVICE:-cpu}
+    ports:
+      - "7997:7997"
+    volumes:
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7997/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
 
   postgres:
     image: postgres:15
