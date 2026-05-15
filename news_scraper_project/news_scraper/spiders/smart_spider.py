@@ -1,4 +1,5 @@
 import scrapy
+import re
 import logging
 import pytz
 import dateparser
@@ -34,11 +35,12 @@ class SmartSpider(scrapy.Spider):
     # Set to False only for spiders where list-page date extraction is genuinely impossible.
     strict_date_required = True
 
-    def __init__(self, full_scan=False, window_days=None, *args, **kwargs):
+    def __init__(self, full_scan=False, window_days=None, earliest_date=None, *args, **kwargs):
         super(SmartSpider, self).__init__(*args, **kwargs)
         # Parse command line arguments
         self.full_scan = str(full_scan).lower() in ("1", "true", "yes")
         self.cmd_window_days = window_days
+        self.cmd_earliest_date = earliest_date
         
         # Runtime state
         self.cutoff_date = None
@@ -53,13 +55,14 @@ class SmartSpider(scrapy.Spider):
 
     def _init_incremental_state(self, settings):
         """Calculate cutoff_date and load seen_urls for deduplication."""
-        # 1. Determine the absolute historical floor from class attribute or settings
-        # Spider's own start_date attribute has higher priority as it's more specialized.
-        default_start_str = getattr(self, 'start_date', None) or settings.get("DEFAULT_START_DATE", "2024-01-01")
+        # 1. Determine the absolute historical floor from cmd arg, class attribute or settings
+        default_start_str = self.cmd_earliest_date or getattr(self, 'start_date', None) or settings.get("DEFAULT_START_DATE", "2024-01-01")
         try:
-            self.earliest_date = datetime.strptime(default_start_str, "%Y-%m-%d")
+            # Parse the string and convert it to UTC naive using the spider's source_timezone
+            dt_raw = datetime.strptime(default_start_str, "%Y-%m-%d")
+            self.earliest_date = self.parse_to_utc(dt_raw)
         except (ValueError, TypeError):
-            self.earliest_date = datetime(2024, 1, 1)
+            self.earliest_date = self.parse_to_utc(datetime(2024, 1, 1))
         
         # 2. Handle Force Full Scan
         if self.full_scan:
@@ -161,9 +164,17 @@ class SmartSpider(scrapy.Spider):
         if not date_str:
             return None
         try:
-            import dateparser
-            # Ensure we respect the DATE_ORDER (default DMY) defined in the class
+            # Detect ISO format (YYYY-MM-DD or YYYY/MM/DD with 4-digit year first)
+            # If it's ISO, we should NOT pass DATE_ORDER settings because it confuses dateparser
+            # (e.g. 2026-05-12 with DMY becomes 2026-12-05)
+            is_iso = re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}', date_str.strip())
+            
             settings = getattr(self, 'dateparser_settings', None)
+            if is_iso and settings and 'DATE_ORDER' in settings:
+                # Create a copy and remove DATE_ORDER for ISO strings
+                settings = settings.copy()
+                settings.pop('DATE_ORDER')
+                
             parsed = dateparser.parse(date_str, settings=settings)
             if parsed:
                 return self.parse_to_utc(parsed)
@@ -232,17 +243,14 @@ class SmartSpider(scrapy.Spider):
         if publish_time_xpath:
             raw_time = response.xpath(publish_time_xpath).get()
             if raw_time:
-                parser_settings = getattr(self, 'dateparser_settings', None)
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
+                publish_time = self.parse_date(raw_time)
         
         if not publish_time:
             # Try standard article meta
             raw_time = response.xpath("//meta[@property='article:published_time']/@content").get() or \
                        response.xpath("//meta[@name='publishdate']/@content").get()
             if raw_time:
-                # Use class-level dateparser_settings if provided
-                parser_settings = getattr(self, 'dateparser_settings', None)
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time, settings=parser_settings))
+                publish_time = self.parse_date(raw_time)
         
         if not publish_time:
             # Fallback to the hint from the listing page
@@ -269,6 +277,18 @@ class SmartSpider(scrapy.Spider):
             "country_code": getattr(self, 'country_code', None),
             "country": getattr(self, 'country', None),
         }
+
+        # 5. Paragraph Normalization (Crucial for Markdown rendering)
+        # Ensure single newlines are converted to double newlines if they aren't already
+        for field in ['content_plain', 'content_markdown', 'content_cleaned']:
+            if item.get(field):
+                # First, collapse any existing triple+ newlines to double
+                # Then, ensure single newlines become double
+                val = item[field]
+                val = re.sub(r'\n{3,}', '\n\n', val)
+                # Replace single \n with \n\n, but don't double up already-double ones
+                val = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', val)
+                item[field] = val
 
         # 5. Intelligent Image Extraction & Deduplication
         raw_images = item.get('images') or []
@@ -307,13 +327,23 @@ class SmartSpider(scrapy.Spider):
 
     def extract_content(self, response):
         """
-        Invoke the Intelligence ContentEngine to extract cleaned HTML and Markdown.
-        Can be called within the spider's parse method.
+        Base content extraction with aggressive newline injection to preserve structure.
         """
+        raw_html = response.text
+        # Aggressive Injection: Add double newlines around block-level tags
+        # This ensures that even "lazy" extractors see distinct paragraphs.
+        import re
+        block_tags = ['p', 'div', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br']
+        for tag in block_tags:
+            raw_html = re.sub(f'<{tag}([^>]*)>', f'\n\n<{tag}\\1>', raw_html, flags=re.IGNORECASE)
+            raw_html = re.sub(f'</{tag}>', f'</{tag}>\n\n', raw_html, flags=re.IGNORECASE)
+        
+        raw_html = re.sub(r'<br\s*/?>', '\n\n<br/>\n\n', raw_html, flags=re.IGNORECASE)
+
         return ContentEngine.process(
-            raw_html=response.text,
+            raw_html=raw_html,
             base_url=response.url,
-            fallback_selector=self.fallback_content_selector
+            fallback_selector=getattr(self, 'fallback_content_selector', None)
         )
 
     def is_already_scraped(self, url: str) -> bool:

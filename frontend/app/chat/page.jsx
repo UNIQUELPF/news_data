@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useChat } from "../../hooks/useChat";
 import SidebarNav from "../../components/SidebarNav";
 import AppHeader from "../../components/AppHeader";
+import ArticleDetail from "../../components/ArticleDetail";
+import { useArticleSearch } from "../../hooks/useArticleSearch";
 import "../globals.css";
 
 function ChatSidebar({ sessions, activeSessionId, onSelect, onNew, onDelete, isCollapsed, onToggleCollapse }) {
@@ -63,9 +65,27 @@ function ChatSidebar({ sessions, activeSessionId, onSelect, onNew, onDelete, isC
   );
 }
 
-function ChatMessage({ msg }) {
+function CitationLink({ id, onOpen }) {
+  return (
+    <span 
+      onClick={() => onOpen(id)}
+      style={{ 
+        color: '#efc94c', 
+        cursor: 'pointer', 
+        fontWeight: 'bold',
+        padding: '0 4px',
+        textDecoration: 'underline'
+      }}
+    >
+      [文章 {id}]
+    </span>
+  );
+}
+
+function ChatMessage({ msg, onOpenArticle }) {
   const isUser = msg.role === 'user';
   
+
   return (
     <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexDirection: isUser ? 'row-reverse' : 'row' }}>
       <div style={{ 
@@ -90,21 +110,48 @@ function ChatMessage({ msg }) {
           background: isUser ? '#2457d6' : '#18324b', color: '#fff',
           borderTopRightRadius: isUser ? '0' : '12px',
           borderTopLeftRadius: isUser ? '12px' : '0',
-          lineHeight: '1.6'
+          lineHeight: '1.6',
+          width: '100%'
         }} className="markdown-body">
           {isUser ? (
             <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({children}) => {
+                  const processNodes = (nodes) => {
+                    return React.Children.map(nodes, child => {
+                      if (typeof child === 'string') {
+                        const parts = child.split(/(\[根据参考资料 \d+\]|\[文章 \d+\])/g);
+                        return parts.map((part, index) => {
+                          const match = part.match(/\[(?:根据参考资料|文章)\s+(\d+)\]/);
+                          if (match) return <CitationLink key={`${index}-${match[1]}`} id={match[1]} onOpen={onOpenArticle} />;
+                          return part;
+                        });
+                      }
+                      return child;
+                    });
+                  };
+                  return <p>{processNodes(children)}</p>;
+                }
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
           )}
         </div>
         {msg.context_article_ids && msg.context_article_ids.length > 0 && (
           <div style={{ fontSize: '12px', color: '#6f8298', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             参考来源: 
             {msg.context_article_ids.map(id => (
-              <a key={id} href={`/?article=${id}`} target="_blank" style={{ color: '#efc94c', textDecoration: 'none' }}>
+              <span 
+                key={id} 
+                onClick={() => onOpenArticle(id)} 
+                style={{ color: '#efc94c', cursor: 'pointer', textDecoration: 'underline' }}
+              >
                 [文章 {id}]
-              </a>
+              </span>
             ))}
           </div>
         )}
@@ -134,6 +181,13 @@ export default function ChatPage() {
     messages, isLoading, thinkMode, setThinkMode,
     sendMessage, createSession, deleteSession
   } = useChat();
+
+  const {
+    selectedArticle,
+    selectedArticleLoading,
+    openArticle,
+    setSelectedArticle
+  } = useArticleSearch();
 
   const [input, setInput] = useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -166,10 +220,10 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="shell">
+    <main className="shell" style={{ height: '100vh', overflow: 'hidden' }}>
       <AppHeader title="政经小助手" subtitle="基于全球政治经济数据库的智能问答助手" />
       
-      <div className="main-grid" style={{ overflow: 'hidden' }}>
+      <div className="main-grid" style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <SidebarNav />
         
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -193,10 +247,36 @@ export default function ChatPage() {
                   <p>您可以问我关于全球政治、经济、央行政策等任何问题。</p>
                 </div>
               ) : (
-                messages.map(msg => <ChatMessage key={msg.id} msg={msg} />)
+                messages.map(msg => <ChatMessage key={msg.id} msg={msg} onOpenArticle={openArticle} />)
               )}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Article Detail Drawer */}
+            {selectedArticle && (
+              <div style={{ 
+                position: 'absolute', top: 0, right: 0, width: '50%', height: '100%', 
+                background: '#091e36', borderLeft: '1px solid rgba(255,255,255,0.1)', 
+                zIndex: 100, display: 'flex', flexDirection: 'column', boxShadow: '-10px 0 30px rgba(0,0,0,0.5)'
+              }}>
+                <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                  <h3 style={{ margin: 0, color: '#fff' }}>参考资料详情</h3>
+                  <button 
+                    onClick={() => setSelectedArticle(null)}
+                    style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '24px' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                  <ArticleDetail 
+                    articleData={selectedArticle} 
+                    loading={selectedArticleLoading} 
+                    onOpenArticle={openArticle} 
+                  />
+                </div>
+              </div>
+            )}
 
             <div style={{ padding: '20px 10%', background: 'linear-gradient(180deg, rgba(9,30,54,0) 0%, #091e36 20%)' }}>
               <div style={{ background: '#18324b', borderRadius: '16px', padding: '12px 16px', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', gap: '8px' }}>

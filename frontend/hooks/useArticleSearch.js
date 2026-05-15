@@ -19,18 +19,24 @@ export function useArticleSearch({ fixedCountry, fixedCountryCode } = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Load filters once, not on every page turn
+  const loadFilters = useCallback(async () => {
+    try {
+      const filtersData = await request("/api/v1/filters");
+      setMeta(filtersData);
+    } catch (e) {
+      console.error("Filters load failed:", e);
+    }
+  }, []);
+
   const loadArticles = useCallback(async (page = 1) => {
     setLoading(true);
     setError("");
     try {
-      const [filtersData, articlesData] = await Promise.all([
-        request("/api/v1/filters"),
-        request("/api/v1/articles", {
-          query: buildArticleQuery({ filters, page, query, searchMode, fixedCountry, fixedCountryCode })
-        })
-      ]);
+      const articlesData = await request("/api/v1/articles", {
+        query: buildArticleQuery({ filters, page, query, searchMode, fixedCountry, fixedCountryCode })
+      });
       const normalized = normalizeArticleListResponse(articlesData);
-      setMeta(filtersData);
       setArticles(normalized.items);
       setPagination(normalized.pagination);
       setSearchInfo(normalized.search);
@@ -76,7 +82,21 @@ export function useArticleSearch({ fixedCountry, fixedCountryCode } = {}) {
 
   useEffect(() => {
     loadArticles(1);
+    
+    // Auto-open article if ID is provided in URL
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const articleId = params.get('article');
+      if (articleId) {
+        openArticle(articleId);
+      }
+    }
   }, [loadArticles]);
+
+  // Load filters once on mount, not on every page turn
+  useEffect(() => {
+    loadFilters();
+  }, [loadFilters]);
 
   return {
     articles,

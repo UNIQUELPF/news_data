@@ -24,7 +24,7 @@ class TmBusinessSpider(SmartSpider):
 
     use_curl_cffi = True
     strict_date_required = True
-    fallback_content_selector = "div.content"
+    fallback_content_selector = "div#printdiv .article_text"
 
     async def start(self):
         """Initial requests entry point."""
@@ -33,12 +33,10 @@ class TmBusinessSpider(SmartSpider):
     def parse(self, response):
         """
         Parse listing page: extract article links and paginate.
-        Note: No date info available on this listing page, so circuit breaker
-        only checks link presence. Date filtering happens in parse_article.
         """
         # Extract article links
-        links = response.css('h4.entry-title a::attr(href)').getall()
-        # Fallback if the layout changes: any link with /post/[id]/[slug]
+        links = response.css('h4.entry-title a::attr(href), div.entry-title a::attr(href)').getall()
+        # Fallback if the layout changes
         if not links:
             links = response.css('a[href*="/post/"]::attr(href)').getall()
 
@@ -49,50 +47,44 @@ class TmBusinessSpider(SmartSpider):
             if len(parts) > 1 and parts[1].split('/')[0].isdigit():
                 valid_links.append(link)
 
-        has_valid_item_in_window = False
-
         for link in valid_links:
-            has_valid_item_in_window = True
             yield response.follow(link, self.parse_article)
 
-        # Pagination: continue as long as there are links on the page
-        if has_valid_item_in_window:
-            current_page = response.meta.get('page', 1)
+        # Pagination
+        current_page = response.meta.get('page', 1)
+        if current_page < 5: # Limit to 5 pages for debug
             next_page = current_page + 1
             yield scrapy.Request(
                 self.base_url.format(next_page),
                 callback=self.parse,
-                meta={'page': next_page}
+                meta={'page': next_page},
+                dont_filter=True
             )
 
     def parse_article(self, response):
         """Parse article detail page using standardized SmartSpider extraction."""
-        # Extract publish_time manually for should_process check
+        # Extract publish_time manually for debugging
         publish_time = None
         datetime_str = response.css('time::attr(datetime)').get()
+        self.logger.info(f"DEBUG DATE: URL={response.url} STR={datetime_str}")
+        
         if datetime_str:
             try:
-                datetime_str = datetime_str.replace('Z', '+00:00')
                 from datetime import datetime
-                publish_time = datetime.fromisoformat(datetime_str)
-                publish_time = self.parse_to_utc(publish_time)
-            except Exception as e:
-                self.logger.warning(f"Date parsing failed for {response.url}: {e} on string {datetime_str}")
-
-        if not publish_time:
-            # Fallback to meta tag
-            meta_date = response.css('meta[property="article:published_time"]::attr(content)').get()
-            if meta_date:
-                try:
-                    from datetime import datetime
-                    publish_time = datetime.fromisoformat(meta_date.replace('Z', '+00:00'))
+                # Try multiple formats
+                if 'T' in datetime_str:
+                    publish_time = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+                elif '.' in datetime_str:
+                    clean_str = datetime_str.split('+')[0].strip()
+                    if ':' in clean_str:
+                        publish_time = datetime.strptime(clean_str, '%d.%m.%Y %H:%M:%S')
+                    else:
+                        publish_time = datetime.strptime(clean_str, '%d.%m.%Y')
+                
+                if publish_time:
                     publish_time = self.parse_to_utc(publish_time)
-                except Exception:
-                    pass
-
-        # Date and dedup filtering via SmartSpider's should_process
-        if not self.should_process(response.url, publish_time):
-            return
+            except Exception as e:
+                self.logger.warning(f"Date parsing failed for {response.url}: {e}")
 
         # Standard SmartSpider auto extraction
         item = self.auto_parse_item(
@@ -100,6 +92,8 @@ class TmBusinessSpider(SmartSpider):
             title_xpath="string(//h1)",
             publish_time_xpath="//time/@datetime"
         )
+        if publish_time:
+            item['publish_time'] = publish_time
 
         # Override specific fields for this source
         item['author'] = 'Business.com.tm'

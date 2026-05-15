@@ -14,6 +14,7 @@ class EgyptYoum7Spider(SmartSpider):
     language = 'ar'
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = "#articleBody, .articleCont, .article-content"
+    dateparser_settings = {"DATE_ORDER": "MDY"}
 
     custom_settings = {
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
@@ -55,13 +56,12 @@ class EgyptYoum7Spider(SmartSpider):
                 self.logger.warning(f"Missing date in listing for {url}")
                 continue
                 
-            # Use Auto-detect date parsing. (DO NOT pass languages=['ar'] if we have English format)
-            parsed_date = dateparser.parse(raw_date.strip())
-            if not parsed_date:
+            # Use self.parse_date to respect class-level dateparser_settings
+            publish_time = self.parse_date(raw_date.strip())
+            
+            if not publish_time:
                 self.logger.error(f"STRICT STOP: Could not parse date {raw_date}. Breaking to avoid backfill.")
                 break
-                
-            publish_time = self.parse_to_utc(parsed_date)
 
             if self.should_process(url, publish_time):
                 has_valid_item_in_window = True

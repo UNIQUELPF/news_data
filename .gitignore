@@ -34,3 +34,14 @@ htmlcov/
 # Text files - refined to allow requirements and documentation
 *.txt
 !requirements*.txt
+
+# Build and Cache
+buildx/
+.cache/
+.pytest_cache/
+
+# Local Dev and Security
+scratch/
+.token_seed*
+.gemini/
+.env*

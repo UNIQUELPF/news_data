@@ -413,16 +413,9 @@ def _build_keyword_condition(search_term: Optional[str], alias: str = "a"):
             COALESCE({alias}.company, '') ILIKE %s OR
             COALESCE({alias}.province, '') ILIKE %s OR
             COALESCE({alias}.city, '') ILIKE %s OR
-            EXISTS (
-                SELECT 1
-                FROM article_translations t
-                WHERE t.article_id = {alias}.id
-                  AND (
-                    t.title_translated ILIKE %s OR
-                    t.summary_translated ILIKE %s OR
-                    t.content_translated ILIKE %s
-                  )
-            )
+            COALESCE(t.title_translated, '') ILIKE %s OR
+            COALESCE(t.summary_translated, '') ILIKE %s OR
+            COALESCE(t.content_translated, '') ILIKE %s
         )
         """,
         [like, like, like, like, like, like, like, like, like],
@@ -457,8 +450,12 @@ def _get_dynamic_organizations(country_code: str | None) -> str:
     return ",".join(matched)
 
 
-def _base_article_select(extra_columns: str = "") -> str:
+def _base_article_select(extra_columns: str = "", include_summary: bool = True) -> str:
     extra = f", {extra_columns}" if extra_columns else ""
+    # When include_summary is True, we compute summary from content_plain.
+    # This should ONLY be used on already-paginated (small) result sets to avoid
+    # TOAST decompression of all 44k+ rows.
+    summary_col = "COALESCE(t.summary_translated, LEFT(a.content_plain, 280)) AS summary," if include_summary else ""
     return f"""
         SELECT
             a.id,
@@ -471,7 +468,7 @@ def _base_article_select(extra_columns: str = "") -> str:
             a.province,
             a.city,
             a.country_code,
-            COALESCE(t.summary_translated, LEFT(a.content_plain, 280)) AS summary,
+            {summary_col}
             a.publish_time,
             a.source_url,
             s.display_name AS source_name,
@@ -589,7 +586,7 @@ def _semantic_search_candidates(
             final_items.append(item)
             seen_articles.add(aid)
 
-    return final_items
+    return final_items, len(final_items)
 
 
 def _similar_articles(article_id: int, limit: int = 5):
@@ -708,7 +705,10 @@ def _keyword_search_candidates(
     province: Optional[str] = None,
     city: Optional[str] = None,
     time_range: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
 ):
+    # 1. Build common filters (for metadata)
     conditions, params = _build_filter_conditions(
         category=category,
         country=country,
@@ -720,38 +720,86 @@ def _keyword_search_candidates(
         time_range=time_range,
         alias="a",
     )
-
-    score_expr = "0"
-    score_params: list = []
-    if search_term:
-        keyword_condition, keyword_params = _build_keyword_condition(search_term, alias="a")
-        if keyword_condition:
-            conditions.append(keyword_condition)
-            params.extend(keyword_params)
-            like = f"%{search_term}%"
-            score_expr = _build_keyword_score_expr("a")
-            score_params = [like, like, like, like, like, like, like, like, like]
-
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            f"""
-            {_base_article_select(f"{score_expr} AS keyword_score")}
-            {where_sql}
-            ORDER BY keyword_score DESC, a.publish_time DESC NULLS LAST, a.id DESC
-            """,
-            score_params + params,
-        )
-        return cursor.fetchall()
+
+        pagination_sql = ""
+        if limit is not None:
+            pagination_sql += f" LIMIT {limit}"
+        if offset is not None:
+            pagination_sql += f" OFFSET {offset}"
+
+        # 2. Find matching IDs using UNION ALL + DISTINCT (Lightning fast with GIN)
+        if search_term:
+            like = f"%{search_term}%"
+            id_query = f"""
+                SELECT DISTINCT id FROM (
+                    SELECT a.id FROM articles a {where_sql} {" AND " if where_sql else "WHERE "} (
+                        a.title_original ILIKE %s OR
+                        a.content_plain ILIKE %s
+                    )
+                    UNION ALL
+                    SELECT t.article_id as id FROM article_translations t
+                    JOIN articles a ON a.id = t.article_id
+                    {where_sql}
+                    {" AND " if where_sql else "WHERE "} (
+                        t.title_translated ILIKE %s OR
+                        t.content_translated ILIKE %s
+                    )
+                ) as matched_ids
+            """
+            search_params = params + [like]*2 + params + [like]*2
+
+            # Step A: Get total count (lightweight, no TOAST access)
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM ({id_query}) as counted", search_params)
+            total_count = cursor.fetchone()["cnt"]
+
+            # Step B: Get paginated IDs
+            cursor.execute(f"""
+                WITH target_ids AS ({id_query})
+                SELECT a.id FROM articles a
+                JOIN target_ids ON target_ids.id = a.id
+                ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
+                {pagination_sql}
+            """, search_params)
+            page_ids = [row["id"] for row in cursor.fetchall()]
+
+        else:
+            # Step A: Get total count (lightweight, no JOIN needed)
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM articles a {where_sql}", params)
+            total_count = cursor.fetchone()["cnt"]
+
+            # Step B: Get paginated IDs via index scan only (no TOAST, no JOIN)
+            cursor.execute(f"""
+                SELECT a.id FROM articles a
+                {where_sql}
+                ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
+                {pagination_sql}
+            """, params)
+            page_ids = [row["id"] for row in cursor.fetchall()]
+
+        # Step C: Fetch full details for only the page IDs (touches TOAST for ~10 rows only)
+        if page_ids:
+            cursor.execute(f"""
+                {_base_article_select("0 AS keyword_score")}
+                WHERE a.id = ANY(%s)
+                ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
+            """, (page_ids,))
+            items = cursor.fetchall()
+        else:
+            items = []
+
+        return items, total_count
     finally:
         connection.close()
 
 
-def _paginate_items(items: list[dict], page: int, page_size: int):
-    total = len(items)
+
+def _paginate_items(items: list[dict], page: int, page_size: int, total_count_override: Optional[int] = None):
+    total = total_count_override if total_count_override is not None else len(items)
     offset = (page - 1) * page_size
     return {
         "items": items[offset : offset + page_size],
@@ -795,8 +843,20 @@ def health():
     return {"status": "ok"}
 
 
+import time
+
+# Simple global cache for filters
+_FILTERS_CACHE = {"data": None, "expiry": 0}
+_FILTERS_TTL = 300  # 5 minutes
+
 @app.get("/api/v1/filters")
 def get_filters():
+    global _FILTERS_CACHE
+    now = time.time()
+    
+    if _FILTERS_CACHE["data"] and now < _FILTERS_CACHE["expiry"]:
+        return _FILTERS_CACHE["data"]
+
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -848,6 +908,10 @@ def get_filters():
         # Only use the fixed MEGA_ORGANIZATIONS as per design
         row["organizations"] = list(MEGA_ORGANIZATIONS.keys())
         
+        # Update cache
+        _FILTERS_CACHE["data"] = row
+        _FILTERS_CACHE["expiry"] = now + _FILTERS_TTL
+        
         return row
     finally:
         connection.close()
@@ -874,7 +938,9 @@ def list_articles(
     province = province if isinstance(province, str) else None
     city = city if isinstance(city, str) else None
     if search_mode == "keyword" or not search_term:
-        items = _keyword_search_candidates(
+        limit = page_size
+        offset = (page - 1) * page_size
+        items, total_count = _keyword_search_candidates(
             search_term=search_term,
             category=category,
             country=country,
@@ -884,8 +950,18 @@ def list_articles(
             province=province,
             city=city,
             time_range=time_range,
+            limit=limit,
+            offset=offset,
         )
-        result = _paginate_items(items, page, page_size)
+        result = {
+            "items": items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total_count,
+                "total_pages": (total_count + page_size - 1) // page_size if total_count else 0,
+            },
+        }
         # 动态计算组织 & 格式化时间
         for item in result["items"]:
             item["organization"] = _get_dynamic_organizations(item.get("country_code"))
@@ -898,7 +974,7 @@ def list_articles(
         return result
 
     if search_mode == "semantic":
-        items = _semantic_search_candidates(
+        items, total_count = _semantic_search_candidates(
             search_term=search_term,
             category=category,
             country=country,
@@ -910,7 +986,7 @@ def list_articles(
             time_range=time_range,
             semantic_limit=semantic_limit,
         )
-        result = _paginate_items(items, page, page_size)
+        result = _paginate_items(items, page, page_size, total_count_override=total_count)
         # 动态计算组织 & 格式化时间
         for item in result["items"]:
             item["organization"] = _get_dynamic_organizations(item.get("country_code"))
@@ -922,7 +998,7 @@ def list_articles(
         }
         return result
 
-    keyword_items = _keyword_search_candidates(
+    keyword_items, _ = _keyword_search_candidates(
         search_term=search_term,
         category=category,
         country=country,

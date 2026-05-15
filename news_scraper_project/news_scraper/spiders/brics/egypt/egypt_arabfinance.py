@@ -15,6 +15,7 @@ class EgyptArabfinanceSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".details, .news-details, .news-content, .article-content"
+    dateparser_settings = {"DATE_ORDER": "MDY"}
 
     async def start(self):
         url = "https://www.arabfinance.com/en/news/newssinglecategory/2"
@@ -37,10 +38,8 @@ class EgyptArabfinanceSpider(SmartSpider):
             from datetime import timedelta
             return datetime.now() - timedelta(days=int(match.group(1)))
 
-        # Fallback to dateparser for absolute dates like 4/28/2026
-        import dateparser
-        parsed = dateparser.parse(date_text, settings={'TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': False})
-        return parsed
+        # Fallback to self.parse_date for absolute dates like 4/28/2026
+        return self.parse_date(date_text)
 
     def parse_list(self, response):
         cards = response.css('.news-thumb').xpath('..')
@@ -120,10 +119,8 @@ class EgyptArabfinanceSpider(SmartSpider):
         publish_time = None
         if date_text:
             clean_date_str = date_text.replace("Updated", "").strip()
-            import dateparser
-            parsed_date = dateparser.parse(clean_date_str, settings={'TIMEZONE': 'UTC'})
-            if parsed_date:
-                publish_time = parsed_date.replace(tzinfo=None)
+            # Use self.parse_date to respect class-level dateparser_settings
+            publish_time = self.parse_date(clean_date_str)
 
         item = self.auto_parse_item(
             response,

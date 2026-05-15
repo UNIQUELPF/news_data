@@ -76,13 +76,20 @@ def _fetch_article(cursor, article_id: int):
     return cursor.fetchone()
 
 
-def _claim_next_pending_articles(cursor, limit: int = 1):
+def _claim_next_pending_articles(cursor, limit: int = 1, country_code: str | None = None):
+    where_clause = "WHERE translation_status = 'pending'"
+    params = [limit]
+    
+    if country_code:
+        where_clause += " AND country_code = %s"
+        params = [country_code, limit]
+
     cursor.execute(
-        """
+        f"""
         WITH candidate AS (
             SELECT id
             FROM articles
-            WHERE translation_status = 'pending'
+            {where_clause}
             ORDER BY publish_time DESC NULLS LAST, id DESC
             LIMIT %s
             FOR UPDATE SKIP LOCKED
@@ -93,40 +100,39 @@ def _claim_next_pending_articles(cursor, limit: int = 1):
         WHERE a.id = candidate.id
         RETURNING a.id
         """,
-        (limit,),
+        tuple(params),
     )
     return [row[0] for row in cursor.fetchall()]
 
 
-def _select_backfill_article_ids(cursor, target_language: str, limit: int, force: bool = False, include_failed: bool = True) -> list[int]:
+def _select_backfill_article_ids(cursor, target_language: str, limit: int, force: bool = False, include_failed: bool = True, country_code: str | None = None) -> list[int]:
+    where_parts = []
+    params = []
+    
     if force:
-        cursor.execute(
-            """
-            SELECT a.id
-            FROM articles a
-            ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
-            LIMIT %s
-            """,
-            (limit,),
-        )
+        pass
     else:
         status_filter = "('pending', 'failed')" if include_failed else "('pending')"
-        cursor.execute(
-            f"""
-            SELECT a.id
-            FROM articles a
-            WHERE a.translation_status IN {status_filter}
-               OR NOT EXISTS (
-                    SELECT 1
-                    FROM article_translations t
-                    WHERE t.article_id = a.id
-                      AND t.target_language = %s
-               )
-            ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
-            LIMIT %s
-            """,
-            (target_language, limit),
-        )
+        where_parts.append(f"(a.translation_status IN {status_filter} OR NOT EXISTS (SELECT 1 FROM article_translations t WHERE t.article_id = a.id AND t.target_language = %s))")
+        params.append(target_language)
+        
+    if country_code:
+        where_parts.append("a.country_code = %s")
+        params.append(country_code)
+        
+    where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+    params.append(limit)
+
+    cursor.execute(
+        f"""
+        SELECT a.id
+        FROM articles a
+        {where_clause}
+        ORDER BY a.publish_time DESC NULLS LAST, a.id DESC
+        LIMIT %s
+        """,
+        tuple(params),
+    )
     return [row[0] for row in cursor.fetchall()]
 
 
@@ -204,6 +210,17 @@ def _upsert_translation_with_translator(
     )
 
 
+def _normalize_newlines(text: str | None) -> str | None:
+    if not text:
+        return text
+    # First collapse excessive newlines
+    import re
+    val = re.sub(r'\n{3,}', '\n\n', text)
+    # Then ensure single newlines are doubled
+    val = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', val)
+    return val
+
+
 @celery_app.task(name="pipeline.tasks.translate.translate_article")
 def translate_article(article_id: int, target_language: str = "zh-CN", parent_task_id: str | None = None) -> dict:
     connection = get_db_connection()
@@ -238,13 +255,16 @@ def translate_article(article_id: int, target_language: str = "zh-CN", parent_ta
                     metadata["company"] = (extracted.get("involved_companies") or "").strip() or metadata["company"]
                 except Exception:
                     pass
+            # Ensure content has double newlines for Markdown rendering in frontend
+            formatted_content = _normalize_newlines(article[2] or "")
+            
             _upsert_translation_with_translator(
                 cursor,
                 article_id,
                 target_language,
                 article[1],
                 None,
-                article[2],
+                formatted_content,
                 "source-original",
             )
             if metadata["category"] or metadata["province"] or metadata["city"] or metadata["company"]:
@@ -275,7 +295,7 @@ def translate_article(article_id: int, target_language: str = "zh-CN", parent_ta
                 target_language,
                 translated.get("title_translated"),
                 translated.get("summary_translated"),
-                translated.get("content_translated"),
+                _normalize_newlines(translated.get("content_translated")),
                 f"openai-compatible:{get_translation_model()}",
             )
             # 1. 优先尝试从 LLM 提取的分类中归一化
@@ -336,12 +356,12 @@ def translate_article(article_id: int, target_language: str = "zh-CN", parent_ta
 
 
 @celery_app.task(name="pipeline.tasks.translate.auto_translate_articles", bind=True)
-def auto_translate_articles(self, limit: int = 3, target_language: str = "zh-CN") -> dict:
+def auto_translate_articles(self, limit: int = 5, target_language: str = "zh-CN", country_code: str | None = None) -> dict:
     parent_id = self.request.id
     connection = get_db_connection()
     try:
         cursor = connection.cursor()
-        article_ids = _claim_next_pending_articles(cursor, limit=limit)
+        article_ids = _claim_next_pending_articles(cursor, limit=limit, country_code=country_code)
         connection.commit()
     finally:
         connection.close()
@@ -350,6 +370,7 @@ def auto_translate_articles(self, limit: int = 3, target_language: str = "zh-CN"
         return {
             "target_language": target_language,
             "status": "empty",
+            "country_code": country_code
         }
 
     # Dispatch tasks asynchronously
@@ -361,11 +382,12 @@ def auto_translate_articles(self, limit: int = 3, target_language: str = "zh-CN"
         "count": len(article_ids),
         "article_ids": article_ids,
         "target_language": target_language,
+        "country_code": country_code
     }
 
 
 @celery_app.task(name="pipeline.tasks.translate.translate_backfill_articles")
-def translate_backfill_articles(target_language: str = "zh-CN", limit: int = 100, force: bool = False, parent_task_id: str | None = None) -> dict:
+def translate_backfill_articles(target_language: str = "zh-CN", limit: int = 100, force: bool = False, parent_task_id: str | None = None, country_code: str | None = None) -> dict:
     """
     Manual/Scheduled task to process articles in bulk.
     """
@@ -377,6 +399,7 @@ def translate_backfill_articles(target_language: str = "zh-CN", limit: int = 100
             target_language=target_language,
             limit=limit,
             force=force,
+            country_code=country_code,
         )
         connection.commit()
     finally:

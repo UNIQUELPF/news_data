@@ -86,7 +86,7 @@ class ContentEngine:
 
             content_cleaned = str(soup)
             content_markdown = md(content_cleaned, strip=['script', 'style', 'iframe', 'object', 'embed'])
-            content_plain = soup.get_text(separator=' ', strip=True)
+            content_plain = soup.get_text(separator='\n\n', strip=True)
 
             logger.info(f"Extraction complete for {base_url}: {len(images)} images found, {len(content_markdown)} chars Markdown")
 
