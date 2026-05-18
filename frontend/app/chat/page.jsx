@@ -119,25 +119,19 @@ function ChatMessage({ msg, onOpenArticle }) {
             <ReactMarkdown 
               remarkPlugins={[remarkGfm]}
               components={{
-                p: ({children}) => {
-                  const processNodes = (nodes) => {
-                    return React.Children.map(nodes, child => {
-                      if (typeof child === 'string') {
-                        const parts = child.split(/(\[根据参考资料 \d+\]|\[文章 \d+\])/g);
-                        return parts.map((part, index) => {
-                          const match = part.match(/\[(?:根据参考资料|文章)\s+(\d+)\]/);
-                          if (match) return <CitationLink key={`${index}-${match[1]}`} id={match[1]} onOpen={onOpenArticle} />;
-                          return part;
-                        });
-                      }
-                      return child;
-                    });
-                  };
-                  return <p>{processNodes(children)}</p>;
+                a: ({node, href, children, ...props}) => {
+                  if (href && href.startsWith('#citation-')) {
+                    const id = href.replace('#citation-', '');
+                    return <CitationLink id={id} onOpen={onOpenArticle} />;
+                  }
+                  return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
                 }
               }}
             >
-              {msg.content}
+              {msg.content.replace(/\[(?:根据)?参考(?:资料|来源|文献)?\s*[:：]?\s*(\d+)\]|\[文章\s*[:：]?\s*(\d+)\]/g, (match, p1, p2) => {
+                const id = p1 || p2;
+                return `[文章 ${id}](#citation-${id})`;
+              })}
             </ReactMarkdown>
           )}
         </div>

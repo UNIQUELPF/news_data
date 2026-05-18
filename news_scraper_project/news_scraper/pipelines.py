@@ -221,11 +221,16 @@ class PostgresPipeline:
         explicit_lang = self._sanitize_value(item.get('language'))
         combined_text = (title or '') + ' ' + (content_plain or '')
         if combined_text:
-            zh_chars = len(re.findall(r'[\u4e00-\u9fa5]', combined_text))
-            if len(combined_text) > 0 and (zh_chars / len(combined_text)) > 0.05:
-                language = 'zh-CN'
+            # Check for Japanese Kana (Hiragana/Katakana) to prevent Kanji-heavy Japanese text from being misclassified as zh-CN
+            has_ja_kana = bool(re.search(r'[\u3040-\u309f\u30a0-\u30ff]', combined_text))
+            if has_ja_kana:
+                language = explicit_lang or 'ja'
             else:
-                language = explicit_lang
+                zh_chars = len(re.findall(r'[\u4e00-\u9fa5]', combined_text))
+                if len(combined_text) > 0 and (zh_chars / len(combined_text)) > 0.05:
+                    language = 'zh-CN'
+                else:
+                    language = explicit_lang
         else:
             language = explicit_lang
             
