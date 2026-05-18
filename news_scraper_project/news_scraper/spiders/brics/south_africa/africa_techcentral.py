@@ -14,6 +14,7 @@ class AfricaTechCentralSpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = ".entry-content, .post-content"
     allowed_domains = ['techcentral.co.za']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'DOWNLOAD_DELAY': 0.5,

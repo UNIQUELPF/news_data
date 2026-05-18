@@ -12,7 +12,7 @@ class InformKzSpider(SmartSpider):
     country = '哈萨克斯坦'
     language = 'ru'
     source_timezone = 'Asia/Almaty'
-    dateparser_settings = {'languages': ['ru']}
+    dateparser_settings = {'DATE_ORDER': 'DMY', 'DEFAULT_LANGUAGES': ['ru']}
 
     allowed_domains = ['inform.kz']
     fallback_content_selector = '.article__content'

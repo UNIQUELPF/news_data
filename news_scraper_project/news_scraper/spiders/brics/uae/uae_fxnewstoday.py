@@ -14,6 +14,7 @@ class UaeFxNewsTodaySpider(SmartSpider):
     language = 'ar'
     source_timezone = 'Asia/Dubai' # UAE Time
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     # Selective selectors for FX News Today
     # .desc-text is the main content container (Arabic text)

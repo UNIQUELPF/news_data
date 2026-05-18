@@ -9,6 +9,7 @@ class SwissinfoSpider(SmartSpider):
     country = '瑞士'
     language = 'en'
     allowed_domains = ['swissinfo.ch', 'www.swissinfo.ch']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = False
     strict_date_required = True

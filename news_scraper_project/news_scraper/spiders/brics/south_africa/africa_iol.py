@@ -16,6 +16,7 @@ class AfricaIolSpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = '[class*="article_content"]'
     allowed_domains = ['iol.co.za']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'DOWNLOAD_DELAY': 0.5,

@@ -15,6 +15,7 @@ class SaudiMcSpider(SmartSpider):
     language = 'en'
     source_timezone = 'UTC' # Assuming UTC or local time is handled by dateparser
     fallback_content_selector = 'div.ms-rtestate-field, [id*="newsInner"]'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,

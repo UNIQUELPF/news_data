@@ -11,6 +11,7 @@ class NigeriaGovSpider(SmartSpider):
     start_date = '2024-01-01'
     allowed_domains = ['statehouse.gov.ng']
     fallback_content_selector = '.post-content'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     strict_date_required = False
 

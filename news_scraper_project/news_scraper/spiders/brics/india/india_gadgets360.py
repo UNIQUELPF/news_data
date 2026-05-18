@@ -13,6 +13,7 @@ class IndiaGadgets360Spider(SmartSpider):
     
     source_timezone = 'Asia/Kolkata'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     fallback_content_selector = ".content_text, #article_content, .story_content, .ins_storybody"
 

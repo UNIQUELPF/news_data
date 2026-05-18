@@ -16,6 +16,7 @@ class Lebanon24Spider(SmartSpider):
     language = "ar"
     source_timezone = "Asia/Beirut"
     start_date = "2026-01-01"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["lebanon24.com"]
 

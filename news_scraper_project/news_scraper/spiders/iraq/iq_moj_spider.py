@@ -14,8 +14,8 @@ class IqMojSpider(SmartSpider):
 
     use_curl_cffi = True
 
-    # Hint dateparser to prefer Arabic locale for dates like "29/03/2026 - 02:07 صباحًا"
-    dateparser_settings = {'languages': ['ar']}
+    # Hint dateparser to prefer Arabic locale and DMY order for dates like "29/03/2026 - 02:07 صباحًا"
+    dateparser_settings = {'DATE_ORDER': 'DMY', 'DEFAULT_LANGUAGES': ['ar']}
 
     # Fallback selector for content extraction (known detail-page content containers)
     fallback_content_selector = 'div.article-content-container, div.article-body'

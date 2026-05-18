@@ -13,6 +13,7 @@ class PortugalCMSpider(SmartSpider):
     allowed_domains = ['cmjornal.pt']
     fallback_content_selector = '.texto_noticia'
     start_urls = ['https://www.cmjornal.pt/economia']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,

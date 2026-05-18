@@ -13,6 +13,7 @@ class Brazil247Spider(SitemapSpider, SmartSpider):
     source_timezone = "America/Sao_Paulo"
     start_date = "2026-01-01"
     allowed_domains = ["brasil247.com"]
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = True
     fallback_content_selector = "article.article__full"

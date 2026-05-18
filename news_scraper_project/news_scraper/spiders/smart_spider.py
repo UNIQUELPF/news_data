@@ -26,8 +26,13 @@ class SmartSpider(scrapy.Spider):
     # Default start date if DB is empty
     default_start_date = None
 
-    # Global dateparser settings (DMY is standard for most non-US sites)
-    dateparser_settings = {"DATE_ORDER": "DMY"}
+    # Per-spider dateparser settings. Default is None (let dateparser auto-detect).
+    # Child spiders should set this explicitly for their region, e.g.:
+    #   dateparser_settings = {"DATE_ORDER": "DMY"}  # Europe, Middle East, most of Asia
+    #   dateparser_settings = {"DATE_ORDER": "MDY"}  # USA, Philippines
+    #   dateparser_settings = {"DATE_ORDER": "YMD"}  # Japan, China, Korea
+    # If left as None, dateparser will auto-detect the format.
+    dateparser_settings = None
 
     # When True, should_process() returns False if no publish_time is provided.
     # This ensures pagination stops when date extraction fails on a listing page.
@@ -160,21 +165,23 @@ class SmartSpider(scrapy.Spider):
         """
         Robustly parses a date string and converts it to a naive UTC datetime.
         Returns None if parsing fails.
+
+        Uses self.dateparser_settings if set by the child spider.
+        Safety: if the date string starts with a 4-digit year (e.g. 2026-05-12,
+        2026/2/12, 2026年3月), DATE_ORDER is stripped because dateparser handles
+        year-first formats correctly on its own, and DATE_ORDER would cause
+        misparses (e.g. DMY turns 2026-05-12 into 2026-12-05).
         """
         if not date_str:
             return None
         try:
-            # Detect ISO format (YYYY-MM-DD or YYYY/MM/DD with 4-digit year first)
-            # If it's ISO, we should NOT pass DATE_ORDER settings because it confuses dateparser
-            # (e.g. 2026-05-12 with DMY becomes 2026-12-05)
-            is_iso = re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}', date_str.strip())
-            
-            settings = getattr(self, 'dateparser_settings', None)
-            if is_iso and settings and 'DATE_ORDER' in settings:
-                # Create a copy and remove DATE_ORDER for ISO strings
-                settings = settings.copy()
-                settings.pop('DATE_ORDER')
-                
+            date_str = date_str.strip()
+            settings = self.dateparser_settings
+
+            # Safety: year-first dates are unambiguous; DATE_ORDER only hurts
+            if settings and 'DATE_ORDER' in settings and re.match(r'\d{4}', date_str):
+                settings = {k: v for k, v in settings.items() if k != 'DATE_ORDER'}
+
             parsed = dateparser.parse(date_str, settings=settings)
             if parsed:
                 return self.parse_to_utc(parsed)

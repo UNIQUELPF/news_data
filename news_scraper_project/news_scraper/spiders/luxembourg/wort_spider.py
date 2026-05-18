@@ -18,6 +18,7 @@ class WortSpider(SmartSpider):
     country_code = 'LUX'
     country = '卢森堡'
     language = 'de'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     start_date = "2026-01-01"
 

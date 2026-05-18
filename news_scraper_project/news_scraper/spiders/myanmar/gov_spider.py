@@ -13,6 +13,7 @@ class MyanmarGovSpider(SmartSpider):
     fallback_content_selector = '.asset-full-content'
     strict_date_required = False
     MAX_PAGES = 40
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,

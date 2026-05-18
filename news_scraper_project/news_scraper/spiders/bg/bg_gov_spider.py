@@ -9,6 +9,7 @@ class BgGovSpider(SmartSpider):
     country_code = 'BGR'
     country = '保加利亚'
     language = 'bg'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     allowed_domains = ["www.gov.bg"]
 

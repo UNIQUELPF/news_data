@@ -14,6 +14,7 @@ class PortugalPublicoSpider(SmartSpider):
     source_timezone = 'Europe/Lisbon'
     start_date = '2024-01-01'
     allowed_domains = ['publico.pt']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     # The actual article body lives in .story__body / #story-body;
     # .story__content wraps header + body + footer.

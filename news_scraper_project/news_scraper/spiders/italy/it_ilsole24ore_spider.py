@@ -11,6 +11,7 @@ class ItIlsole24oreSpider(SmartSpider):
 
     country_code = 'ITA'
     country = '意大利'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["ilsole24ore.com"]
 

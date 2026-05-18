@@ -16,6 +16,7 @@ class EgyptCbeSpider(SmartSpider):
     language = 'en' # dynamic per article
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".cbe-rich-text, .content, .details, article, .news-details, #main-content"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     async def start(self):
         url = "https://www.cbe.org.eg/sitemap.xml"

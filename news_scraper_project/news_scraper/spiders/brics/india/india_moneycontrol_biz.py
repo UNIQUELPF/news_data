@@ -14,6 +14,7 @@ class IndiaMoneycontrolBizSpider(SmartSpider):
     
     source_timezone = 'Asia/Kolkata'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     # Sitemap based spider currently doesn't parse lastmod, 
     # so we disable strict mode to avoid skipping all URLs.

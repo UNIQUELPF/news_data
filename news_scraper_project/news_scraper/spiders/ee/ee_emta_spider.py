@@ -12,6 +12,7 @@ class EeEmtaSpider(SmartSpider):
     source_timezone = 'Europe/Tallinn'
     start_date = '2024-01-01'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["www.emta.ee", "search.service.eu-live.vportal.ee"]
     # Internal JSON API endpoint for search/news

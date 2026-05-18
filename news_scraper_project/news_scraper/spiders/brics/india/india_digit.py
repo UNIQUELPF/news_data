@@ -13,6 +13,7 @@ class IndiaDigitSpider(SmartSpider):
     
     source_timezone = 'Asia/Kolkata' # India is UTC+5:30
     use_curl_cffi = False
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     fallback_content_selector = "article, .article_content, .entry-content, .post-content"
 

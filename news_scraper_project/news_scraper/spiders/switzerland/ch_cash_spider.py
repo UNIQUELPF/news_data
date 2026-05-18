@@ -9,6 +9,7 @@ class CashCHSpider(SmartSpider):
     country = '瑞士'
     language = 'de'
     allowed_domains = ['cash.ch']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = True
     strict_date_required = True

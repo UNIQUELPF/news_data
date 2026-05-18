@@ -12,6 +12,7 @@ class UaeWamSpider(SmartSpider):
     country = '阿联酋'
     language = 'ar'
     source_timezone = 'Asia/Dubai'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     list_url = "https://www.wam.ae/api/app/views/GetViewByUrl"
     section_url = "https://www.wam.ae/api/app/views/GetSectionArticlesFDto"

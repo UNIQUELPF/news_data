@@ -12,6 +12,7 @@ class UaeMubasherSpider(SmartSpider):
     language = 'ar'
     source_timezone = 'Asia/Dubai'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     fallback_content_selector = ".article__content-text, .mi-article__body"
     

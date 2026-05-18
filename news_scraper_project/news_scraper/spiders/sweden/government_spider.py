@@ -11,6 +11,7 @@ class GovernmentSESpider(SmartSpider):
     country = '瑞典'
     language = 'en'
     strict_date_required = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ['government.se']
     use_curl_cffi = True

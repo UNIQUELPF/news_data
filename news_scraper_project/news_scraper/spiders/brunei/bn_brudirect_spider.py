@@ -10,6 +10,7 @@ class BnBrudirectSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Asia/Brunei'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ['brudirect.com']
 

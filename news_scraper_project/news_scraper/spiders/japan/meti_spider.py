@@ -14,7 +14,7 @@ class MetiSpider(SmartSpider):
     start_date = '2026-01-01'
     fallback_content_selector = 'div.main.w1000, div#main'
 
-    dateparser_settings = {'LANGUAGES': ['ja']}
+    dateparser_settings = {'DATE_ORDER': 'YMD'}
 
     allowed_domains = ['meti.go.jp']
     start_urls = ['https://www.meti.go.jp/press/index.html']

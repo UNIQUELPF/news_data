@@ -14,6 +14,7 @@ class AfricaThePresidencySpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = ".node-content, .field-items"
     allowed_domains = ['thepresidency.gov.za']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'DOWNLOAD_DELAY': 1,

@@ -14,6 +14,7 @@ class UaeMoetSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Asia/Dubai'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     # Selective selectors for Ministry of Economy
     fallback_content_selector = ".news_detail, .content_area, [class*='content-spacious']"

@@ -14,6 +14,7 @@ class AfricaBusinessDaySpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = ".c-article-content"
     allowed_domains = ['businessday.co.za']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'DOWNLOAD_DELAY': 1,

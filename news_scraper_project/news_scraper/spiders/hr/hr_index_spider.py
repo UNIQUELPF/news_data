@@ -12,6 +12,7 @@ class HrIndexSpider(SmartSpider):
     country_code = 'HRV'
     country = '克罗地亚'
     language = 'hr'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["www.index.hr"]
     start_urls = ["https://www.index.hr/vijesti/rubrika/hrvatska/22.aspx"]

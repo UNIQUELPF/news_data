@@ -12,6 +12,7 @@ class PortugalDNSpider(SmartSpider):
     start_date = '2024-01-01'
     allowed_domains = ['dn.pt', 'dinheirovivo.pt']
     fallback_content_selector = '.article-body'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     start_urls = ['https://www.dn.pt/economia/']
 

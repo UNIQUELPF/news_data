@@ -10,6 +10,7 @@ class FinewsCHSpider(SmartSpider):
     country = '瑞士'
     language = 'en'
     allowed_domains = ['finews.com']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = True
     strict_date_required = True

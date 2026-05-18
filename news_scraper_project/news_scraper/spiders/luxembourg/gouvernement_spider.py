@@ -14,6 +14,7 @@ class GouvernementSpider(SmartSpider):
     country = '卢森堡'
     language = 'fr'
     source_timezone = 'Europe/Luxembourg'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["gouvernement.lu"]
     fallback_content_selector = "div.cmp-text"

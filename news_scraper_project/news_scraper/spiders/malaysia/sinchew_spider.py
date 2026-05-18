@@ -16,6 +16,7 @@ class SinchewSpider(SmartSpider):
     start_date = "2026-01-01"
     strict_date_required = False  # Dates unavailable on list API (relative time only)
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["sinchew.com.my"]
 

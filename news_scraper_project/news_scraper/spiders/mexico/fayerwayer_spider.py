@@ -13,6 +13,7 @@ class MexicoFayerWayerSpider(SmartSpider):
     fallback_content_selector = '.article-body'
     strict_date_required = False
     MAX_PAGES = 80
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,

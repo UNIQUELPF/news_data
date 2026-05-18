@@ -9,6 +9,7 @@ class KuwaitCitraSpider(KuwaitBaseSpider):
     name = "kuwait_citra"
 
     country_code = 'KWT'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = []
     start_urls = ["https://www.citra.gov.kw/sites/en/Pages/NewsEvents.aspx"]

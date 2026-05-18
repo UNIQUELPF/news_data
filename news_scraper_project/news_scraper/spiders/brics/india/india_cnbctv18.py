@@ -14,6 +14,7 @@ class IndiaCnbctv18Spider(SmartSpider):
     
     source_timezone = 'Asia/Kolkata'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     fallback_content_selector = ".articleWrap, .narticle-data, .article-content, #main-content"
 

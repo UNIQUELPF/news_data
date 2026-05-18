@@ -11,6 +11,7 @@ class GrMinfinSpider(SmartSpider):
     country = '希腊'
     language = 'el'
     use_curl_cffi = False
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ['minfin.gov.gr']
 

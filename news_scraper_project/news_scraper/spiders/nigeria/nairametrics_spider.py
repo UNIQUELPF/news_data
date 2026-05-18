@@ -11,6 +11,7 @@ class NigeriaNairametricsSpider(SmartSpider):
     start_date = '2024-01-01'
     allowed_domains = ['nairametrics.com']
     fallback_content_selector = '.content-inner'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     strict_date_required = False
 

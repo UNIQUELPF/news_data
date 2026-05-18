@@ -16,6 +16,7 @@ class EgyptMubasherSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Africa/Cairo'
     fallback_content_selector = ".article-body, .md-news-details__content, article, .the-news"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     async def start(self):
         url = "https://english.mubasher.info/news/sa/now/latest"

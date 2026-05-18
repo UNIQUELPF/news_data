@@ -11,6 +11,7 @@ class IndonesiaInaNewsSpider(SmartSpider):
     
     source_timezone = 'Asia/Jakarta'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
     
     # Root container for the article content as seen in the screenshot
     fallback_content_selector = "#block-ina-content"

@@ -13,6 +13,7 @@ class GrKathimeriniSpider(SmartSpider):
     language = 'el'
     source_timezone = 'Europe/Athens'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     start_date = '2026-04-01'
     fallback_content_selector = 'main.container, .entry-content'

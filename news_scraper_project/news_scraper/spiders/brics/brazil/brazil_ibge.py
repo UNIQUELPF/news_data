@@ -12,6 +12,7 @@ class BrazilIBGESpider(SmartSpider):
     source_timezone = "America/Sao_Paulo"
     start_date = "2026-01-01"
     allowed_domains = ["agenciadenoticias.ibge.gov.br"]
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = False
     playwright = True

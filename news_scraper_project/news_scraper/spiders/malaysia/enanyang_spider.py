@@ -12,6 +12,7 @@ class EnanyangSpider(SmartSpider):
     source_timezone = "Asia/Kuala_Lumpur"
     start_date = "2026-01-01"
     allowed_domains = ["enanyang.my"]
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     fallback_content_selector = 'article.article-page-article'
 

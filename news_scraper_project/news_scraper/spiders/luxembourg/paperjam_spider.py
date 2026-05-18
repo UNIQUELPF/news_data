@@ -14,6 +14,7 @@ class PaperjamSpider(SmartSpider):
     language = 'fr'
     source_timezone = 'Europe/Luxembourg'
     fallback_content_selector = 'article.article'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["paperjam.lu"]
 

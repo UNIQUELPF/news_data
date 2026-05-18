@@ -10,6 +10,7 @@ class ChAdminSpider(SmartSpider):
     country = '瑞士'
     language = 'en'
     allowed_domains = ['news.admin.ch', 'admin.ch', 'www.news.admin.ch']
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     use_curl_cffi = True
     strict_date_required = True

@@ -10,6 +10,7 @@ class GrNaftemporikiSpider(SmartSpider):
     language = 'el'
     source_timezone = 'Europe/Athens'
     use_curl_cffi = True
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     # 列表页只有时间 (如 "14:04")，没有完整日期，所以在详情页做日期过滤
     strict_date_required = False

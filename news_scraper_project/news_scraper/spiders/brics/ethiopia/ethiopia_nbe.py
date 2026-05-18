@@ -12,6 +12,7 @@ class EthiopiaNBESpider(SmartSpider):
     
     source_timezone = 'Africa/Cairo' # Ethiopia is UTC+3
     fallback_content_selector = ".elementor-widget-theme-post-content, .entry-content, article, main"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         "CONCURRENT_REQUESTS": 2,

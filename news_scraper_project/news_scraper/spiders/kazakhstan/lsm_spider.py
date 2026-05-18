@@ -12,6 +12,7 @@ class LSMSpider(SmartSpider):
     country = '哈萨克斯坦'
     language = 'ru'
     source_timezone = 'Asia/Almaty'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ['lsm.kz']
 

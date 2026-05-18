@@ -16,6 +16,7 @@ class EthiopiaAddisChamberSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Africa/Cairo' # Ethiopia is UTC+3
     fallback_content_selector = ".entry-content, article, .elementor-widget-theme-post-content, #main"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
         "CONCURRENT_REQUESTS": 2,

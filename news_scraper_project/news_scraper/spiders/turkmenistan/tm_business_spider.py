@@ -9,6 +9,7 @@ class TmBusinessSpider(SmartSpider):
     country_code = 'TKM'
     country = '土库曼斯坦'
     language = 'en'
+    dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ['business.com.tm']
 
