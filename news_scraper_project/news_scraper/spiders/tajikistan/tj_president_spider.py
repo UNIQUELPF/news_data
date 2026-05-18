@@ -42,15 +42,31 @@ class TjPresidentSpider(SmartSpider):
 
         for item in items:
             news_id = item.get('id')
-            if news_id:
-                detail_url = f'https://controlpanel.president.tj/api/event/show?type=news&id={news_id}&lang_id=3'
-                has_valid_item_in_window = True
-                yield scrapy.Request(detail_url, self.parse_detail, meta={'news_id': news_id})
+            if not news_id:
+                continue
 
-        # Request next page; stopped by _stop_pagination when items are too old
+            pub_date_str = item.get('publish_date') or item.get('news_date')
+            pub_time = None
+            if pub_date_str:
+                try:
+                    dt_obj = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
+                    pub_time = self.parse_to_utc(dt_obj)
+                except Exception:
+                    pass
+
+            detail_url = f'https://controlpanel.president.tj/api/event/show?type=news&id={news_id}&lang_id=3'
+            if self.should_process(detail_url, pub_time):
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    detail_url,
+                    self.parse_detail,
+                    meta={'news_id': news_id, 'pub_time': pub_time}
+                )
+
+        # Request next page; stopped when items are too old
         next_page = current_page + 1
         if (next_page not in self._requested_pages
-                and not self._stop_pagination):
+                and has_valid_item_in_window):
             self._requested_pages.add(next_page)
             yield scrapy.Request(
                 self.base_list_url.format(next_page),
@@ -67,19 +83,7 @@ class TjPresidentSpider(SmartSpider):
             return
 
         title = detail.get('title', '').strip()
-        pub_date_str = detail.get('publish_date', '')
-
-        pub_time = None
-        if pub_date_str:
-            try:
-                dt_obj = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
-                pub_time = self.parse_to_utc(dt_obj)
-            except Exception:
-                pass
-
-        if not self.should_process(response.url, pub_time):
-            self._stop_pagination = True
-            return
+        pub_time = response.meta.get('pub_time')
 
         content = detail.get('text', '').strip()
 
