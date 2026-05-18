@@ -64,16 +64,20 @@ class RoWallstreetSpider(SmartSpider):
                 link = "https://www.wall-street.ro" + link
 
             title = article.css('h4::text').get()
+            
+            # Try to extract date from the card text
+            card_text = " ".join(article.css('*::text').getall())
+            pub_date = self._parse_ro_date(card_text)
 
-            if self.should_process(link):
+            if self.should_process(link, pub_date):
                 has_valid_item_in_window = True
                 yield scrapy.Request(
                     link,
                     callback=self.parse_article,
-                    meta={'title_hint': title}
+                    meta={'title_hint': title, 'pub_date': pub_date}
                 )
 
-        if has_valid_item_in_window:
+        if has_valid_item_in_window and not getattr(self, 'has_hit_date_limit', False):
             current_page = 1
             if '?page=' in response.url:
                 try:
@@ -112,31 +116,37 @@ class RoWallstreetSpider(SmartSpider):
                 parts.append(text)
         return '\n\n'.join(parts)
 
+    def _parse_ro_date(self, date_str):
+        if not date_str:
+            return None
+        try:
+            date_str = date_str.strip().lower()
+            match = re.search(r'(\d{1,2})\s+([a-z\.]+)\s+(\d{4})', date_str)
+            if match:
+                day = int(match.group(1))
+                month_name = match.group(2).strip('.')
+                year = int(match.group(3))
+
+                if month_name in self.MONTHS_RO:
+                    month = self.MONTHS_RO[month_name]
+                elif (month_name + '.') in self.MONTHS_RO:
+                    month = self.MONTHS_RO[month_name + '.']
+                else:
+                    month = None
+
+                if month:
+                    pub_date = datetime(year, month, day)
+                    return self.parse_to_utc(pub_date)
+        except Exception:
+            pass
+        return None
+
     def parse_article(self, response):
-        # Custom Romanian date parsing
-        date_str = response.css('.article-meta .date::text').get()
-        pub_date = None
-        if date_str:
-            try:
-                date_str = date_str.strip().lower()
-                match = re.search(r'(\d{1,2})\s+([a-z\.]+)\s+(\d{4})', date_str)
-                if match:
-                    day = int(match.group(1))
-                    month_name = match.group(2).strip('.')
-                    year = int(match.group(3))
-
-                    if month_name in self.MONTHS_RO:
-                        month = self.MONTHS_RO[month_name]
-                    elif (month_name + '.') in self.MONTHS_RO:
-                        month = self.MONTHS_RO[month_name + '.']
-                    else:
-                        month = None
-
-                    if month:
-                        pub_date = datetime(year, month, day)
-                        pub_date = self.parse_to_utc(pub_date)
-            except Exception:
-                self.logger.warning(f"RO_DATE Parse failed: {date_str}")
+        # Retrieve parsed date from list page, or try parsing from article page
+        pub_date = response.meta.get('pub_date')
+        if not pub_date:
+            date_str = response.css('.article-meta .date::text').get()
+            pub_date = self._parse_ro_date(date_str)
 
         # Direct content extraction via CSS selector (ContentEngine/trafilatura misses this site)
         content = self._extract_content(response)
@@ -171,6 +181,7 @@ class RoWallstreetSpider(SmartSpider):
         item['section'] = 'Economy'
 
         if not self.should_process(response.url, item.get('publish_time')):
+            self.has_hit_date_limit = True
             return
 
         if item.get('content_plain') and len(item['content_plain']) > 50:

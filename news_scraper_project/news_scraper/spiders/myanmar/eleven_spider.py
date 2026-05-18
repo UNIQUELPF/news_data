@@ -62,7 +62,7 @@ class MyanmarElevenSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1[@class='article-title']/text()",
-            publish_time_xpath="//meta[@property='article:published_time']/@content",
+            publish_time_xpath="//span[@class='date-display-single']/text()",
         )
         item['author'] = 'Eleven Media Group'
         item['section'] = 'Business'

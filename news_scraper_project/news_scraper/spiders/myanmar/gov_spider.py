@@ -1,4 +1,6 @@
 import scrapy
+import re
+from datetime import datetime
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -64,8 +66,33 @@ class MyanmarGovSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1[@class='fontsize24']/text() | //div[@class='asset-content']/h2/text()",
-            publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
+        
+        # Parse date from content_plain
+        content = item.get('content_plain', '')
+        pub_date = None
+        if content:
+            match = re.search(
+                r'\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),\s+(\d{4})\b',
+                content,
+                re.IGNORECASE
+            )
+            if match:
+                month_str = match.group(1).title()
+                day = int(match.group(2))
+                year = int(match.group(3))
+                months = {
+                    "January": 1, "Jan": 1, "February": 2, "Feb": 2, "March": 3, "Mar": 3,
+                    "April": 4, "Apr": 4, "May": 5, "June": 6, "Jun": 6, "July": 7, "Jul": 7,
+                    "August": 8, "Aug": 8, "September": 9, "Sep": 9, "October": 10, "Oct": 10,
+                    "November": 11, "Nov": 11, "December": 12, "Dec": 12
+                }
+                month = months.get(month_str)
+                if month:
+                    pub_date = datetime(year, month, day)
+                    pub_date = self.parse_to_utc(pub_date)
+
+        item['publish_time'] = pub_date or item.get('publish_time')
         item['author'] = 'Myanmar Government Portal'
         item['section'] = 'Latest News'
         item['language'] = 'my'

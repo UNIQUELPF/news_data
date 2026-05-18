@@ -62,7 +62,7 @@ class MexicoElFinancieroSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
-            publish_time_xpath="//time[@class='c-date']/@dateTime",
+            publish_time_xpath="//time[contains(@class, 'c-date')]/@datetime",
         )
         item['author'] = response.css('.c-attribution a::text').get() or 'El Financiero'
         item['section'] = 'Economía'

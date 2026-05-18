@@ -35,15 +35,29 @@ class NigeriaGovSpider(SmartSpider):
     def parse_list(self, response):
         if self._stop_pagination:
             return
-        articles = response.css('.news-detail a::attr(href)').getall() or \
-                   response.css('.news-item a::attr(href)').getall()
+        
+        cards = response.css('.news-item')
+        if not cards:
+            cards = response.css('.news-detail')
 
         has_valid_item_in_window = False
-        for link in articles:
+        for card in cards:
+            link = card.css('a::attr(href)').get()
+            if not link:
+                continue
             full_url = response.urljoin(link)
-            if self.should_process(full_url):
+            
+            # Extract date from list page card
+            date_str = card.css('.news-info span::text').get()
+            pub_date = self.parse_date(date_str)
+
+            if self.should_process(full_url, pub_date):
                 has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+                yield scrapy.Request(
+                    full_url, 
+                    callback=self.parse_article,
+                    meta={'title_hint': card.css('h3::text').get(), 'pub_date': pub_date}
+                )
 
         if has_valid_item_in_window:
             page = response.meta.get('page', 1)
@@ -57,11 +71,12 @@ class NigeriaGovSpider(SmartSpider):
             )
 
     def parse_article(self, response):
+        pub_date = response.meta.get('pub_date')
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
-            publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
+        item['publish_time'] = pub_date or item.get('publish_time')
         item['author'] = 'Presidential Villa, Abuja'
         item['section'] = 'Press Release'
 
