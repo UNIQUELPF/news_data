@@ -124,13 +124,11 @@ class HrIndexSpider(SmartSpider):
     def _extract_listing_date(self, anchor_sel):
         """
         Extract publish date from the listing card containing the anchor element.
-        Index.hr cards use a <time> element or .publish-date span.
+        Index.hr cards use a <time> element or .publish-date div/span inside the anchor.
         Returns a naive UTC datetime or None.
         """
         # Strategy 1: <time> element with datetime attribute
-        time_el = anchor_sel.xpath(
-            'ancestor::div[contains(@class,"vijesti")]//time'
-        )
+        time_el = anchor_sel.css('time')
         if time_el:
             dt_attr = time_el.xpath('@datetime').get()
             if dt_attr:
@@ -144,11 +142,9 @@ class HrIndexSpider(SmartSpider):
                     return self.parse_to_utc(parsed)
 
         # Strategy 2: .publish-date text
-        card = anchor_sel.xpath('ancestor::div[contains(@class,"vijesti")]')
-        if card:
-            date_text = card.css('.publish-date::text').get()
-            if date_text:
-                return self._parse_croatian_date(date_text.strip())
+        date_text = anchor_sel.css('.publish-date::text').get()
+        if date_text:
+            return self.parse_date(date_text.strip())
 
         return None
 
@@ -159,10 +155,6 @@ class HrIndexSpider(SmartSpider):
         """
         match = re.search(r'(\d{2}:\d{2}),\s*(\d{2})\.\s*(\w+)\s*(\d{4})\.', text)
         if not match:
-            # Try dateparser as last resort
-            parsed = dateparser.parse(text)
-            if parsed:
-                return self.parse_to_utc(parsed)
             return None
 
         try:
