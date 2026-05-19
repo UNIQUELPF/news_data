@@ -151,6 +151,11 @@ class BloombergSpider(SmartSpider):
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
 
+        if not item.get('publish_time'):
+            url_date_match = re.search(r'/articles/(\d{4}-\d{2}-\d{2})/', response.url)
+            if url_date_match:
+                item['publish_time'] = self.parse_date(url_date_match.group(1))
+
         # Re-check with the publish_time that auto_parse_item extracted from the page
         if not self.should_process(response.url, item.get('publish_time')):
             return
