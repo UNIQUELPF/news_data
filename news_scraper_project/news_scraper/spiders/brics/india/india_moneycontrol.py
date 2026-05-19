@@ -33,6 +33,8 @@ class IndiaMoneycontrolSpider(SmartSpider):
         },
     }
 
+    MAX_PAGES = 50
+
     async def start(self):
         # Modernized API: async start() replaces start_requests()
         headers = self.custom_settings.get("DEFAULT_REQUEST_HEADERS", {})
@@ -45,8 +47,6 @@ class IndiaMoneycontrolSpider(SmartSpider):
         )
 
     def parse_list(self, response):
-        if self._stop_pagination:
-            return
         current_page = response.meta.get('current_page', 1)
         # Extract links from the economy news list
         links = response.css('.fleft a::attr(href), #left-container a::attr(href), .article_title a::attr(href)').getall()
@@ -59,9 +59,7 @@ class IndiaMoneycontrolSpider(SmartSpider):
                 self.logger.warning(f"No links found on page {current_page}. Might be the end of the list.")
             return
 
-        new_links_found = 0
         valid_article_links = set()
-
         for link in set(links):
             # STRICT FILTERING: 
             # 1. Must be an economy link
@@ -71,24 +69,39 @@ class IndiaMoneycontrolSpider(SmartSpider):
                 if link.endswith('.html') and '/page-' not in link:
                     valid_article_links.add(response.urljoin(link))
 
-        has_valid_item_in_window = False
+        valid_links = list(valid_article_links)
+        if not valid_links:
+            self.logger.info(f"[{self.name}] No valid links on page {current_page}. Stopping.")
+            return
 
-        for full_url in valid_article_links:
-            if self.should_process(full_url, None):
-                has_valid_item_in_window = True
-                new_links_found += 1
-                yield scrapy.Request(
-                    full_url,
-                    callback=self.parse_detail,
-                    headers=self.custom_settings.get("DEFAULT_REQUEST_HEADERS", {})
-                )
+        state = {
+            'pending_count': len(valid_links),
+            'dates': [],
+            'page': current_page,
+            'response_url': response.url
+        }
 
-        # Logic: If we found new valid articles on this page, or we are in full_scan mode,
-        # we proceed to the next page.
-        if has_valid_item_in_window or (self.full_scan and valid_article_links):
-            next_page = current_page + 1
+        for url in valid_links:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                errback=self._handle_detail_error,
+                headers=self.custom_settings.get("DEFAULT_REQUEST_HEADERS", {}),
+                meta={'shared_state': state}
+            )
+
+    def _check_next_page(self, state, response_url):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        if page < self.MAX_PAGES:
+            next_page = page + 1
             next_url = f"https://www.moneycontrol.com/news/business/economy/page-{next_page}/"
-            self.logger.info(f"Continuing to page {next_page}...")
+            self.logger.info(f"Continuing to page {next_page}: {next_url}")
             yield scrapy.Request(
                 url=next_url,
                 callback=self.parse_list,
@@ -97,9 +110,15 @@ class IndiaMoneycontrolSpider(SmartSpider):
                 priority=-next_page,
                 dont_filter=True
             )
-        else:
-            reason = "No new articles found" if not new_links_found else "Reached end of list"
-            self.logger.info(f"Stopping at page {current_page}: {reason}")
+
+    def _handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, state['response_url']):
+                    yield req
 
     def parse_detail(self, response):
         item = self.auto_parse_item(
@@ -107,22 +126,29 @@ class IndiaMoneycontrolSpider(SmartSpider):
             title_xpath="//h1[contains(@class, 'article_title')]/text() | //meta[@property='og:title']/@content",
             publish_time_xpath="//meta[@property='og:article:published_time']/@content | //meta[@property='article:published_time']/@content"
         )
-        
-        # Priority og:image
-        og_image = response.xpath("//meta[@property='og:image']/@content").get()
-        if og_image:
-            if not item.get('images'):
-                item['images'] = []
-            if og_image not in item['images']:
-                item['images'].insert(0, og_image)
+        state = response.meta.get('shared_state')
+        pub_time = item.get('publish_time') if item else None
 
-        # Stop if older than cutoff
-        if not self.should_process(response.url, item.get('publish_time')):
-            self._stop_pagination = True
-            return
+        if state:
+            state['dates'].append(pub_time)
 
-        item['author'] = response.css('.article_author::text, .article_author span::text').get() or "Moneycontrol Staff"
-        item['country_code'] = self.country_code
-        item['country'] = self.country
-        
-        yield item
+        if item and self.should_process(response.url, pub_time):
+            # Priority og_image
+            og_image = response.xpath("//meta[@property='og:image']/@content").get()
+            if og_image:
+                if not item.get('images'):
+                    item['images'] = []
+                if og_image not in item['images']:
+                    item['images'].insert(0, og_image)
+
+            item['author'] = response.css('.article_author::text, .article_author span::text').get() or "Moneycontrol Staff"
+            item['country_code'] = self.country_code
+            item['country'] = self.country
+            
+            yield item
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, response.url):
+                    yield req

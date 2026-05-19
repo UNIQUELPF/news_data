@@ -14,6 +14,8 @@ class NigeriaNairametricsSpider(SmartSpider):
 
     strict_date_required = False
 
+    MAX_PAGES = 50
+
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
@@ -32,30 +34,62 @@ class NigeriaNairametricsSpider(SmartSpider):
         )
 
     def parse_list(self, response):
-        if self._stop_pagination:
-            return
-
         articles = response.css('h3.jeg_post_title a::attr(href)').getall()
         if not articles:
             articles = response.css('.jeg_main_content a::attr(href)').getall()
 
-        has_valid_item_in_window = False
+        valid_links = []
         for link in articles:
             full_url = response.urljoin(link)
             if '/202' in full_url and self.should_process(full_url):
-                has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+                valid_links.append(full_url)
 
-        if has_valid_item_in_window:
-            page = response.meta.get('page', 1)
+        current_page = response.meta.get('page', 1)
+        if not valid_links:
+            self.logger.info(f"[{self.name}] No valid links to process on page {current_page}. Stopping.")
+            return
+
+        state = {
+            'pending_count': len(valid_links),
+            'dates': [],
+            'page': current_page
+        }
+
+        for url in valid_links:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_article,
+                errback=self._handle_detail_error,
+                meta={'shared_state': state}
+            )
+
+    def _check_next_page(self, state):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        if page < self.MAX_PAGES:
             next_page = page + 1
             next_url = f"https://nairametrics.com/category/economy/page/{next_page}/"
+            self.logger.info(f"[{self.name}] Proceeding to page {next_page}: {next_url}")
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
                 meta={'page': next_page},
                 dont_filter=True
             )
+
+    def _handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req
 
     def parse_article(self, response):
         item = self.auto_parse_item(
@@ -66,9 +100,18 @@ class NigeriaNairametricsSpider(SmartSpider):
         item['author'] = response.css('.jeg_meta_author a::text').get() or 'Nairametrics Desk'
         item['section'] = 'Economy'
 
-        if not self.should_process(response.url, item.get('publish_time')):
-            self._stop_pagination = True
-            return
+        state = response.meta.get('shared_state')
+        pub_time = item.get('publish_time')
 
-        if item.get('content_plain') and len(item['content_plain']) > 50:
-            yield item
+        if state:
+            state['dates'].append(pub_time)
+
+        if self.should_process(response.url, pub_time):
+            if item.get('content_plain') and len(item['content_plain']) > 50:
+                yield item
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req

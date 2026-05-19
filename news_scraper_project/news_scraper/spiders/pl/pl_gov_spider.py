@@ -27,6 +27,8 @@ class PlGovSpider(SmartSpider):
         "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True}
     }
 
+    MAX_PAGES = 50
+
     async def start(self):
         yield scrapy.Request(
             "https://www.gov.pl/web/premier/wydarzenia?page=1",
@@ -35,13 +37,11 @@ class PlGovSpider(SmartSpider):
         )
 
     def parse(self, response):
-        if self._stop_pagination:
-            return
         links = response.css('div.art-prev ul li .title a::attr(href)').getall()
         if not links:
             links = response.css('a[href*="/web/premier/"]::attr(href)').getall()
 
-        has_valid_item_in_window = False
+        valid_links = []
         for link in links:
             if not link.startswith('http'):
                 link = "https://www.gov.pl" + link
@@ -50,25 +50,69 @@ class PlGovSpider(SmartSpider):
                 continue
 
             if self.should_process(link):
-                has_valid_item_in_window = True
-                yield scrapy.Request(
-                    link,
-                    callback=self.parse_article,
-                    meta={"playwright": True}
-                )
+                valid_links.append(link)
 
-        if has_valid_item_in_window:
-            current_page = 1
-            if 'page=' in response.url:
-                try:
-                    current_page = int(response.url.split('page=')[-1].split('&')[0])
-                except ValueError:
-                    pass
+        # De-duplicate while preserving order
+        seen = set()
+        unique_links = []
+        for l in valid_links:
+            if l not in seen:
+                seen.add(l)
+                unique_links.append(l)
 
-            next_page_url = f"https://www.gov.pl/web/premier/wydarzenia?page={current_page + 1}"
-            yield scrapy.Request(next_page_url, callback=self.parse)
+        current_page = 1
+        if 'page=' in response.url:
+            try:
+                current_page = int(response.url.split('page=')[-1].split('&')[0])
+            except ValueError:
+                pass
+
+        if not unique_links:
+            self.logger.info(f"[{self.name}] No valid links to process on page {current_page}. Stopping.")
+            return
+
+        state = {
+            'pending_count': len(unique_links),
+            'dates': [],
+            'page': current_page,
+            'response_url': response.url
+        }
+
+        for url in unique_links:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_article,
+                errback=self._handle_detail_error,
+                meta={"playwright": True, 'shared_state': state}
+            )
+
+    def _check_next_page(self, state, response_url):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        if page < self.MAX_PAGES:
+            next_page_url = f"https://www.gov.pl/web/premier/wydarzenia?page={page + 1}"
+            self.logger.info(f"Proceeding to page {page + 1}: {next_page_url}")
+            yield scrapy.Request(
+                next_page_url,
+                callback=self.parse
+            )
+
+    def _handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, state['response_url']):
+                    yield req
 
     def parse_article(self, response):
+        state = response.meta.get('shared_state')
         # Custom date extraction (DD.MM.YYYY)
         date_str = response.css('p.event-date::text, .date::text, .article-header .date::text').get()
         if not date_str:
@@ -82,13 +126,22 @@ class PlGovSpider(SmartSpider):
             pub_date = self.parse_date(date_str.strip())
 
         item = self.auto_parse_item(response)
-        item['publish_time'] = pub_date or item.get('publish_time')
-        item['author'] = 'Kancelaria Prezesa Rady Ministrów (KPRM)'
-        item['section'] = 'Government Announcements'
+        if item:
+            item['publish_time'] = pub_date or item.get('publish_time')
+            item['author'] = 'Kancelaria Prezesa Rady Ministrów (KPRM)'
+            item['section'] = 'Government Announcements'
 
-        if not self.should_process(response.url, item.get('publish_time')):
-            self._stop_pagination = True
-            return
+        pub_time = item.get('publish_time') if item else None
 
-        if item.get('content_plain') and len(item['content_plain']) > 50:
-            yield item
+        if state:
+            state['dates'].append(pub_time)
+
+        if item and item.get('title') and item.get('content_plain') and self.should_process(response.url, pub_time):
+            if item.get('content_plain') and len(item['content_plain']) > 50:
+                yield item
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, response.url):
+                    yield req

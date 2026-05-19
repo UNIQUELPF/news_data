@@ -25,35 +25,80 @@ class AustriaTrendSpider(AustriaBaseSpider):
     ]
     strict_date_required = False
 
+    MAX_PAGES = 50
+
     async def start(self):
         self._stop_pagination = False
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        if self._stop_pagination:
-            return
         links = response.css('a[href*="trend.at/unternehmen/"]::attr(href), a[href*="trend.at/finanzen/"]::attr(href)').getall()
+        valid_links = []
         for href in links:
             full_url = response.urljoin(href)
             if not self.should_process(full_url):
                 continue
             if "/unternehmen/" not in full_url and "/finanzen/" not in full_url:
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            valid_links.append(full_url)
 
-        if not self._stop_pagination:
-            next_page = response.css("a[rel='next']::attr(href)").get()
-            if next_page:
-                yield response.follow(next_page, callback=self.parse_listing)
+        current_page = response.meta.get('page', 1)
+        if not valid_links:
+            self.logger.info(f"[{self.name}] No valid links to process on page {current_page}. Stopping.")
+            return
+
+        next_page = response.css("a[rel='next']::attr(href)").get()
+
+        state = {
+            'pending_count': len(valid_links),
+            'dates': [],
+            'page': current_page,
+            'response_url': response.url,
+            'next_page_url': next_page
+        }
+
+        for url in valid_links:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_detail,
+                errback=self._handle_detail_error,
+                meta={'shared_state': state}
+            )
+
+    def _check_next_page(self, state, response_url):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        next_page = state.get('next_page_url')
+        if next_page and page < self.MAX_PAGES:
+            next_page_full = response_urljoin_helper(response_url, next_page)
+            self.logger.info(f"[{self.name}] Proceeding to page {page + 1}: {next_page_full}")
+            yield scrapy.Request(
+                next_page_full,
+                callback=self.parse_listing,
+                meta={'page': page + 1}
+            )
+
+    def _handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, state['response_url']):
+                    yield req
 
     def parse_detail(self, response):
         title = self._clean_text(
             response.xpath("//meta[@property='og:title']/@content").get()
             or response.css("h1::text").get()
         )
-        if not title:
-            return
+        state = response.meta.get('shared_state')
 
         publish_time = self._parse_datetime(
             response.xpath("//meta[@property='article:published_time']/@content").get()
@@ -61,26 +106,36 @@ class AustriaTrendSpider(AustriaBaseSpider):
             or response.xpath("//time/text()").get(),
             languages=["de", "en"],
         )
-        if publish_time and publish_time < self.cutoff_date:
-            self._stop_pagination = True
-            return
 
-        content = self._extract_content(response)
-        if not content:
-            content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
-        if not content:
-            return
+        if state:
+            state['dates'].append(publish_time)
 
-        section = "finanzen" if "/finanzen/" in response.url else "unternehmen"
-        yield self._build_item(
-            response=response,
-            title=title,
-            content=content,
-            publish_time=publish_time,
-            author="trend",
-            language="de",
-            section=section,
-        )
+        if title and self.should_process(response.url, publish_time):
+            content = self._extract_content(response)
+            if not content:
+                content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
+            
+            if content:
+                section = "finanzen" if "/finanzen/" in response.url else "unternehmen"
+                yield self._build_item(
+                    response=response,
+                    title=title,
+                    content=content,
+                    publish_time=publish_time,
+                    author="trend",
+                    language="de",
+                    section=section,
+                )
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state, response.url):
+                    yield req
+
+def response_urljoin_helper(base_url, relative_url):
+    from urllib.parse import urljoin
+    return urljoin(base_url, relative_url)
 
     def _extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
