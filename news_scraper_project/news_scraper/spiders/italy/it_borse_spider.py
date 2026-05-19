@@ -141,18 +141,6 @@ class ItBorseSpider(SmartSpider):
                     if parsed:
                         return parsed
 
-        # Strategy 2: Try dateparser on the card's full text as a last resort
-        if card:
-            card_text = ' '.join(card.css('*::text').getall())
-            if card_text:
-                parsed = dateparser.parse(
-                    card_text,
-                    settings=self.dateparser_settings,
-                    languages=['it'],
-                )
-                if parsed:
-                    return self.parse_to_utc(parsed)
-
         return None
 
     def _looks_like_italian_date(self, text):

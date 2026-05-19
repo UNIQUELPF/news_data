@@ -79,6 +79,8 @@ class LPGovSpider(SmartSpider):
             pub_time = self.parse_arabic_date(date_str)
             if pub_time:
                 pub_time = self.parse_to_utc(pub_time)
+                if pub_time > datetime.utcnow():
+                    pub_time = datetime.utcnow()
 
             detail_url = f"https://www.lp.gov.lb/ContentRecordDetails?Id={record.get('Id')}"
 

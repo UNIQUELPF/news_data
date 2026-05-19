@@ -41,7 +41,9 @@ class ItIlsole24oreSpider(SmartSpider):
         if self.cutoff_date:
             target_date_str = self.cutoff_date.strftime('%Y-%m-%dT%H:%M:%SZ')
         else:
-            target_date_str = '2026-01-01'
+            from datetime import datetime
+            earliest = getattr(self, 'earliest_date', datetime(2026, 5, 10))
+            target_date_str = earliest.strftime('%Y-%m-%dT%H:%M:%SZ')
 
         js_scroll = f"""
         async () => {{
