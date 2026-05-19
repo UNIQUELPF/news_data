@@ -194,8 +194,28 @@ class NewsCNSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1[contains(@class,'atitle')]/text() | //div[contains(@class,'header-content')]/h1/text() | //h1[@id='title']/text()",
-            publish_time_xpath="//span[contains(@class,'header-time')]/text() | //span[@id='pubtime']/text() | //div[@class='source']//span[1]/text()",
         )
+
+        # 1. Custom precise publish time extraction (with time components)
+        publish_time = None
+        
+        # Try joining header-time text nodes (desktop view)
+        header_time_nodes = response.xpath("//div[contains(@class,'header-time')]//text() | //span[contains(@class,'header-time')]//text()").getall()
+        if header_time_nodes:
+            raw_time = "".join(header_time_nodes).strip()
+            raw_time = re.sub(r'\s+', ' ', raw_time)
+            if raw_time:
+                publish_time = self.parse_date(raw_time)
+
+        # Try mobile header info if still no precise time
+        if not publish_time:
+            raw_time = response.xpath("//div[contains(@class, 'mheader')]//div[@class='info']/text()").get()
+            if raw_time:
+                publish_time = self.parse_date(raw_time.strip())
+
+        # If custom extraction succeeded, override item['publish_time']
+        if publish_time:
+            item['publish_time'] = publish_time
 
         item['author'] = item.get('author') or "新华网"
         item['section'] = response.meta.get('section_hint', '综合')
