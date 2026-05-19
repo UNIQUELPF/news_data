@@ -24,7 +24,6 @@ class ElnashraSpider(SmartSpider):
 
     allowed_domains = ["elnashra.com"]
 
-    start_date = '2026-01-01'
 
     base_list_url = (
         "https://www.elnashra.com/category/show/important/news/"

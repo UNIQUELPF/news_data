@@ -20,7 +20,6 @@ class WortSpider(SmartSpider):
     language = 'de'
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
-    start_date = "2026-01-01"
 
     allowed_domains = ["wort.lu"]
 

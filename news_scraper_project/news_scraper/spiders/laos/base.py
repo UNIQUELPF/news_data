@@ -21,7 +21,6 @@ class LaosBaseSpider(SmartSpider):
     country = "老挝"
     language = "en"
     source_timezone = "Asia/Vientiane"
-    start_date = "2025-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

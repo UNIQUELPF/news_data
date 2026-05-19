@@ -21,7 +21,6 @@ class TimorLesteBaseSpider(SmartSpider):
     country = "???"
     language = "en"
     source_timezone = "Asia/Dili"
-    start_date = "2025-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

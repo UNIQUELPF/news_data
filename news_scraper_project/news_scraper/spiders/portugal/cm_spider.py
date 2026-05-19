@@ -9,7 +9,6 @@ class PortugalCMSpider(SmartSpider):
     country = '葡萄牙'
     language = 'pt'
     source_timezone = 'Europe/Lisbon'
-    start_date = '2024-01-01'
     allowed_domains = ['cmjornal.pt']
     fallback_content_selector = '.texto_noticia'
     start_urls = ['https://www.cmjornal.pt/economia']

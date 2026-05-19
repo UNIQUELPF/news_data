@@ -24,7 +24,6 @@ class LPGovSpider(SmartSpider):
     country = '黎巴嫩'
     source_timezone = 'Asia/Beirut'
     language = 'ar'
-    start_date = '2024-01-01'
 
     allowed_domains = ["lp.gov.lb"]
 

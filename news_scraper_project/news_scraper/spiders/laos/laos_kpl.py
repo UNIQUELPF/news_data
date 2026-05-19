@@ -17,6 +17,8 @@ class LaosKplSpider(LaosBaseSpider):
         "https://kpl.gov.la/En/News.aspx?cat=9",
     ]
 
+    dateparser_settings = {"DATE_ORDER": "DMY"}
+
     def parse(self, response):
         emitted = 0
         for li in response.css('ul.news-story li'):
@@ -27,7 +29,7 @@ class LaosKplSpider(LaosBaseSpider):
             if "/En/" not in url:
                 continue
             date_str = li.css('p.uk-text-small.uk-text-muted::text').get()
-            publish_time = self._parse_datetime(date_str, languages=["en"]) if date_str else None
+            publish_time = self.parse_date(date_str) if date_str else None
             if not self.should_process(url, publish_time):
                 continue
             yield scrapy.Request(url, callback=self.parse_detail)
@@ -46,7 +48,7 @@ class LaosKplSpider(LaosBaseSpider):
 
         page_text = self._clean_text(" ".join(response.css("body *::text").getall()))
         match = re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", page_text)
-        publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
+        publish_time = self.parse_date(match.group(0)) if match else None
         if not self.should_process(response.url, publish_time):
             return
 

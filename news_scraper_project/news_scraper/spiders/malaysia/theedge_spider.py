@@ -12,7 +12,6 @@ class TheEdgeSpider(SmartSpider):
     country = "马来西亚"
     language = "en"
     source_timezone = "Asia/Kuala_Lumpur"
-    start_date = "2026-01-01"
     allowed_domains = ["theedgemalaysia.com"]
 
     use_curl_cffi = True

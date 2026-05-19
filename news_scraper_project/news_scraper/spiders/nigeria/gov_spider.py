@@ -8,7 +8,6 @@ class NigeriaGovSpider(SmartSpider):
     country = '尼日利亚'
     language = 'en'
     source_timezone = 'Africa/Lagos'
-    start_date = '2024-01-01'
     allowed_domains = ['statehouse.gov.ng']
     fallback_content_selector = '.post-content'
     dateparser_settings = {"DATE_ORDER": "DMY"}
@@ -49,14 +48,16 @@ class NigeriaGovSpider(SmartSpider):
             
             # Extract date from list page card
             date_str = card.css('.news-info span::text').get()
-            pub_date = self.parse_date(date_str)
+            if date_str:
+                date_str = date_str.strip()
+            pub_date = self.parse_date(date_str) if date_str else None
 
             if self.should_process(full_url, pub_date):
                 has_valid_item_in_window = True
                 yield scrapy.Request(
                     full_url, 
                     callback=self.parse_article,
-                    meta={'title_hint': card.css('h3::text').get(), 'pub_date': pub_date}
+                    meta={'title_hint': card.css('h3::text').get(), 'publish_time_hint': pub_date}
                 )
 
         if has_valid_item_in_window:
@@ -71,17 +72,20 @@ class NigeriaGovSpider(SmartSpider):
             )
 
     def parse_article(self, response):
-        pub_date = response.meta.get('pub_date')
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
         )
-        item['publish_time'] = pub_date or item.get('publish_time')
+        
+        hint_date = response.meta.get('publish_time_hint')
+        if hint_date and not item.get("publish_time"):
+            item["publish_time"] = hint_date
+            
         item['author'] = 'Presidential Villa, Abuja'
         item['section'] = 'Press Release'
 
         if not self.should_process(response.url, item.get('publish_time')):
             return
 
-        if item.get('content_plain') and len(item['content_plain']) > 50:
+        if item.get('content_plain') and len(item.get('content_plain')) > 50:
             yield item

@@ -16,7 +16,6 @@ class DigitalBusinessSpider(SmartSpider):
 
     allowed_domains = ['digitalbusiness.kz']
 
-    start_date = '2025-01-01'
     fallback_content_selector = '.content_col'
 
     # Base URL

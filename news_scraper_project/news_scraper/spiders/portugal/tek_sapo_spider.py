@@ -9,7 +9,6 @@ class PortugalTekSapoSpider(SmartSpider):
     country = '葡萄牙'
     language = 'pt'
     source_timezone = 'Europe/Lisbon'
-    start_date = '2024-01-01'
     allowed_domains = ['tek.sapo.pt']
     fallback_content_selector = '.article-content'
     dateparser_settings = {"DATE_ORDER": "DMY"}

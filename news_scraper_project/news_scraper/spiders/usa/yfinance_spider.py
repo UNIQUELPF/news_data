@@ -12,7 +12,6 @@ class USAYFinanceSpider(SmartSpider):
     country_code = 'USA'
     country = '美国'
     language = 'en'
-    start_date = '2026-01-01'
     allowed_domains = ['finance.yahoo.com']
     strict_date_required = False  # List page dates unreliable; extracted on detail pages
     use_curl_cffi = True

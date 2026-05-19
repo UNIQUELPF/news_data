@@ -32,7 +32,6 @@ class AlgeriaBankOfAlgeriaSpider(SmartSpider):
     country = "阿尔及利亚"
     language = "en"
     source_timezone = "Africa/Algiers"
-    start_date = "2026-01-01"
     allowed_domains = ["bank-of-algeria.dz", "www.bank-of-algeria.dz"]
 
     fallback_content_selector = ".entry-content, article"

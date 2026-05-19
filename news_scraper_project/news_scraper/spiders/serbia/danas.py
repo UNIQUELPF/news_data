@@ -13,7 +13,6 @@ class DanasSpider(SmartSpider):
     country = '塞尔维亚'
     language = 'sr'
     source_timezone = 'Europe/Belgrade'
-    start_date = '2024-01-01'
     allowed_domains = ['danas.rs']
     fallback_content_selector = '.post-content'
 
@@ -80,7 +79,8 @@ class DanasSpider(SmartSpider):
             if 'danas' in date_str.lower():
                 time_match = re.search(r'(\d{2}):(\d{2})', date_str)
                 if time_match:
-                    return now.replace(hour=int(time_match.group(1)), minute=int(time_match.group(2)), second=0, microsecond=0)
+                    dt = now.replace(hour=int(time_match.group(1)), minute=int(time_match.group(2)), second=0, microsecond=0)
+                    return self.parse_to_utc(dt)
 
             date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{4})\.\s+(\d{2}):(\d{2})', date_str)
             if date_match:
@@ -89,7 +89,8 @@ class DanasSpider(SmartSpider):
                 year = int(date_match.group(3))
                 hour = int(date_match.group(4))
                 minute = int(date_match.group(5))
-                return datetime(year, month, day, hour, minute)
+                dt = datetime(year, month, day, hour, minute)
+                return self.parse_to_utc(dt)
 
         except Exception as e:
             self.logger.error(f"Error parsing date {date_str}: {e}")

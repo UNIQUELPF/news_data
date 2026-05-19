@@ -21,7 +21,6 @@ class NetherlandsBaseSpider(SmartSpider):
     country = "荷兰"
     language = "en"
     source_timezone = "Europe/Amsterdam"
-    start_date = "2026-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

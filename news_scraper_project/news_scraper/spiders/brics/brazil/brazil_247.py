@@ -11,7 +11,6 @@ class Brazil247Spider(SitemapSpider, SmartSpider):
     country = "巴西"
     language = "pt"
     source_timezone = "America/Sao_Paulo"
-    start_date = "2026-01-01"
     allowed_domains = ["brasil247.com"]
     dateparser_settings = {"DATE_ORDER": "DMY"}
 

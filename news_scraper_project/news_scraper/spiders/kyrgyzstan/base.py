@@ -21,7 +21,6 @@ class KyrgyzstanBaseSpider(SmartSpider):
     country = "??????"
     language = "en"
     source_timezone = "Asia/Bishkek"
-    start_date = "2025-01-01"
     fallback_content_selector = "article, main, .content"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,

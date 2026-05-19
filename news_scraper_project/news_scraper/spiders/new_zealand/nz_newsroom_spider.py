@@ -10,7 +10,6 @@ class NzNewsroomSpider(SmartSpider):
     country = '新西兰'
     language = 'en'
     source_timezone = 'Pacific/Auckland'
-    start_date = '2024-01-01'
     allowed_domains = ["newsroom.co.nz"]
     fallback_content_selector = '.entry-content'
 

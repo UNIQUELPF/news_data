@@ -21,7 +21,6 @@ class FinlandBaseSpider(SmartSpider):
     country = "芬兰"
     language = "en"
     source_timezone = "Europe/Helsinki"
-    start_date = "2026-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

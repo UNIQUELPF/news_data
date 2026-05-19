@@ -133,6 +133,19 @@ class UkParliamentSpider(SmartSpider):
         if not content_plain or len(content_plain) < 50:
             content_plain = content_area.get_text(separator=' ', strip=True)
 
+        # --- Date ---
+        pub_date = None
+        meta_date = (
+            soup.select_one('meta[property="article:published_time"]')
+            or soup.select_one('meta[name="dcterms.created"]')
+            or soup.select_one('meta[name="dc.date"]')
+            or soup.select_one('meta[name="publishdate"]')
+        )
+        if meta_date:
+            date_str = meta_date.get('content', '').strip()
+            if date_str:
+                pub_date = self.parse_date(date_str)
+
         if content_plain and len(content_plain) > 50:
             images = []
             for img in content_area.find_all('img'):
@@ -147,6 +160,7 @@ class UkParliamentSpider(SmartSpider):
                 "content_plain": content_plain.strip(),
                 "images": images,
                 "title": title,
+                "publish_time": pub_date,
             }
 
         return None
@@ -265,7 +279,7 @@ class UkParliamentSpider(SmartSpider):
                 "url": url,
                 "title": title or content_data.get("title", ""),
                 "content_plain": content_data["content_plain"],
-                "publish_time": pub_date,
+                "publish_time": pub_date or content_data.get("publish_time"),
                 "language": "en",
                 "section": section,
                 "author": "UK Parliament",
@@ -283,7 +297,7 @@ class UkParliamentSpider(SmartSpider):
                 "url": url,
                 "title": title,
                 "content_plain": final_content,
-                "publish_time": pub_date,
+                "publish_time": pub_date or (content_data.get("publish_time") if content_data else None),
                 "language": "en",
                 "section": section,
                 "author": "UK Parliament",

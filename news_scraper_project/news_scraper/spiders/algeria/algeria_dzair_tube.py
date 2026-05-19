@@ -27,7 +27,6 @@ class AlgeriaDzairTubeSpider(SmartSpider):
     country = "阿尔及利亚"
     language = "en"
     source_timezone = "Africa/Algiers"
-    start_date = "2026-01-01"
     allowed_domains = ["dzair-tube.dz"]
     # 当前 spider 对应的数据库表名。
 

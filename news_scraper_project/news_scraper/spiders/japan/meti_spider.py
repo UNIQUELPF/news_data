@@ -11,7 +11,6 @@ class MetiSpider(SmartSpider):
     source_timezone = 'Asia/Tokyo'
     use_curl_cffi = True
 
-    start_date = '2026-01-01'
     fallback_content_selector = 'div.main.w1000, div#main'
 
     dateparser_settings = {'DATE_ORDER': 'YMD'}

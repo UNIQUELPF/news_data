@@ -27,7 +27,6 @@ class ArgentinaEconomiaGovSpider(SmartSpider):
     country = "阿根廷"
     language = "en"
     source_timezone = "America/Argentina/Buenos_Aires"
-    start_date = "2026-01-01"
     strict_date_required = False
     allowed_domains = ["argentina.gob.ar"]
 

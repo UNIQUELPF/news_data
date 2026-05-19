@@ -126,6 +126,7 @@ class CaixinSpider(scrapy.Spider):
                     headline_item['type'] = 'headline'
                     headline_item['title'] = title
                     headline_item['url'] = url
+                    headline_item['publish_time'] = item_date_str
                     headline_item['crawl_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     yield headline_item
 

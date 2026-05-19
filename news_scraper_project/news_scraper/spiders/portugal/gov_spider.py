@@ -10,7 +10,6 @@ class PortugalGovSpider(SmartSpider):
     country = '葡萄牙'
     language = 'pt'
     source_timezone = 'Europe/Lisbon'
-    start_date = '2024-01-01'
     allowed_domains = ['portugal.gov.pt']
     fallback_content_selector = 'div#regText.gov-texts'
     start_urls = ['https://www.portugal.gov.pt/pt/gc25/comunicacao/noticias']

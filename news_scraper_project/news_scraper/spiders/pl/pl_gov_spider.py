@@ -9,7 +9,6 @@ class PlGovSpider(SmartSpider):
     country = '波兰'
     language = 'pl'
     source_timezone = 'Europe/Warsaw'
-    start_date = '2024-01-01'
     allowed_domains = ["www.gov.pl"]
     fallback_content_selector = '.editor-content'
     dateparser_settings = {"DATE_ORDER": "DMY"}

@@ -30,7 +30,6 @@ class ArgentinaLaNacionSpider(SmartSpider):
     country = "阿根廷"
     language = "en"
     source_timezone = "America/Argentina/Buenos_Aires"
-    start_date = "2026-01-01"
     allowed_domains = ["lanacion.com.ar"]
     # 当前 spider 对应的数据库表名。
 

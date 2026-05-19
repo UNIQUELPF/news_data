@@ -33,19 +33,35 @@ class MexicoElFinancieroSpider(SmartSpider):
         )
 
     def parse_list(self, response):
-        articles = response.css('.b-results-list a.c-link::attr(href)').getall()
-        if not articles:
-            articles = response.css('a.c-link::attr(href)').getall()
-
+        cards = response.css('.b-results-list')
         has_valid_item_in_window = False
 
-        for link in articles:
-            if '/202' not in link:
-                continue
-            full_url = response.urljoin(link)
-            if self.should_process(full_url):
-                has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+        if not cards:
+            articles = response.css('a.c-link::attr(href)').getall()
+            for link in articles:
+                if '/202' not in link:
+                    continue
+                full_url = response.urljoin(link)
+                if self.should_process(full_url):
+                    has_valid_item_in_window = True
+                    yield scrapy.Request(full_url, callback=self.parse_article)
+        else:
+            for card in cards:
+                link = card.css('a.c-link::attr(href)').get()
+                if not link or '/202' not in link:
+                    continue
+                full_url = response.urljoin(link)
+                
+                date_str = card.css('time.c-date::attr(datetime)').get()
+                pub_date = self.parse_date(date_str) if date_str else None
+                
+                if self.should_process(full_url, pub_date):
+                    has_valid_item_in_window = True
+                    yield scrapy.Request(
+                        full_url, 
+                        callback=self.parse_article,
+                        meta={'publish_time_hint': pub_date}
+                    )
 
         current_page = response.meta.get('page', 1)
         if has_valid_item_in_window and current_page < self.MAX_PAGES:
@@ -64,6 +80,11 @@ class MexicoElFinancieroSpider(SmartSpider):
             title_xpath="//h1/text()",
             publish_time_xpath="//time[contains(@class, 'c-date')]/@datetime",
         )
+        
+        hint_date = response.meta.get('publish_time_hint')
+        if hint_date and not item.get("publish_time"):
+            item["publish_time"] = hint_date
+            
         item['author'] = response.css('.c-attribution a::text').get() or 'El Financiero'
         item['section'] = 'Economía'
 

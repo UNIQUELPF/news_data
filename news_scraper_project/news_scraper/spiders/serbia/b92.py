@@ -12,7 +12,6 @@ class B92Spider(SmartSpider):
     country = '塞尔维亚'
     language = 'sr'
     source_timezone = 'Europe/Belgrade'
-    start_date = '2024-01-01'
     allowed_domains = ['b92.net']
     start_urls = ['https://www.b92.net/najnovije-vesti']
     fallback_content_selector = '#article-content'

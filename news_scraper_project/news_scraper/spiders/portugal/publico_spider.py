@@ -12,7 +12,6 @@ class PortugalPublicoSpider(SmartSpider):
     country = '葡萄牙'
     language = 'pt'
     source_timezone = 'Europe/Lisbon'
-    start_date = '2024-01-01'
     allowed_domains = ['publico.pt']
     dateparser_settings = {"DATE_ORDER": "DMY"}
 

@@ -21,7 +21,6 @@ class KoreaBaseSpider(SmartSpider):
     country = "韩国"
     language = "en"
     source_timezone = "Asia/Seoul"
-    start_date = "2026-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

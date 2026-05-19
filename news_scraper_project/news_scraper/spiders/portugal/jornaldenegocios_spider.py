@@ -9,7 +9,6 @@ class PortugalJornalNegociosSpider(SmartSpider):
     country = '葡萄牙'
     language = 'pt'
     source_timezone = 'Europe/Lisbon'
-    start_date = '2024-01-01'
     allowed_domains = ['jornaldenegocios.pt']
     fallback_content_selector = '.texto_noticia'
     dateparser_settings = {"DATE_ORDER": "DMY"}

@@ -19,7 +19,6 @@ class QatarBaseSpider(SmartSpider):
     country = "卡塔尔"
     language = "en"
     source_timezone = "Asia/Qatar"
-    start_date = "2025-01-01"
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

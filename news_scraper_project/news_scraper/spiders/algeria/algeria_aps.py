@@ -30,7 +30,6 @@ class AlgeriaApsSpider(SmartSpider):
     language = "en"
     strict_date_required = False
     source_timezone = "Africa/Algiers"
-    start_date = "2026-01-01"
     allowed_domains = ["aps.dz"]
     # 当前 spider 对应的数据库表名。
 
@@ -55,22 +54,38 @@ class AlgeriaApsSpider(SmartSpider):
         if self._stop_pagination:
             return
 
-        # APS 列表页先收集文章链接，再继续找下一页。
-        article_links = response.xpath(
-            '//a[contains(@href, "/economie/banque-et-finances/")]/@href'
-        ).getall()
-
+        cards = response.xpath('//div[contains(@class, "flex-col") and .//a[contains(@href, "/economie/banque-et-finances/")]]')
+        
         has_valid_item_in_window = False
-        unique_links = []
-        for href in article_links:
-            full_url = response.urljoin(href)
-            if not self.should_process(full_url):
-                continue
-            has_valid_item_in_window = True
-            unique_links.append(full_url)
-
-        for article_url in unique_links:
-            yield scrapy.Request(article_url, callback=self.parse_detail)
+        
+        if not cards:
+            # Fallback if UI changes
+            article_links = response.xpath('//a[contains(@href, "/economie/banque-et-finances/")]/@href').getall()
+            for href in article_links:
+                full_url = response.urljoin(href)
+                if not self.should_process(full_url):
+                    continue
+                has_valid_item_in_window = True
+                yield scrapy.Request(full_url, callback=self.parse_detail)
+        else:
+            for card in cards:
+                href = card.xpath('.//a[contains(@href, "/economie/banque-et-finances/")]/@href').get()
+                if not href:
+                    continue
+                full_url = response.urljoin(href)
+                
+                date_str = card.xpath('.//span[contains(@class, "text-xs")]/text()').get()
+                pub_date = self.parse_date(date_str) if date_str else None
+                
+                if not self.should_process(full_url, pub_date):
+                    continue
+                
+                has_valid_item_in_window = True
+                yield scrapy.Request(
+                    full_url, 
+                    callback=self.parse_detail,
+                    meta={'publish_time_hint': pub_date}
+                )
 
         if self._stop_pagination:
             return
@@ -92,6 +107,11 @@ class AlgeriaApsSpider(SmartSpider):
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
+        
+        hint_date = response.meta.get("publish_time_hint")
+        if hint_date and not item.get("publish_time"):
+            item["publish_time"] = hint_date
+
         if not item.get("title") or not item.get("content_plain"):
             return
 

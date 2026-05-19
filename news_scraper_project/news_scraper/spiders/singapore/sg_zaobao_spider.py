@@ -11,7 +11,6 @@ class SgZaobaoSpider(SmartSpider):
     country = '新加坡'
     language = 'zh'
     source_timezone = 'Asia/Singapore'
-    start_date = '2024-01-01'
     allowed_domains = ['zaobao.com.sg']
     fallback_content_selector = 'article'
 

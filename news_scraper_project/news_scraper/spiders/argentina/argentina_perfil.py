@@ -27,7 +27,6 @@ class ArgentinaPerfilSpider(SmartSpider):
     country = "阿根廷"
     language = "en"
     source_timezone = "America/Argentina/Buenos_Aires"
-    start_date = "2026-01-01"
     allowed_domains = ["perfil.com"]
     # 当前 spider 对应的数据库表名。
 

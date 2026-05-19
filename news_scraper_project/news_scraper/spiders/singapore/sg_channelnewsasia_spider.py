@@ -11,7 +11,6 @@ class SgChannelNewsAsiaSpider(SmartSpider):
     country = '新加坡'
     language = 'en'
     source_timezone = 'Asia/Singapore'
-    start_date = '2024-01-01'
     allowed_domains = ['channelnewsasia.com', 'algolianet.com', 'algolia.net']
     fallback_content_selector = '.text-long'
 

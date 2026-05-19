@@ -41,28 +41,30 @@ class MyanmarGovSpider(SmartSpider):
         if not articles:
             articles = response.css('.smallcardstyle a::attr(href)').getall()
 
-        has_valid_item_in_window = False
-
+        urls_to_process = []
         for link in articles:
             if not link or '/content/' not in link:
                 continue
             if self.should_process(link):
-                has_valid_item_in_window = True
-                yield scrapy.Request(link, callback=self.parse_article)
+                urls_to_process.append(link)
 
         current_page = response.meta.get('page', 1)
-        if has_valid_item_in_window and current_page < self.MAX_PAGES:
-            next_page = current_page + 1
-            base_param = "?_com_liferay_asset_publisher_web_portlet_AssetPublisherPortlet_INSTANCE_idasset354_cur="
-            next_url = f"{self.start_urls[0]}{base_param}{next_page}"
+
+        if urls_to_process:
+            next_url = urls_to_process.pop(0)
             yield scrapy.Request(
                 next_url,
-                callback=self.parse_list,
-                meta={'page': next_page},
-                dont_filter=True
+                callback=self.parse_article_sync,
+                meta={
+                    'urls_to_process': urls_to_process,
+                    'any_item_new': False,
+                    'page': current_page
+                }
             )
+        else:
+            self.logger.info(f"No new/valid URLs on page {current_page}. Stopping pagination.")
 
-    def parse_article(self, response):
+    def parse_article_sync(self, response):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1[@class='fontsize24']/text() | //div[@class='asset-content']/h2/text()",
@@ -92,10 +94,52 @@ class MyanmarGovSpider(SmartSpider):
                     pub_date = datetime(year, month, day)
                     pub_date = self.parse_to_utc(pub_date)
 
-        item['publish_time'] = pub_date or item.get('publish_time')
+        pub_time = pub_date or item.get('publish_time')
+        item['publish_time'] = pub_time
         item['author'] = 'Myanmar Government Portal'
         item['section'] = 'Latest News'
         item['language'] = 'my'
 
-        if item.get('content_plain') and len(item['content_plain']) > 200:
-            yield item
+        # Check if the extracted publish date is valid and within the window
+        is_new = False
+        if pub_time:
+            is_new = self.should_process(response.url, pub_time)
+        else:
+            is_new = not self.strict_date_required
+
+        if is_new:
+            response.meta['any_item_new'] = True
+            if item.get('content_plain') and len(item['content_plain']) > 200:
+                yield item
+
+        # Process the remaining URLs for this list page
+        urls_to_process = response.meta.get('urls_to_process', [])
+        current_page = response.meta.get('page', 1)
+        any_item_new = response.meta.get('any_item_new', False)
+
+        if urls_to_process:
+            next_url = urls_to_process.pop(0)
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_article_sync,
+                meta={
+                    'urls_to_process': urls_to_process,
+                    'any_item_new': any_item_new,
+                    'page': current_page
+                }
+            )
+        else:
+            # All URLs for this list page are processed! Now decide if we should load the next page
+            if any_item_new and current_page < self.MAX_PAGES:
+                next_page = current_page + 1
+                base_param = "?_com_liferay_asset_publisher_web_portlet_AssetPublisherPortlet_INSTANCE_idasset354_cur="
+                next_url = f"{self.start_urls[0]}{base_param}{next_page}"
+                self.logger.info(f"Page {current_page} had new articles. Proceeding to page {next_page}: {next_url}")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse_list,
+                    meta={'page': next_page},
+                    dont_filter=True
+                )
+            else:
+                self.logger.info(f"All articles on page {current_page} were old or already scraped. Stopping pagination.")

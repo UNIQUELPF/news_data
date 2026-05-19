@@ -8,7 +8,6 @@ class NigeriaBusinessDaySpider(SmartSpider):
     country = '尼日利亚'
     language = 'en'
     source_timezone = 'Africa/Lagos'
-    start_date = '2024-01-01'
     allowed_domains = ['businessday.ng']
     fallback_content_selector = '.entry-content'
     dateparser_settings = {"DATE_ORDER": "DMY"}

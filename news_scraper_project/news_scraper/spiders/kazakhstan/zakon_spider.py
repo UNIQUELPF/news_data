@@ -21,7 +21,6 @@ class ZakonSpider(SmartSpider):
     country = '哈萨克斯坦'
     language = 'ru'
     source_timezone = 'Asia/Almaty'
-    start_date = '2024-01-01'
 
     allowed_domains = ['zakon.kz']
     start_urls = ['https://www.zakon.kz/finansy/']

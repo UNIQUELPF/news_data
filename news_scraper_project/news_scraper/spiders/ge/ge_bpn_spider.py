@@ -13,7 +13,6 @@ class GeBpnSpider(SmartSpider):
     country = '格鲁吉亚'
     source_timezone = 'Asia/Tbilisi'
     language = 'ka'
-    start_date = '2024-01-01'
     use_curl_cffi = True
 
     allowed_domains = ["www.bpn.ge"]
@@ -54,36 +53,37 @@ class GeBpnSpider(SmartSpider):
 
         self.logger.info(f"GE_BPN List: Found {len(article_urls)} articles on {response.url}")
 
-        has_valid_item_in_window = False
-
+        urls_to_process = []
         for url in article_urls:
-            # Use page-level dateModified as approximate publish_time for filtering.
-            # Prefer None over approximate date to avoid blocking real articles.
-            if not self.should_process(url, publish_time=None):
-                continue
+            # Prefer None over approximate date to avoid blocking real articles too early.
+            if self.should_process(url, publish_time=None):
+                urls_to_process.append(url)
 
-            has_valid_item_in_window = True
+        match = re.search(r'page=(\d+)', response.url)
+        current_page = int(match.group(1)) if match else 1
 
+        if urls_to_process:
+            next_url = urls_to_process.pop(0)
             yield scrapy.Request(
-                url,
-                callback=self.parse_article,
+                next_url,
+                callback=self.parse_article_sync,
                 meta={
                     "playwright": True,
-                    "title_hint": headlines.get(url),
+                    "title_hint": headlines.get(next_url),
                     "publish_time_hint": page_date,
                     "playwright_page_methods": [
                         PageMethod("wait_for_load_state", "domcontentloaded", timeout=30000),
-                    ]
+                    ],
+                    "urls_to_process": urls_to_process,
+                    "headlines": headlines,
+                    "page_date": page_date,
+                    "any_item_new": False,
+                    "page": current_page
                 },
                 dont_filter=self.full_scan,
             )
-
-        # Pagination: stop when page has no new (non-duplicate) items
-        if has_valid_item_in_window:
-            match = re.search(r'page=(\d+)', response.url)
-            current_page = int(match.group(1)) if match else 1
-            next_page_url = f"https://www.bpn.ge/category/161-ekonomika/?page={current_page + 1}"
-            yield scrapy.Request(next_page_url, callback=self.parse, dont_filter=True)
+        else:
+            self.logger.info(f"No new/valid URLs on page {current_page}. Stopping pagination.")
 
     def _parse_listing_ldjson(self, response):
         """
@@ -164,7 +164,7 @@ class GeBpnSpider(SmartSpider):
             'headlines': headlines,
         }
 
-    def parse_article(self, response):
+    def parse_article_sync(self, response):
         """Parse detail page using SmartSpider auto_parse_item."""
         item = self.auto_parse_item(
             response,
@@ -174,4 +174,48 @@ class GeBpnSpider(SmartSpider):
         item['author'] = "BPN.ge"
         item['section'] = "Economy"
 
-        yield item
+        pub_time = item.get('publish_time')
+        is_new = False
+        if pub_time:
+            is_new = self.should_process(response.url, pub_time)
+        else:
+            is_new = not self.strict_date_required
+
+        if is_new:
+            response.meta['any_item_new'] = True
+            yield item
+
+        urls_to_process = response.meta.get('urls_to_process', [])
+        current_page = response.meta.get('page', 1)
+        any_item_new = response.meta.get('any_item_new', False)
+        headlines = response.meta.get('headlines', {})
+        page_date = response.meta.get('page_date')
+
+        if urls_to_process:
+            next_url = urls_to_process.pop(0)
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_article_sync,
+                meta={
+                    "playwright": True,
+                    "title_hint": headlines.get(next_url),
+                    "publish_time_hint": page_date,
+                    "playwright_page_methods": [
+                        PageMethod("wait_for_load_state", "domcontentloaded", timeout=30000),
+                    ],
+                    "urls_to_process": urls_to_process,
+                    "headlines": headlines,
+                    "page_date": page_date,
+                    "any_item_new": any_item_new,
+                    "page": current_page
+                },
+                dont_filter=self.full_scan,
+            )
+        else:
+            if any_item_new and current_page < 100:  # Safety boundary
+                next_page = current_page + 1
+                next_page_url = f"https://www.bpn.ge/category/161-ekonomika/?page={next_page}"
+                self.logger.info(f"Page {current_page} had new articles. Proceeding to page {next_page}: {next_page_url}")
+                yield scrapy.Request(next_page_url, callback=self.parse, dont_filter=True)
+            else:
+                self.logger.info(f"All articles on page {current_page} were old or already scraped. Stopping pagination.")

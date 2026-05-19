@@ -16,7 +16,6 @@ class InformburoSpider(SmartSpider):
     language = 'ru'
     source_timezone = 'Asia/Almaty'
 
-    start_date = '2024-01-01'
     fallback_content_selector = 'article.article-content'
     # URLs no longer contain dates; we rely on detail pages for date extraction
     strict_date_required = False

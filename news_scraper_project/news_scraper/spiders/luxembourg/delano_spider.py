@@ -16,7 +16,6 @@ class DelanoSpider(SmartSpider):
     country_code = 'LUX'
     country = '卢森堡'
     language = 'en'
-    start_date = '2026-01-01'
 
     allowed_domains = ["delano.lu"]
 

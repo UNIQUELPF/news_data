@@ -11,7 +11,6 @@ class RoWallstreetSpider(SmartSpider):
     country = '罗马尼亚'
     language = 'ro'
     source_timezone = 'Europe/Bucharest'
-    start_date = '2024-01-01'
     allowed_domains = ["www.wall-street.ro"]
     fallback_content_selector = '.article-content, article, main'
 

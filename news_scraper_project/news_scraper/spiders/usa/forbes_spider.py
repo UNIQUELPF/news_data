@@ -14,7 +14,6 @@ class USAForbesSpider(SmartSpider):
     country_code = 'USA'
     country = '美国'
     language = 'en'
-    start_date = '2026-01-01'
     allowed_domains = ['forbes.com']
     strict_date_required = True
     use_curl_cffi = True

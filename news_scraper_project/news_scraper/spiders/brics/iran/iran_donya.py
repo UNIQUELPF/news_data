@@ -129,12 +129,16 @@ class IranDonyaSpider(SmartSpider):
 
         if not publish_time:
             # Fallback to Persian date in text
-            header_date_match = response.xpath('//*[contains(text(), "۱۴۰")]/text()').re(r'\d{4}/\d{2}/\d{2}')
-            if header_date_match:
-                date_str = header_date_match[0]
-                publish_time = self._parse_persian_date(date_str)
-                if publish_time:
-                    publish_time = self.parse_to_utc(publish_time)
+            # Extract the raw text containing Persian date first, translate to standard digits, then match
+            header_elements = response.xpath('//*[contains(text(), "۱۴۰")]/text()').getall()
+            for element in header_elements:
+                translated = element.translate(self.PERSIAN_DIGITS)
+                match = re.search(r'\d{4}/\d{2}/\d{2}', translated)
+                if match:
+                    publish_time = self._parse_persian_date(match.group(0))
+                    if publish_time:
+                        publish_time = self.parse_to_utc(publish_time)
+                        break
 
         # Fallback to meta tags
         if not publish_time:

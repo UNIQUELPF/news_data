@@ -113,6 +113,37 @@ class BloombergSpider(SmartSpider):
     # ------------------------------------------------------------------
     # Detail page
     # ------------------------------------------------------------------
+    def parse_date(self, date_str: str):
+        if not date_str:
+            return None
+        date_str = date_str.strip()
+        
+        import re
+        from datetime import datetime, timedelta
+        
+        # 1. Handle relative Japanese hours "X 時間前"
+        match_hour = re.search(r'(\d+)\s*時間前', date_str)
+        if match_hour:
+            hours = int(match_hour.group(1))
+            dt = datetime.now() - timedelta(hours=hours)
+            return self.parse_to_utc(dt)
+            
+        # 2. Handle relative Japanese minutes "X 分前"
+        match_min = re.search(r'(\d+)\s*分前', date_str)
+        if match_min:
+            mins = int(match_min.group(1))
+            dt = datetime.now() - timedelta(minutes=mins)
+            return self.parse_to_utc(dt)
+            
+        # 3. Handle relative Japanese days "X 日前"
+        match_day = re.search(r'(\d+)\s*日前', date_str)
+        if match_day:
+            days = int(match_day.group(1))
+            dt = datetime.now() - timedelta(days=days)
+            return self.parse_to_utc(dt)
+
+        return super().parse_date(date_str)
+
     def parse_detail(self, response):
         item = self.auto_parse_item(
             response,

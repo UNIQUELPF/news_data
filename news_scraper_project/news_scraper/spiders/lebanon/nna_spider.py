@@ -19,7 +19,6 @@ class LebanonNnaSpider(SmartSpider):
     country = '黎巴嫩'
     language = 'ar'
     source_timezone = 'Asia/Beirut'
-    start_date = '2024-01-01'
 
     allowed_domains = ["nna-leb.gov.lb"]
 

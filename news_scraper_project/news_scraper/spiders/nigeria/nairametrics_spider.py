@@ -8,7 +8,6 @@ class NigeriaNairametricsSpider(SmartSpider):
     country = '尼日利亚'
     language = 'en'
     source_timezone = 'Africa/Lagos'
-    start_date = '2024-01-01'
     allowed_domains = ['nairametrics.com']
     fallback_content_selector = '.content-inner'
     dateparser_settings = {"DATE_ORDER": "DMY"}

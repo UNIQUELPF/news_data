@@ -28,7 +28,6 @@ class ArgentinaBcraSpider(SmartSpider):
     country = "阿根廷"
     language = "en"
     source_timezone = "America/Argentina/Buenos_Aires"
-    start_date = "2026-01-01"
     allowed_domains = ["bcra.gob.ar"]
 
     fallback_content_selector = ".et_pb_post_content, .entry-content, .post-content, .inside-article, .site-main"

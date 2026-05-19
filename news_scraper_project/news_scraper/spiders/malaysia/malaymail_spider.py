@@ -12,7 +12,6 @@ class MalayMailSpider(SmartSpider):
     country = "马来西亚"
     language = "en"
     source_timezone = "Asia/Kuala_Lumpur"
-    start_date = "2026-01-01"
     use_curl_cffi = True
     fallback_content_selector = "div.article-body, div.item-content"
 

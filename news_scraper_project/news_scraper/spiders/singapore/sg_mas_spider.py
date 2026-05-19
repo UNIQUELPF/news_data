@@ -10,7 +10,6 @@ class SgMasSpider(SmartSpider):
     country = '新加坡'
     language = 'en'
     source_timezone = 'Asia/Singapore'
-    start_date = '2024-01-01'
     allowed_domains = ["mas.gov.sg"]
     fallback_content_selector = '.mas-rte-content'
 

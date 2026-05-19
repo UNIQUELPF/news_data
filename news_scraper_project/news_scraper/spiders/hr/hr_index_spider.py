@@ -183,6 +183,16 @@ class HrIndexSpider(SmartSpider):
             self.logger.warning(f"Date parse failed for listing text: {text}")
             return None
 
+    def parse_date(self, date_str: str):
+        if not date_str:
+            return None
+        # Try custom Croatian parser first
+        parsed = self._parse_croatian_date(date_str.strip())
+        if parsed:
+            return parsed
+        # Fall back to base class parse_date
+        return super().parse_date(date_str)
+
     def parse_article(self, response):
         """
         Parse article detail page using SmartSpider V2 auto_parse_item.

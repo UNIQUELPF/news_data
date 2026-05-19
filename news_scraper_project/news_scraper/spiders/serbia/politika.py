@@ -11,7 +11,6 @@ class PolitikaSpider(SmartSpider):
     country = '塞尔维亚'
     language = 'sr'
     source_timezone = 'Europe/Belgrade'
-    start_date = '2024-01-01'
     allowed_domains = ['politika.rs']
     start_urls = ['https://www.politika.rs/scc/columns/archive/6']
     fallback_content_selector = '#text-holder'

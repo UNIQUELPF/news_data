@@ -13,7 +13,6 @@ class ItBorseSpider(SmartSpider):
     country_code = 'ITA'
     country = '意大利'
     language = 'it'
-    start_date = '2024-01-01'
 
     # Italian date format: "15 aprile 2026"
     dateparser_settings = {

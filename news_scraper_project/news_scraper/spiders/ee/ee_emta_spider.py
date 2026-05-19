@@ -10,7 +10,6 @@ class EeEmtaSpider(SmartSpider):
     country = '爱沙尼亚'
     language = 'et'
     source_timezone = 'Europe/Tallinn'
-    start_date = '2024-01-01'
     use_curl_cffi = True
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
