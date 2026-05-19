@@ -1,6 +1,7 @@
 import json
 import os
 import httpx
+import asyncio
 from typing import Optional, AsyncGenerator
 from psycopg2.extras import RealDictCursor
 from fastapi import APIRouter, HTTPException, Depends
@@ -44,6 +45,26 @@ def create_session(user = Depends(get_current_user)):
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Check if the user already has a session with no user messages
+        cursor.execute(
+            """
+            SELECT s.id, s.title, s.created_at, s.updated_at 
+            FROM chat_sessions s
+            LEFT JOIN chat_messages m ON m.session_id = s.id AND m.role = 'user'
+            WHERE s.user_id = %s
+            GROUP BY s.id
+            HAVING COUNT(m.id) = 0
+            ORDER BY s.created_at DESC
+            LIMIT 1
+            """,
+            (user['sub'],)
+        )
+        existing_empty = cursor.fetchone()
+        if existing_empty:
+            existing_empty['id'] = str(existing_empty['id'])
+            return existing_empty
+
         cursor.execute(
             "INSERT INTO chat_sessions (user_id) VALUES (%s) RETURNING id, title, created_at, updated_at",
             (user['sub'],)
@@ -201,141 +222,200 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
     context_text = ""
     
     try:
-        # First round: Let the LLM decide if it needs to call the search tool (Non-streaming)
+        tool_called_at_least_once = False
+        context_article_ids = []
+        
+        # Fully streaming multi-turn agent loop (max 3 turns to prevent infinite loops)
         async with httpx.AsyncClient(timeout=60.0) as client:
-            first_response = await client.post(
+            for loop_idx in range(3):
+                full_content = ""
+                full_think_content = ""
+                tool_calls_buffer = {}
+                
+                # Turn 1, 2, 3 always run with tools available so the model can search up to 3 times
+                async with client.stream(
+                    "POST",
+                    f"{get_chat_base_url()}/chat/completions",
+                    headers=get_chat_headers(),
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools,
+                        "tool_choice": "auto",
+                        "stream": True
+                    }
+                ) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_lines():
+                        if chunk.startswith("data: ") and chunk != "data: [DONE]":
+                            data_str = chunk[6:]
+                            try:
+                                data = json.loads(data_str)
+                                delta = data['choices'][0]['delta']
+                                
+                                # Instantly yield reasoning chunks to the frontend for real-time progress!
+                                if 'reasoning_content' in delta and delta['reasoning_content']:
+                                    think = delta['reasoning_content']
+                                    full_think_content += think
+                                    yield "data: " + json.dumps({"type": "think", "text": think}) + "\n\n"
+                                    
+                                # Instantly yield regular response content chunks to the frontend!
+                                if 'content' in delta and delta['content']:
+                                    content = delta['content']
+                                    full_content += content
+                                    yield "data: " + json.dumps({"type": "content", "text": content}) + "\n\n"
+                                    
+                                # Buffer and accumulate tool calls chunks if any
+                                if 'tool_calls' in delta and delta['tool_calls']:
+                                    for tc in delta['tool_calls']:
+                                        idx = tc.get('index', 0)
+                                        if idx not in tool_calls_buffer:
+                                            tool_calls_buffer[idx] = {
+                                                "id": tc.get("id", ""),
+                                                "type": tc.get("type", "function"),
+                                                "function": {
+                                                    "name": tc.get("function", {}).get("name", ""),
+                                                    "arguments": tc.get("function", {}).get("arguments", "")
+                                                }
+                                            }
+                                        else:
+                                            if "id" in tc and tc["id"]:
+                                                tool_calls_buffer[idx]["id"] = tc["id"]
+                                            if "function" in tc:
+                                                fn = tc["function"]
+                                                if "name" in fn and fn["name"]:
+                                                    tool_calls_buffer[idx]["function"]["name"] += fn["name"]
+                                                if "arguments" in fn and fn["arguments"]:
+                                                    tool_calls_buffer[idx]["function"]["arguments"] += fn["arguments"]
+                            except Exception:
+                                pass
+                
+                # Convert the accumulated tool calls buffer into a sorted list
+                tool_calls = [v for k, v in sorted(tool_calls_buffer.items())]
+                
+                if tool_calls:
+                    # Append assistant message containing the tool calls to history
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": full_content if full_content else None,
+                    }
+                    if full_think_content:
+                        assistant_msg["reasoning_content"] = full_think_content
+                    if tool_calls:
+                        assistant_msg["tool_calls"] = tool_calls
+                    messages.append(assistant_msg)
+                    
+                    # Execute all tools requested in this turn
+                    for tc in tool_calls:
+                        tool_called_at_least_once = True
+                        args_str = tc["function"]["arguments"]
+                        try:
+                            args = json.loads(args_str)
+                        except Exception:
+                            args = {}
+                        search_query = args.get('query', message)
+                        limit = args.get('limit', CHAT_RAG_TOP_K)
+                        
+                        # Execute search - search Qdrant and Postgres
+                        query_vectors, _ = embed_texts([search_query])
+                        current_turn_article_ids = []
+                        context_text = ""
+                        
+                        if query_vectors:
+                            q_client = get_qdrant_client()
+                            search_results = q_client.query_points(
+                                collection_name=COLLECTION_NAME,
+                                query=query_vectors[0],
+                                limit=limit,
+                                with_payload=True
+                            )
+                            
+                            if search_results and search_results.points:
+                                valid_points = [res for res in search_results.points if res.score >= 0.4]
+                                if valid_points:
+                                    current_turn_article_ids = list(dict.fromkeys([res.payload["article_id"] for res in valid_points]))
+                                    for aid in current_turn_article_ids:
+                                        if aid not in context_article_ids:
+                                            context_article_ids.append(aid)
+                                    
+                                    connection = get_db_connection()
+                                    try:
+                                        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                                            cursor.execute(
+                                                """
+                                                SELECT a.id, COALESCE(t.title_translated, a.title_original) as title, COALESCE(t.content_translated, a.content_plain) as content
+                                                FROM articles a
+                                                LEFT JOIN article_translations t ON t.article_id = a.id AND t.target_language = 'zh-CN'
+                                                WHERE a.id = ANY(%s)
+                                                """,
+                                                (current_turn_article_ids,)
+                                            )
+                                            articles = cursor.fetchall()
+                                            for a in articles:
+                                                content_preview = a['content'][:1000] if a['content'] else ""
+                                                context_text += f"\n[Document {a['id']}] Title: {a['title']}\nContent: {content_preview}\n"
+                                    finally:
+                                        connection.close()
+                        
+                        # Push retrieved source articles update to frontend
+                        yield "data: " + json.dumps({"type": "context", "article_ids": context_article_ids}) + "\n\n"
+                        
+                        # Append tool response message to history
+                        tool_content = context_text if context_text else "暂无匹配的资料。"
+                        if loop_idx == 2:
+                            tool_content += "\n\n【系统特别指令】：已达到最大检索次数。请根据目前所有检索到的参考文章直接为用户做出最终汇总分析解答。如果确实没有搜到海力士的实时股价，请如实告知用户，并汇总已知的上市地点及历史信息，严禁输出任何工具调用标签或进行搜索尝试。"
+                            
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc['id'],
+                            "name": "search_news_articles",
+                            "content": tool_content
+                        })
+                else:
+                    # No more tools requested. Complete successfully!
+                    yield "data: [DONE]\n\n"
+                    _save_assistant_message(session_id, full_content, full_think_content, model, context_article_ids)
+                    return
+            
+            # --- FINAL FORCED SYNTHESIS STAGE ---
+            # If the loop finished (meaning 3 tool searches were executed), invoke the LLM one final time completely WITHOUT tools to synthesize the final streamed response.
+            full_content = ""
+            full_think_content = ""
+            
+            async with client.stream(
+                "POST",
                 f"{get_chat_base_url()}/chat/completions",
                 headers=get_chat_headers(),
                 json={
                     "model": model,
                     "messages": messages,
-                    "tools": tools,
-                    "tool_choice": "auto"
+                    "stream": True
                 }
-            )
-            first_response.raise_for_status()
-            res_data = first_response.json()
-            choice = res_data['choices'][0]
-            message_obj = choice['message']
-            
-            if 'tool_calls' in message_obj and message_obj['tool_calls']:
-                tool_called = True
-                tool_call = message_obj['tool_calls'][0]
-                args = json.loads(tool_call['function']['arguments'])
-                search_query = args.get('query', message)
-                limit = args.get('limit', CHAT_RAG_TOP_K)
-                
-                # Execute tool - search Qdrant and Postgres
-                query_vectors, _ = embed_texts([search_query])
-                if query_vectors:
-                    q_client = get_qdrant_client()
-                    search_results = q_client.query_points(
-                        collection_name=COLLECTION_NAME,
-                        query=query_vectors[0],
-                        limit=limit,
-                        with_payload=True
-                    )
-                    
-                    if search_results and search_results.points:
-                        # Enforce similarity threshold on tool-returned scores (lowered to 0.4 for generic queries)
-                        valid_points = [res for res in search_results.points if res.score >= 0.4]
-                        if valid_points:
-                            article_ids = list(dict.fromkeys([res.payload["article_id"] for res in valid_points]))
-                            context_article_ids = article_ids
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_lines():
+                    if chunk.startswith("data: ") and chunk != "data: [DONE]":
+                        data_str = chunk[6:]
+                        try:
+                            data = json.loads(data_str)
+                            delta = data['choices'][0]['delta']
                             
-                            connection = get_db_connection()
-                            try:
-                                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                                    cursor.execute(
-                                        """
-                                        SELECT a.id, COALESCE(t.title_translated, a.title_original) as title, COALESCE(t.content_translated, a.content_plain) as content
-                                        FROM articles a
-                                        LEFT JOIN article_translations t ON t.article_id = a.id AND t.target_language = 'zh-CN'
-                                        WHERE a.id = ANY(%s)
-                                        """,
-                                        (article_ids,)
-                                    )
-                                    articles = cursor.fetchall()
-                                    for a in articles:
-                                        content_preview = a['content'][:1000] if a['content'] else ""
-                                        context_text += f"\n[Document {a['id']}] Title: {a['title']}\nContent: {content_preview}\n"
-                            finally:
-                                connection.close()
-                
-                # Push source articles to frontend first
-                yield "data: " + json.dumps({"type": "context", "article_ids": context_article_ids}) + "\n\n"
-                
-                # Formulate secondary LLM request with tool context
-                messages.append(message_obj)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call['id'],
-                    "name": "search_news_articles",
-                    "content": context_text if context_text else "暂无匹配的资料。"
-                })
-                # Add strict role system instruction to tell the LLM that search is complete and it must synthesize the final response without calling tools
-                messages.append({
-                    "role": "system",
-                    "content": "请注意：你已经完成了 search_news_articles 工具调用。现在请根据已经检索到的参考资料直接为用户做出最终分析解答。在这个回答阶段，严禁再次输出任何工具调用标签（如 <||DSML||tool_calls> 或任何 XML/JSON 格式的工具调用指令），直接以自然语言输出给用户。"
-                })
-                
-                # Stream the final synthesis response based on retrieved tools
-                payload = {
-                    "model": model,
-                    "messages": messages,
-                    "tools": tools,
-                    "stream": True,
-                    "temperature": 0.5
-                }
-                
-                full_content = ""
-                full_think_content = ""
-                
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{get_chat_base_url()}/chat/completions",
-                        headers=get_chat_headers(),
-                        json=payload
-                    ) as response:
-                        response.raise_for_status()
-                        async for chunk in response.aiter_lines():
-                            if chunk.startswith("data: ") and chunk != "data: [DONE]":
-                                data_str = chunk[6:]
-                                try:
-                                    data = json.loads(data_str)
-                                    delta = data['choices'][0]['delta']
-                                    
-                                    if 'content' in delta and delta['content']:
-                                        content = delta['content']
-                                        full_content += content
-                                        yield "data: " + json.dumps({"type": "content", "text": content}) + "\n\n"
-                                        
-                                    if 'reasoning_content' in delta and delta['reasoning_content']:
-                                        think = delta['reasoning_content']
-                                        full_think_content += think
-                                        yield "data: " + json.dumps({"type": "think", "text": think}) + "\n\n"
-                                except Exception as e:
-                                    pass
-                
-                yield "data: [DONE]\n\n"
-                _save_assistant_message(session_id, full_content, full_think_content, model, context_article_ids)
-                
-            else:
-                # No tool needed (greeting/chitchat).
-                # Directly stream the pre-generated response from the first call instantly
-                yield "data: " + json.dumps({"type": "context", "article_ids": []}) + "\n\n"
-                content = message_obj.get('content', '')
-                reasoning = message_obj.get('reasoning_content', '')
-                
-                if reasoning:
-                    yield "data: " + json.dumps({"type": "think", "text": reasoning}) + "\n\n"
-                if content:
-                    yield "data: " + json.dumps({"type": "content", "text": content}) + "\n\n"
-                yield "data: [DONE]\n\n"
-                
-                _save_assistant_message(session_id, content, reasoning, model, [])
-                
+                            if 'reasoning_content' in delta and delta['reasoning_content']:
+                                think = delta['reasoning_content']
+                                full_think_content += think
+                                yield "data: " + json.dumps({"type": "think", "text": think}) + "\n\n"
+                                
+                            if 'content' in delta and delta['content']:
+                                content = delta['content']
+                                full_content += content
+                                yield "data: " + json.dumps({"type": "content", "text": content}) + "\n\n"
+                        except Exception:
+                            pass
+            
+            yield "data: [DONE]\n\n"
+            _save_assistant_message(session_id, full_content, full_think_content, model, context_article_ids)
+            return
+            
     except Exception as e:
         yield "data: " + json.dumps({"type": "error", "text": str(e)}) + "\n\n"
 

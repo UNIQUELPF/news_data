@@ -16,6 +16,7 @@ export function useChat() {
   // Load messages when active session changes
   useEffect(() => {
     if (activeSessionId) {
+      setMessages([]);
       loadMessages(activeSessionId);
     } else {
       setMessages([]);
