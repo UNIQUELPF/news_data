@@ -46,7 +46,9 @@ export default function TaskPanel({
   loadPanel,
   availableSpiders,
   activeTab,
-  onActiveTabChange
+  onActiveTabChange,
+  spiderViolations,
+  resolveSpiderViolation
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -232,11 +234,99 @@ export default function TaskPanel({
         >
           🕒 定时自动任务
         </button>
+        <button 
+          onClick={() => onActiveTabChange('health')}
+          style={{ 
+            padding: '12px 24px', 
+            background: activeTab === 'health' ? '#1890ff' : 'transparent',
+            color: activeTab === 'health' ? 'white' : 'var(--text-color, #1e293b)',
+            border: 'none',
+            borderRadius: '6px 6px 0 0',
+            fontWeight: activeTab === 'health' ? 'bold' : 'normal',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          🩺 爬虫健康
+          {(spiderViolations || []).length > 0 && (
+            <span style={{
+              background: '#ef4444',
+              color: 'white',
+              fontSize: '11px',
+              padding: '2px 6px',
+              borderRadius: '10px',
+              fontWeight: 'bold'
+            }}>
+              {spiderViolations.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {activeTab === 'schedules' && (
         <div className="tab-pane fade-in">
           <TaskSchedulesPanel adminToken={adminToken} adminActor={adminActor} />
+        </div>
+      )}
+
+      {activeTab === 'health' && (
+        <div className="tab-pane fade-in">
+          <div className="panel-head" style={{ marginBottom: '16px' }}>
+            <h3>爬虫日期违规监控</h3>
+            <span className="muted">自动拦截异常的 publish_time 并在超出阈值时熔断爬虫。</span>
+          </div>
+          
+          <div className="monitor-list" style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            {(spiderViolations || []).length ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                  <tr>
+                    <th style={{ padding: '12px 16px' }}>爬虫名称</th>
+                    <th style={{ padding: '12px 16px' }}>违规类型</th>
+                    <th style={{ padding: '12px 16px' }}>违规次数</th>
+                    <th style={{ padding: '12px 16px' }}>最近检测时间</th>
+                    <th style={{ padding: '12px 16px' }}>示例值</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right' }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {spiderViolations.map(item => (
+                    <tr key={`${item.spider_name}-${item.violation_type}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: 'bold' }}>{item.spider_name}</td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span className="state-pill state-failure">{item.violation_type}</span>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontWeight: 'bold', color: item.count >= 3 ? '#ef4444' : 'inherit' }}>
+                        {item.count} 次
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#64748b' }}>{formatDate(item.last_detected)}</td>
+                      <td style={{ padding: '12px 16px' }}>
+                        {item.sample_raw_date !== 'None' ? item.sample_raw_date : 'NULL'}
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
+                          <a href={item.sample_url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                            {item.sample_title || '查看示例链接'}
+                          </a>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <button 
+                          className="secondary compact-button" 
+                          onClick={() => resolveSpiderViolation(item.spider_name)}
+                        >
+                          标记已解决
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="empty" style={{ padding: '32px' }}>🎉 当前所有爬虫日期状态健康，无违规记录！</div>
+            )}
+          </div>
         </div>
       )}
 

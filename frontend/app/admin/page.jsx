@@ -63,7 +63,9 @@ export default function AdminPage() {
     availableSpiders,
     persistAdminActor,
     persistAdminToken,
-    loadPanel
+    loadPanel,
+    spiderViolations,
+    resolveSpiderViolation
   } = usePipelinePanel();
 
   if (isAuthChecking) {
@@ -120,6 +122,8 @@ export default function AdminPage() {
             persistAdminActor={persistAdminActor}
             persistAdminToken={persistAdminToken}
             loadPanel={loadPanel}
+            spiderViolations={spiderViolations}
+            resolveSpiderViolation={resolveSpiderViolation}
           />
         </section>
       </div>

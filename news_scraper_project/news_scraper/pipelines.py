@@ -19,6 +19,98 @@ class SpiderMetadataPipeline:
         return item
 
 
+from scrapy.exceptions import DropItem, CloseSpider
+from datetime import datetime
+
+class DateHealthGuardPipeline:
+    """
+    Checks for publish_time violations (NULL, future, or older than absolute threshold).
+    Records violations and terminates spider if threshold is exceeded.
+    """
+    def open_spider(self, spider):
+        self.violation_counts = {}
+        self.enabled = spider.settings.getbool('ENABLE_POSTGRES_PIPELINE', True)
+        self.threshold = spider.settings.getint('DATE_HEALTH_VIOLATION_THRESHOLD', 3)
+        
+        # We need a DB connection to log violations independently
+        settings = spider.settings.get('POSTGRES_SETTINGS')
+        if settings and self.enabled:
+            try:
+                self.connection = psycopg2.connect(
+                    dbname=settings['dbname'], user=settings['user'],
+                    password=settings['password'], host=settings['host'],
+                    port=settings['port']
+                )
+            except Exception as e:
+                spider.logger.error(f"DateHealthGuardPipeline DB error: {e}")
+                self.connection = None
+        else:
+            self.connection = None
+
+    def close_spider(self, spider):
+        if hasattr(self, 'connection') and self.connection:
+            self.connection.close()
+
+    def process_item(self, item, spider):
+        if not self.enabled:
+            return item
+
+        publish_time = item.get('publish_time')
+        violation = self._check_violation(publish_time, spider)
+        
+        if violation:
+            self._record_violation(spider, item, violation)
+            
+            count = self.violation_counts.get(spider.name, 0) + 1
+            self.violation_counts[spider.name] = count
+            
+            if count >= self.threshold:
+                spider.logger.error(f"[DateHealthGuard] {spider.name} reached {count} date violations. Terminating.")
+                raise CloseSpider(f"date_violation_threshold_exceeded ({count} violations)")
+            
+            raise DropItem(f"Date violation ({violation}) on {item.get('url')}")
+            
+        return item
+
+    def _check_violation(self, publish_time, spider):
+        if publish_time is None:
+            return 'null_date'
+        
+        if publish_time > datetime.utcnow():
+            return 'future_date'
+            
+        earliest_date = getattr(spider, 'earliest_date', None)
+        if earliest_date and publish_time < earliest_date:
+            return 'too_old'
+            
+        return None
+
+    def _record_violation(self, spider, item, violation_type):
+        if not self.connection:
+            return
+            
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO spider_date_violations 
+                    (spider_name, violation_type, article_url, article_title, raw_date)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        spider.name, 
+                        violation_type, 
+                        item.get('url'), 
+                        item.get('title'),
+                        str(item.get('publish_time', 'None'))
+                    )
+                )
+            self.connection.commit()
+        except Exception as e:
+            spider.logger.error(f"Failed to record date violation: {e}")
+            self.connection.rollback()
+
+
 class PostgresPipeline:
     def __init__(self, crawler=None):
         self.crawler = crawler

@@ -36,6 +36,7 @@ export function usePipelinePanel() {
   const [panelError, setPanelError] = useState("");
   const [backfillForm, setBackfillForm] = useState(defaultBackfillForm);
   const [availableSpiders, setAvailableSpiders] = useState([]);
+  const [spiderViolations, setSpiderViolations] = useState([]);
 
   useEffect(() => {
     setAdminToken(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "");
@@ -93,6 +94,9 @@ export function usePipelinePanel() {
       if (!activeTaskId && mergedTasks.length) {
         setActiveTaskId(mergedTasks[0].task_id);
       }
+    } else if (activeTab === "health") {
+      const violationsData = await request("/api/v1/pipeline/spider-violations", { adminToken, adminActor });
+      setSpiderViolations(violationsData?.violations || []);
     }
   }, [activeTab, activeTaskId, adminActor, adminToken, taskLimit]);
 
@@ -132,6 +136,9 @@ export function usePipelinePanel() {
           }
 
           setAvailableSpiders(spiderData.spiders || []);
+          
+          const violationsData = await request("/api/v1/pipeline/spider-violations", { adminToken, adminActor });
+          setSpiderViolations(violationsData?.violations || []);
         } else {
           await loadStatus();
         }
@@ -311,6 +318,16 @@ export function usePipelinePanel() {
     return () => window.clearInterval(timer);
   }, [adminToken, autoRefresh, loadPanel]);
 
+  async function resolveSpiderViolation(spiderName) {
+    if (!window.confirm(`确认将爬虫 ${spiderName} 的违规记录标记为已解决吗？`)) return;
+    await request(`/api/v1/pipeline/spider-violations/${spiderName}/resolve`, {
+      method: "POST",
+      adminToken,
+      adminActor
+    });
+    await loadPanel(false);
+  }
+
   const activeTaskState = useMemo(() => {
     return resolveActiveTaskState(activeTaskId, taskDetails, tasks);
   }, [activeTaskId, taskDetails, tasks]);
@@ -377,6 +394,8 @@ export function usePipelinePanel() {
     updateBackfillForm,
     persistAdminActor,
     persistAdminToken,
-    useSpiderInPipeline
+    useSpiderInPipeline,
+    spiderViolations,
+    resolveSpiderViolation
   };
 }

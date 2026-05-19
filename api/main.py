@@ -1511,6 +1511,47 @@ def list_pipeline_groups(
         connection.close()
 
 
+@app.get("/api/v1/pipeline/spider-violations")
+def list_spider_violations(x_admin_token: Optional[str] = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    connection = get_db_connection()
+    try:
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT 
+                spider_name,
+                violation_type,
+                COUNT(*) as count,
+                MAX(detected_at) as last_detected,
+                MAX(article_url) as sample_url,
+                MAX(article_title) as sample_title,
+                MAX(raw_date) as sample_raw_date
+            FROM spider_date_violations
+            WHERE resolved = FALSE
+            GROUP BY spider_name, violation_type
+            ORDER BY last_detected DESC
+        """)
+        return {"violations": cursor.fetchall()}
+    finally:
+        connection.close()
+
+
+@app.post("/api/v1/pipeline/spider-violations/{spider_name}/resolve")
+def resolve_spider_violations(spider_name: str, x_admin_token: Optional[str] = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    connection = get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE spider_date_violations SET resolved = TRUE WHERE spider_name = %s AND resolved = FALSE",
+            (spider_name,)
+        )
+        connection.commit()
+        return {"status": "success"}
+    finally:
+        connection.close()
+
+
 @app.get("/api/v1/pipeline/spiders")
 def list_available_spiders(x_admin_token: Optional[str] = Header(default=None)):
     _require_admin_token(x_admin_token)

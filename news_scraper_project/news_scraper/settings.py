@@ -31,8 +31,11 @@ POSTGRES_SETTINGS = {
 
 ITEM_PIPELINES = {
     "news_scraper.pipelines.SpiderMetadataPipeline": 200,
+    "news_scraper.pipelines.DateHealthGuardPipeline": 250,
     "news_scraper.pipelines.PostgresPipeline": 300,
 }
+
+DATE_HEALTH_VIOLATION_THRESHOLD = 3
 
 ENABLE_UNIFIED_PIPELINE = os.getenv("ENABLE_UNIFIED_PIPELINE", "1") == "1"
 ENABLE_LEGACY_TABLES = os.getenv("ENABLE_LEGACY_TABLES", "1") == "1"
