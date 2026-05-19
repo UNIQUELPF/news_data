@@ -29,7 +29,7 @@ class MexicoFayerWayerSpider(SmartSpider):
             self.start_urls[0],
             callback=self.parse_list,
             meta={'page': 1},
-        dont_filter=True,
+            dont_filter=True,
         )
 
     def parse_list(self, response):
@@ -37,26 +37,60 @@ class MexicoFayerWayerSpider(SmartSpider):
         if not articles:
             articles = response.css('a.c-link::attr(href)').getall()
 
-        has_valid_item_in_window = False
-
+        valid_links = []
         for link in articles:
             if '/202' not in link:
                 continue
             full_url = response.urljoin(link)
             if self.should_process(full_url):
-                has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+                valid_links.append(full_url)
 
         current_page = response.meta.get('page', 1)
-        if has_valid_item_in_window and current_page < self.MAX_PAGES:
-            next_page = current_page + 1
+        if not valid_links:
+            self.logger.info(f"[{self.name}] No valid links to process on page {current_page}. Stopping.")
+            return
+
+        state = {
+            'pending_count': len(valid_links),
+            'dates': [],
+            'page': current_page
+        }
+
+        for url in valid_links:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_article,
+                errback=self.handle_detail_error,
+                meta={'shared_state': state}
+            )
+
+    def _check_next_page(self, state):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        if page < self.MAX_PAGES:
+            next_page = page + 1
             next_url = f"{self.start_urls[0]}page/{next_page}/"
+            self.logger.info(f"[{self.name}] Crawling next page {next_page}: {next_url}")
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
                 meta={'page': next_page},
                 dont_filter=True
             )
+
+    def handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req
 
     def parse_article(self, response):
         item = self.auto_parse_item(
@@ -67,8 +101,16 @@ class MexicoFayerWayerSpider(SmartSpider):
         item['author'] = response.css('.c-attribution a::text').get() or 'FayerWayer Mexico'
         item['section'] = 'Tech & Business'
 
-        if not self.should_process(response.url, item.get('publish_time')):
-            return
+        state = response.meta.get('shared_state')
+        if state:
+            state['dates'].append(item.get('publish_time'))
 
-        if item.get('content_plain') and len(item['content_plain']) > 200:
-            yield item
+        if self.should_process(response.url, item.get('publish_time')):
+            if item.get('content_plain') and len(item['content_plain']) > 200:
+                yield item
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req
