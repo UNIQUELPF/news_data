@@ -67,5 +67,8 @@ class MexicoFayerWayerSpider(SmartSpider):
         item['author'] = response.css('.c-attribution a::text').get() or 'FayerWayer Mexico'
         item['section'] = 'Tech & Business'
 
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
+
         if item.get('content_plain') and len(item['content_plain']) > 200:
             yield item

@@ -66,5 +66,8 @@ class MyanmarBizTodaySpider(SmartSpider):
         item['author'] = response.css('.td-post-author-name a::text').get() or 'Myanmar Business Today'
         item['section'] = 'Investment & Finance'
 
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
+
         if item.get('content_plain') and len(item['content_plain']) > 150:
             yield item
