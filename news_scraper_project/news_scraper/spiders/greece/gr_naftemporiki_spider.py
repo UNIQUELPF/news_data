@@ -14,6 +14,7 @@ class GrNaftemporikiSpider(SmartSpider):
 
     # 列表页只有时间 (如 "14:04")，没有完整日期，所以在详情页做日期过滤
     strict_date_required = False
+    MAX_PAGES = 50
 
     allowed_domains = ['naftemporiki.gr']
 
@@ -36,13 +37,9 @@ class GrNaftemporikiSpider(SmartSpider):
         )
 
     def parse_list(self, response):
-        if self._stop_pagination:
-            return
-
         articles = response.css('div.box-item')
 
-        has_valid_item_in_window = False
-
+        valid_links = []
         for article in articles:
             url = article.css('div.title a::attr(href)').get()
             if not url:
@@ -51,30 +48,60 @@ class GrNaftemporikiSpider(SmartSpider):
 
             title_hint = article.css('div.title a::text').get()
 
-            # No date on listing page; check dedup via should_process.
-            # Date filtering happens on detail page via _stop_pagination.
             if not self.should_process(url):
                 continue
 
-            has_valid_item_in_window = True
+            valid_links.append((url, title_hint))
+
+        current_page = response.meta['page']
+        if not valid_links:
+            self.logger.info(f"[{self.name}] No valid links on page {current_page}. Stopping.")
+            return
+
+        state = {
+            'pending_count': len(valid_links),
+            'dates': [],
+            'page': current_page
+        }
+
+        for url, title_hint in valid_links:
             yield scrapy.Request(
                 url,
                 callback=self.parse_detail,
+                errback=self._handle_detail_error,
                 meta={
                     'title_hint': title_hint,
                     'section_hint': 'News',
+                    'shared_state': state,
                 }
             )
 
-        current_page = response.meta['page']
-        if has_valid_item_in_window:
-            next_page = current_page + 1
+    def _check_next_page(self, state):
+        page = state['page']
+        parsed_dates = [d for d in state['dates'] if d is not None]
+
+        if parsed_dates and all(d < self.cutoff_date for d in parsed_dates):
+            self.logger.info(f"[{self.name}] All articles on page {page} are older than cutoff {self.cutoff_date}. Stopping pagination.")
+            return
+
+        if page < self.MAX_PAGES:
+            next_page = page + 1
+            self.logger.info(f"[{self.name}] Proceeding to page {next_page}")
             yield scrapy.Request(
                 self.base_url.format(next_page),
                 callback=self.parse_list,
                 meta={'page': next_page},
                 dont_filter=True
             )
+
+    def _handle_detail_error(self, failure):
+        self.logger.error(f"Detail request failed: {failure.value}")
+        state = failure.request.meta.get('shared_state')
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req
 
     def parse_detail(self, response):
         item = self.auto_parse_item(
@@ -83,13 +110,19 @@ class GrNaftemporikiSpider(SmartSpider):
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
 
-        # Date filtering on detail page: stop pagination when article is too old
+        state = response.meta.get('shared_state')
         pub_time = item.get('publish_time')
-        if not self.should_process(response.url, pub_time):
-            self._stop_pagination = True
-            return
 
-        item['author'] = 'Naftemporiki Newsroom'
-        item['section'] = response.meta.get('section_hint', 'News')
+        if state:
+            state['dates'].append(pub_time)
 
-        yield item
+        if self.should_process(response.url, pub_time):
+            item['author'] = 'Naftemporiki Newsroom'
+            item['section'] = response.meta.get('section_hint', 'News')
+            yield item
+
+        if state:
+            state['pending_count'] -= 1
+            if state['pending_count'] == 0:
+                for req in self._check_next_page(state):
+                    yield req
