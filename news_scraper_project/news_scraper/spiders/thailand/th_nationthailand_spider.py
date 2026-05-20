@@ -56,7 +56,7 @@ class ThNationthailandSpider(SmartSpider):
 
             # Try to extract date from API item for circuit breaker
             pub_time = None
-            date_str = item.get('publishDate') or item.get('publishedAt') or item.get('createdAt')
+            date_str = item.get('published_at') or item.get('publishDate') or item.get('publishedAt') or item.get('createdAt')
             if date_str:
                 try:
                     dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
