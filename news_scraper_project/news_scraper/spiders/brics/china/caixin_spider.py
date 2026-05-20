@@ -1,71 +1,48 @@
 # 中国caixin spider爬虫，负责抓取对应站点、机构或栏目内容。
 
 import scrapy
-from scrapy_playwright.page import PageMethod
-from news_scraper.items import CaixinHeadlineItem, CaixinMarketIndexItem
-from datetime import datetime
-from bs4 import BeautifulSoup
-import psycopg2
 import re
+from datetime import datetime
+from scrapy_playwright.page import PageMethod
+from news_scraper.spiders.smart_spider import SmartSpider
+from pipeline.content_engine import ContentEngine
 
-class CaixinSpider(scrapy.Spider):
+class CaixinSpider(SmartSpider):
     name = 'caixin'
-
+    source_timezone = 'Asia/Shanghai'
     country_code = 'CHN'
-
     country = '中国'
+    language = 'zh'
+    dateparser_settings = {"DATE_ORDER": "YMD"}
+
     allowed_domains = ['finance.caixin.com']
     start_urls = ['https://finance.caixin.com/']
 
-    def __init__(self, *args, **kwargs):
-        super(CaixinSpider, self).__init__(*args, **kwargs)
-        self.is_first_run = True
+    fallback_content_selector = "div#the_content, div.content, div.article"
 
-    def check_if_first_run(self):
-        db_settings = self.settings.get('POSTGRES_SETTINGS')
-        try:
-            conn = psycopg2.connect(**db_settings)
-            cur = conn.cursor()
-            # 检查统一的 articles 表中是否已经有来自财新的数据
-            cur.execute("SELECT count(*) FROM articles WHERE legacy_table = 'caixin'")
-            count = cur.fetchone()[0]
-            cur.close()
-            conn.close()
-            return count == 0
-        except Exception as e:
-            self.logger.error(f"Failed to check DB status for Caixin: {e}")
-            return True
-
-    def check_url_exists(self, url):
-        db_settings = self.settings.get('POSTGRES_SETTINGS')
-        try:
-            conn = psycopg2.connect(**db_settings)
-            cur = conn.cursor()
-            cur.execute("SELECT 1 FROM news_articles WHERE url = %s", (url,))
-            exists = cur.fetchone() is not None
-            cur.close()
-            conn.close()
-            return exists
-        except Exception as e:
-            self.logger.error(f"Failed to check URL existence: {e}")
-            return False
+    custom_settings = {
+        'CONCURRENT_REQUESTS': 2,
+        'DOWNLOAD_DELAY': 1.5,
+        'AUTOTHROTTLE_ENABLED': True,
+        'PLAYWRIGHT_LAUNCH_OPTIONS': {"headless": True, "timeout": 60000},
+    }
 
     async def start(self):
-        self.is_first_run = self.check_if_first_run()
-        
-        # JS 脚本：点击“加载更多”直到结束（仅限首次运行）
-        # 翻页 30 次约可覆盖几周数据
-        # 改进：即使不是首次运行，也至少滚动 5 次以确保抓取到最新的动态内容
-        scroll_count = 30 if self.is_first_run else 5
-        js_script = f"""
+        # 确定滚动加载次数：如果是首次运行或强制全量扫描，则滚动 30 次；否则滚动 5 次。
+        is_first_run = (self.cutoff_date == self.earliest_date)
+        scroll_count = 30 if is_first_run else 5
+        self.logger.info(f"Caixin start request. First run: {is_first_run}, Scroll limit: {scroll_count}")
+
+        js_scroll = f"""
         async () => {{
             let attempts = 0;
             while (attempts < {scroll_count}) {{
                 window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 1000));
-                const buttons = Array.from(document.querySelectorAll('a, div, span'));
-                const loadMore = buttons.find(b => b.innerText && b.innerText.includes('加载更多文章'));
-                if (loadMore) {{
+                await new Promise(r => setTimeout(r, 1500));
+                
+                // 定位“加载更多文章”按钮并点击
+                const loadMore = document.querySelector('div#moreArticle.moreArt a, div#moreArticle a');
+                if (loadMore && loadMore.offsetParent !== null) {{
                     loadMore.click();
                     await new Promise(r => setTimeout(r, 2000));
                 }} else {{
@@ -83,21 +60,21 @@ class CaixinSpider(scrapy.Spider):
                     "playwright": True,
                     "playwright_page_methods": [
                         PageMethod("wait_for_selector", ".ywListCon"),
-                        PageMethod("evaluate", js_script) if js_script else PageMethod("wait_for_timeout", 1000),
+                        PageMethod("evaluate", js_scroll),
                     ],
                 },
-                callback=self.parse,
-            dont_filter=True,
+                callback=self.parse_list,
+                dont_filter=True,
             )
 
-    def parse(self, response):
+    def parse_list(self, response):
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, 'html.parser')
-        today_str = datetime.now().strftime("%Y-%m-%d")
         
-        self.logger.info(f"Caixin Filtering headlines. First run: {self.is_first_run}, Today: {today_str}")
-
-        # 1. 提取要闻
+        # 提取要闻列表
         headlines = soup.select('.ywListCon .boxa')
+        self.logger.info(f"Found {len(headlines)} articles in listing.")
+        
         for box in headlines:
             link_tag = box.select_one('h4 a')
             span_tag = box.select_one('span')
@@ -106,42 +83,48 @@ class CaixinSpider(scrapy.Spider):
                 url = response.urljoin(link_tag.get('href'))
                 title = link_tag.get_text(strip=True)
                 
-                # 提取日期 (格式: /2026-01-25/)
+                # 尝试从 URL 中匹配日期 (例如: /2026-05-19/)
                 item_date_str = None
                 m = re.search(r'(\d{4}-\d{2}-\d{2})', url)
                 if m:
                     item_date_str = m.group(1)
                 
-                # 如果 URL 里没找到，尝试从 span 里提取
+                # 若 URL 未匹配到日期，从 span 的文本中匹配
                 if not item_date_str and span_tag:
                     m = re.search(r'(\d{4})年(\d{2})月(\d{2})日', span_tag.get_text())
                     if m:
                         item_date_str = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-
-                # 改进逻辑：检查数据库中是否已存在该 URL
-                should_yield = not self.check_url_exists(url)
                 
-                if should_yield:
-                    headline_item = CaixinHeadlineItem()
-                    headline_item['type'] = 'headline'
-                    headline_item['title'] = title
-                    headline_item['url'] = url
-                    headline_item['publish_time'] = item_date_str
-                    headline_item['crawl_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    yield headline_item
-
-        # 2. 提取今日开盘
-        for dl in soup.find_all('dl'):
-            if "今日开盘" in dl.get_text():
-                dt = dl.find('dt')
-                span = dl.find('span')
-                p_tag = dl.find('p')
+                publish_time = self.parse_date(item_date_str) if item_date_str else None
                 
-                if dt and span and p_tag:
-                    index_item = CaixinMarketIndexItem()
-                    index_item['type'] = 'market_index'
-                    index_item['title'] = dt.get_text(strip=True)
-                    index_item['time'] = span.get_text(strip=True)
-                    index_item['detail'] = p_tag.get_text(strip=True)
-                    index_item['crawl_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    yield index_item
+                if not self.should_process(url, publish_time):
+                    continue
+                
+                yield scrapy.Request(
+                    url,
+                    callback=self.parse_detail,
+                    dont_filter=self.full_scan,
+                    meta={
+                        "title_hint": title,
+                        "publish_time_hint": publish_time,
+                        "section_hint": "金融" if "finance.caixin.com" in url else "综合"
+                    }
+                )
+
+    def parse_detail(self, response):
+        # 自动提取文章标题、正文、发布时间等字段
+        item = self.auto_parse_item(
+            response,
+            title_xpath='//div[@id="conTit"]/h1/text()',
+            publish_time_xpath='//span[@id="pubtime_baidu"]/text()'
+        )
+        
+        # 覆盖并填充其他信息
+        item['author'] = item.get('author') or "财新网"
+        item['section'] = response.meta.get('section_hint', '综合')
+        
+        # 清理常见的冗余图标/分享图
+        if item.get('images'):
+            item['images'] = [img for img in item['images'] if not any(x in img.lower() for x in ['icon', 'logo', 'share', 'qrcode'])]
+            
+        yield item

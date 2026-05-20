@@ -37,6 +37,10 @@ class DigitalBusinessSpider(SmartSpider):
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.visited_list_urls = set()
+
     async def start(self):
         for category, path in self.SECTIONS.items():
             url = self.BASE_URL + path
@@ -73,6 +77,13 @@ class DigitalBusinessSpider(SmartSpider):
             return
         category = response.meta['category']
         current_page = response.meta['page']
+
+        # Prevent runaway pagination by checking canonical URL of list pages
+        canonical_url = response.xpath('//link[@rel="canonical"]/@href').get() or response.url
+        if canonical_url in self.visited_list_urls:
+            self.logger.info(f"[{category}] Duplicate list page detected (canonical: {canonical_url}). Stopping pagination.")
+            return
+        self.visited_list_urls.add(canonical_url)
 
         self.logger.info(f"[{category}] Page {current_page} response length: {len(response.body)}")
 
