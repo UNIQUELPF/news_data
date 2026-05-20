@@ -222,7 +222,8 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
         '- 当用户提出关于政治、经济、时事、媒体报道等事实性问答或分析请求时，**必须调用** `search_news_articles` 工具进行检索，并将用户的问题转化为最适合向量库检索的核心词。\n'
         '- 当用户只是进行打招呼、日常寒暄，或者询问你自身的定义、能力、数据范围等问题时，直接依据此 System Prompt 的定义回复即可，**无需调用工具**。如果调用了且返回了无关检索结果，必须遵循"过滤无关检索"原则将其忽略。\n\n'
 
-        '# 回答格式\n'
+        '# 回答格式与语言\n'
+        '- **必须全程使用中文进行思考与回答**。无论是内部推理思考过程（Reasoning/Thinking）还是给用户的最终回复，都必须完全使用中文书写。\n'
         '- 使用清晰、专业的中文回答，条理分明。\n'
         '- 区分"新闻报道中提到的客观事实"和"基于新闻事实的合理分析推断"。\n'
     )
@@ -350,9 +351,6 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
                                 valid_points = [res for res in search_results.points if res.score >= 0.4]
                                 if valid_points:
                                     current_turn_article_ids = list(dict.fromkeys([res.payload["article_id"] for res in valid_points]))
-                                    for aid in current_turn_article_ids:
-                                        if aid not in context_article_ids:
-                                            context_article_ids.append(aid)
                                     
                                     connection = get_db_connection()
                                     try:
@@ -368,8 +366,11 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
                                             )
                                             articles = cursor.fetchall()
                                             for a in articles:
+                                                aid = a['id']
+                                                if aid not in context_article_ids:
+                                                    context_article_ids.append(aid)
                                                 content_preview = a['content'][:1000] if a['content'] else ""
-                                                context_text += f"\n[文章 {a['id']}] 标题: {a['title']}\n内容: {content_preview}\n"
+                                                context_text += f"\n[文章 {aid}] 标题: {a['title']}\n内容: {content_preview}\n"
                                     finally:
                                         connection.close()
                         
