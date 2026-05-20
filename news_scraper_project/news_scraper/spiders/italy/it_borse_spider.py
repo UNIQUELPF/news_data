@@ -190,7 +190,6 @@ class ItBorseSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
-            publish_time_xpath="//span[@class='date']/text()",
         )
 
         item['author'] = "Borse.it"
