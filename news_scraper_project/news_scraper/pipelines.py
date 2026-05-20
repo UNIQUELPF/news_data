@@ -73,10 +73,14 @@ class DateHealthGuardPipeline:
         return item
 
     def _check_violation(self, publish_time, spider):
+        strict_date = getattr(spider, 'strict_date_required', True)
         if publish_time is None:
-            return 'null_date'
+            if strict_date:
+                return 'null_date'
+            return None
         
-        if publish_time > datetime.utcnow():
+        from datetime import timedelta
+        if publish_time > datetime.utcnow() + timedelta(hours=24):
             return 'future_date'
             
         earliest_date = getattr(spider, 'earliest_date', None)

@@ -103,10 +103,17 @@ class AlgeriaBankOfAlgeriaSpider(SmartSpider):
     def _parse_datetime(self, value):
         if not value:
             return None
-        parsed = dateparser.parse(value, languages=["fr"], settings={"TIMEZONE": "UTC", "DATE_ORDER": "DMY"})
+        try:
+            # First try standard ISO format which is fast, robust and avoids DATE_ORDER issues
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return self.parse_to_utc(dt)
+        except (ValueError, TypeError):
+            pass
+
+        parsed = dateparser.parse(value, languages=["fr"], settings={"TIMEZONE": self.source_timezone, "DATE_ORDER": "DMY"})
         if not parsed:
             return None
-        return parsed.replace(tzinfo=None)
+        return self.parse_to_utc(parsed)
 
     def _clean_text(self, value):
         if not value:

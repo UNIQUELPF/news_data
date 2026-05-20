@@ -132,14 +132,14 @@ class HrIndexSpider(SmartSpider):
         if time_el:
             dt_attr = time_el.xpath('@datetime').get()
             if dt_attr:
-                parsed = dateparser.parse(dt_attr)
+                parsed = self.parse_date(dt_attr)
                 if parsed:
-                    return self.parse_to_utc(parsed)
+                    return parsed
             time_text = time_el.xpath('text()').get()
             if time_text:
-                parsed = dateparser.parse(time_text.strip())
+                parsed = self.parse_date(time_text.strip())
                 if parsed:
-                    return self.parse_to_utc(parsed)
+                    return parsed
 
         # Strategy 2: .publish-date text
         date_text = anchor_sel.css('.publish-date::text').get()
@@ -189,11 +189,29 @@ class HrIndexSpider(SmartSpider):
         """
         Parse article detail page using SmartSpider V2 auto_parse_item.
         """
+        # Try JSON-LD first for robust date and title extraction
+        pub_time = None
+        for ld in response.css('script[type="application/ld+json"]::text').getall():
+            try:
+                import json
+                data = json.loads(ld)
+                if isinstance(data, list):
+                    data = data[0]
+                ds = data.get('datePublished') or data.get('dateCreated')
+                if ds:
+                    pub_time = self.parse_date(ds)
+                    if pub_time:
+                        break
+            except Exception:
+                continue
+
         item = self.auto_parse_item(
             response,
             title_xpath="//meta[@property='og:title']/@content",
-            publish_time_xpath="//span[contains(@class,'publish-date')]/text()",
         )
+
+        if pub_time:
+            item['publish_time'] = pub_time
 
         # Override specific fields
         item['author'] = "Index.hr"

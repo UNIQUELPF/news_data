@@ -44,7 +44,9 @@ class TrHurriyetSpider(SmartSpider):
         has_valid_item_in_window = False
 
         for link in set(links):
-            if '?p=' in link or link == '/gundem/':
+            if '?p=' in link or '/haberleri/' in link:
+                continue
+            if '/gundem/' not in link or link.rstrip('/') == '/gundem':
                 continue
             has_valid_item_in_window = True
             yield response.follow(link, self.parse_detail)
@@ -61,7 +63,7 @@ class TrHurriyetSpider(SmartSpider):
 
     def parse_detail(self, response):
         # 1. JSON-LD 提取 (最稳健，无视语言干扰)
-        pub_time = None
+        pub_time_utc = None
         author = 'Hurriyet'
         title_override = None
 
@@ -75,8 +77,8 @@ class TrHurriyetSpider(SmartSpider):
                     title_override = data.get('headline') or data.get('name')
 
                 ds = data.get('datePublished')
-                if ds and not pub_time:
-                    pub_time = datetime.fromisoformat(ds.replace('Z', '+00:00'))
+                if ds and not pub_time_utc:
+                    pub_time_utc = self.parse_date(ds)
 
                 if 'author' in data:
                     auth_data = data['author']
@@ -88,15 +90,10 @@ class TrHurriyetSpider(SmartSpider):
                 continue
 
         # 2. 备选方案: 标准 HTML 提取
-        if not pub_time:
+        if not pub_time_utc:
             date_str = response.css('meta[property="article:published_time"]::attr(content)').get()
             if date_str:
-                try:
-                    pub_time = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                except Exception:
-                    pass
-
-        pub_time_utc = self.parse_to_utc(pub_time) if pub_time else self.parse_to_utc(datetime.now())
+                pub_time_utc = self.parse_date(date_str)
 
         # 3. SmartSpider 日期窗口 + 去重过滤
         if not self.should_process(response.url, pub_time_utc):

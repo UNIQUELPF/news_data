@@ -175,12 +175,15 @@ class SmartSpider(scrapy.Spider):
         if not date_str:
             return None
         try:
-            date_str = date_str.strip()
-            settings = self.dateparser_settings
+            settings = self.dateparser_settings or {}
 
             # Safety: year-first dates are unambiguous; DATE_ORDER only hurts
-            if settings and 'DATE_ORDER' in settings and re.match(r'\d{4}', date_str):
+            if 'DATE_ORDER' in settings and re.match(r'\d{4}', date_str):
                 settings = {k: v for k, v in settings.items() if k != 'DATE_ORDER'}
+
+            # Merge TIMEZONE to self.source_timezone to correctly resolve relative dates
+            if 'TIMEZONE' not in settings and getattr(self, 'source_timezone', None):
+                settings = {**settings, 'TIMEZONE': self.source_timezone}
 
             parsed = dateparser.parse(date_str, settings=settings)
             if parsed:

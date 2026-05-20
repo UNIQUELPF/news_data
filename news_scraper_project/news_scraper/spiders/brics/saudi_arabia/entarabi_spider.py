@@ -13,6 +13,7 @@ class EntarabiSpider(SmartSpider):
     country_code = 'SAU'
     country = '沙特阿拉伯'
     language = 'ar'
+    source_timezone = 'Asia/Riyadh'
     
     # Standard settings for high performance
     custom_settings = {
