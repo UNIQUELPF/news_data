@@ -77,7 +77,6 @@ class MalayMailSpider(SmartSpider):
                 url,
                 callback=self.parse_article,
                 meta={'publish_time_hint': publish_time},
-                dont_filter=True,
             )
 
         # Pagination
