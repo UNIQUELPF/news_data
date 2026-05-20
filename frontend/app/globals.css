@@ -65,8 +65,10 @@ a {
   border-radius: 0;
   background: linear-gradient(180deg, var(--navy) 0%, var(--navy-deep) 100%);
   color: #fff;
-  box-shadow: none;
-  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  position: sticky;
+  top: 0;
 }
 
 .brand {
@@ -196,7 +198,10 @@ a {
   background: linear-gradient(180deg, var(--navy) 0%, var(--navy-deep) 100%);
   border-radius: 0;
   border: 0;
-  min-height: calc(100vh - 72px);
+  position: sticky;
+  top: 76px;
+  height: calc(100vh - 76px);
+  overflow-y: auto;
 }
 
 .nav-item {
@@ -738,10 +743,12 @@ tbody tr:hover {
 .pagination-input::-webkit-outer-spin-button,
 .pagination-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
+  appearance: none;
   margin: 0;
 }
 .pagination-input {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .empty {
@@ -764,6 +771,8 @@ tbody tr:hover {
   .sidebar {
     border-radius: 24px;
     min-height: 0;
+    position: static;
+    height: auto;
   }
 
   .search-row,

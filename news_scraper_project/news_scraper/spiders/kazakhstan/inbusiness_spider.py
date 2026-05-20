@@ -3,7 +3,6 @@
 import scrapy
 import re
 from datetime import datetime, timedelta
-from scrapy_playwright.page import PageMethod
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -59,11 +58,6 @@ class InBusinessSpider(SmartSpider):
                 meta={
                     'category': category,
                     'page': 1,
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_timeout', 2000),
-                        PageMethod('wait_for_selector', 'a[href^="/ru/news/"]', timeout=20000)
-                    ]
                 },
             dont_filter=True,
             )
@@ -101,11 +95,6 @@ class InBusinessSpider(SmartSpider):
                     'section_hint': category,
                     'title_hint': title,
                     'publish_time_hint': publish_time,
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_timeout', 1500),
-                        PageMethod('wait_for_selector', 'h1', timeout=15000)
-                    ]
                 },
                 dont_filter=self.full_scan,
             )
@@ -122,11 +111,6 @@ class InBusinessSpider(SmartSpider):
                 meta={
                     'category': category,
                     'page': next_page,
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_timeout', 2000),
-                        PageMethod('wait_for_selector', 'a[href^="/ru/news/"]', timeout=20000)
-                    ]
                 }
             )
 
