@@ -34,15 +34,36 @@ class NzMbieSpider(SmartSpider):
         )
 
     def parse(self, response):
-        links = response.css('a.listing-link.f4::attr(href)').getall()
+        items = response.css('div.listing-item')
         start = response.meta.get('start', 0)
 
         has_valid_item_in_window = False
-        for link in links:
+        for item in items:
+            link = item.css('a.listing-link.f4::attr(href)').get()
+            if not link:
+                continue
             full_url = response.urljoin(link)
-            if self.should_process(full_url):
-                has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+
+            # Extract date from listing
+            date_text = item.css('span.listing-date::text').get()
+            publish_time = None
+            if date_text:
+                try:
+                    date_str = date_text.strip()
+                    dt = datetime.strptime(date_str, '%d %B %Y')
+                    publish_time = self.parse_to_utc(dt)
+                except Exception:
+                    pass
+
+            if not self.should_process(full_url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            
+            meta = {}
+            if publish_time:
+                meta['publish_time_hint'] = publish_time
+            yield scrapy.Request(full_url, callback=self.parse_article, meta=meta)
 
         if has_valid_item_in_window:
             next_start = start + 10
