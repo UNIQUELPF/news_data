@@ -18,7 +18,7 @@ class MalayMailSpider(SmartSpider):
     allowed_domains = ["malaymail.com"]
 
     # Money section
-    BASE_URL = "https://www.malaymail.com/morearticles/money?page={page}"
+    BASE_URL = "https://www.malaymail.com/morearticles/money?pgno={page}"
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
@@ -39,9 +39,9 @@ class MalayMailSpider(SmartSpider):
             return
         page = response.meta['page']
 
-        items = response.css('div.article-item')
+        items = response.css('div.malaymail-more-articles-view div.article-item')
         if not items:
-            items = response.xpath("//h2/parent::div")
+            items = response.css('div.article-item')
 
         if not items:
             self.logger.info(f"No more items on page {page}")
