@@ -24,7 +24,7 @@ zsh scripts/preflight.sh "${ENV_FILE}"
 
 echo "[bootstrap] starting services"
 docker compose --env-file "${ENV_FILE}" up -d \
-  postgres redis api frontend web scheduler crawl-worker translation-worker embedding-worker
+  postgres redis qdrant api frontend web scheduler crawl-worker translation-worker embedding-worker
 
 echo "[bootstrap] waiting for postgres"
 until docker compose --env-file "${ENV_FILE}" exec -T postgres pg_isready -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" >/dev/null 2>&1; do
@@ -35,6 +35,8 @@ echo "[bootstrap] applying migrations"
 docker compose --env-file "${ENV_FILE}" exec -T postgres psql -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" < migrations/000001_unified_news_schema.sql
 docker compose --env-file "${ENV_FILE}" exec -T postgres psql -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" < migrations/000003_pipeline_task_runs.sql
 docker compose --env-file "${ENV_FILE}" exec -T postgres psql -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" < migrations/000004_pipeline_task_audit_columns.sql
+docker compose --env-file "${ENV_FILE}" exec -T postgres psql -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" < migrations/000006_content_schema_compat.sql
+docker compose --env-file "${ENV_FILE}" exec -T postgres psql -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" < migrations/000007_pipeline_task_parent_id.sql
 
 if [[ "${SEED_MODE}" == "--with-demo-seed" ]]; then
   echo "[bootstrap] loading demo semantic seed"

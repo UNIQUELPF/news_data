@@ -45,3 +45,4 @@ scratch/
 .token_seed*
 .gemini/
 .env*
+docker-compose.override.yml

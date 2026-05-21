@@ -50,6 +50,7 @@ from api.routers import auth, users, chat
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1/admin/users", tags=["admin/users"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(chat.integration_router, prefix="/api/v1/chat", tags=["chat"])
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

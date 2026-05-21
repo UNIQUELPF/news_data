@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.celery
     container_name: news_scheduler
+    restart: unless-stopped
     depends_on:
       - redis
     command:
@@ -35,6 +36,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       QDRANT_URL: http://qdrant:6333
       POSTGRES_DB: scrapy_db
       POSTGRES_USER: your_user
@@ -47,6 +49,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.crawl
     container_name: news_crawl_worker
+    restart: unless-stopped
     depends_on:
       - redis
     deploy:
@@ -87,6 +90,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       QDRANT_URL: http://qdrant:6333
       POSTGRES_DB: scrapy_db
       POSTGRES_USER: your_user
@@ -99,6 +103,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.celery
     container_name: news_translation_worker
+    restart: unless-stopped
     depends_on:
       - redis
     command:
@@ -134,6 +139,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       QDRANT_URL: http://qdrant:6333
       POSTGRES_DB: scrapy_db
       POSTGRES_USER: your_user
@@ -146,8 +152,12 @@ services:
       context: .
       dockerfile: docker/Dockerfile.embed
     container_name: news_embedding_worker
+    restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     command:
       [
         "celery",
@@ -181,6 +191,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       QDRANT_URL: http://qdrant:6333
       POSTGRES_DB: scrapy_db
       POSTGRES_USER: your_user
@@ -242,10 +253,13 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
     container_name: news_api
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
       migration:
         condition: service_completed_successfully
@@ -275,6 +289,7 @@ services:
       LOCAL_EMBEDDING_BATCH_SIZE: ${LOCAL_EMBEDDING_BATCH_SIZE:-16}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGINGFACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       QDRANT_URL: http://qdrant:6333
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
@@ -306,6 +321,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: news_frontend
+    restart: unless-stopped
     depends_on:
       - api
     environment:
@@ -328,6 +344,7 @@ services:
   web:
     image: nginx:1.27-alpine
     container_name: news_web
+    restart: unless-stopped
     depends_on:
       - api
       - frontend
@@ -345,13 +362,16 @@ services:
   embedding-service:
     image: michaelf34/infinity:latest
     container_name: news_embedding_service
-    command: v2 --model-id ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3} --port 7997 --device ${LOCAL_EMBEDDING_DEVICE:-cpu}
+    restart: unless-stopped
+    command: v2 --model-id ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3} --port 7997 --device ${LOCAL_EMBEDDING_DEVICE:-cpu} --no-model-warmup --no-compile --no-bettertransformer
     ports:
       - "7997:7997"
     volumes:
       - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      - HF_HOME=/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7997/health"]
       interval: 20s
@@ -361,13 +381,14 @@ services:
   postgres:
     image: postgres:15
     container_name: scrapy_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: scrapy_db
       POSTGRES_USER: your_user
       POSTGRES_PASSWORD: your_password
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -380,6 +401,7 @@ services:
   redis:
     image: redis:7
     container_name: scrapy_redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -392,13 +414,14 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.13.0
     container_name: news_qdrant
+    restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/6333"]
       interval: 10s
       timeout: 5s
       retries: 5

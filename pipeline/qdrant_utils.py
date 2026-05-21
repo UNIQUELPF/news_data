@@ -11,20 +11,23 @@ def get_qdrant_client(timeout=10.0):
 
 def init_qdrant_schema(vector_size: int = None):
     if vector_size is None:
-        # Dynamically determine vector size based on environment
+        # Keep Qdrant collection dimensions aligned with the configured embedding model.
         provider = os.getenv("EMBEDDING_PROVIDER", "openai")
-        if provider == "local":
+        if provider == "demo":
+            vector_size = 4
+            model = ""
+        elif provider == "local":
             model = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
-            if "bge-m3" in model.lower():
+        else:
+            model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        if provider != "demo":
+            model_name = model.lower()
+            if "bge-m3" in model_name or "bge-large" in model_name:
                 vector_size = 1024
-            elif "bge-large" in model.lower():
-                vector_size = 1024
-            elif "bge-small" in model.lower() or "bge-base" in model.lower():
+            elif "bge-small" in model_name or "bge-base" in model_name:
                 vector_size = 768
             else:
-                vector_size = 1024 # Default fallback for local
-        else:
-            vector_size = 1536 # Default for OpenAI ada-002 and text-embedding-3-small
+                vector_size = 1536 # Default for OpenAI ada-002 and text-embedding-3-small
 
     client = get_qdrant_client()
     if not client.collection_exists(COLLECTION_NAME):

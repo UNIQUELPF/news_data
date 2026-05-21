@@ -18,6 +18,7 @@ def ensure_pipeline_task_runs_table():
                 params JSONB,
                 result JSONB,
                 error_message TEXT,
+                parent_task_id TEXT,
                 requested_by TEXT,
                 request_ip TEXT,
                 user_agent TEXT,
@@ -35,6 +36,7 @@ def ensure_pipeline_task_runs_table():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_state ON pipeline_task_runs(state)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_created_at ON pipeline_task_runs(created_at DESC)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_requested_by ON pipeline_task_runs(requested_by)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_task_runs_parent_task_id ON pipeline_task_runs(parent_task_id)")
         
         cursor.execute(
             """

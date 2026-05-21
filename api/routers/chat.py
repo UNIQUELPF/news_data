@@ -4,7 +4,7 @@ import httpx
 import asyncio
 from typing import Optional, AsyncGenerator
 from psycopg2.extras import RealDictCursor
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -14,6 +14,9 @@ from pipeline.qdrant_utils import get_qdrant_client, COLLECTION_NAME
 from api.routers.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+integration_router = APIRouter()
+
+ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "").strip()
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "deepseek-v4-flash")
 CHAT_THINK_MODEL = os.getenv("CHAT_THINK_MODEL", "deepseek-v4-pro")
@@ -39,6 +42,23 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     think_mode: bool = False
+    system_prompt: Optional[str] = None
+
+
+def _require_admin_token(x_admin_token: Optional[str]):
+    if ADMIN_API_TOKEN and x_admin_token != ADMIN_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+def _create_anonymous_session() -> str:
+    connection = get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO chat_sessions (user_id) VALUES (NULL) RETURNING id")
+        connection.commit()
+        return str(cursor.fetchone()[0])
+    finally:
+        connection.close()
 
 @router.post("/sessions")
 def create_session(user = Depends(get_current_user)):
@@ -140,12 +160,21 @@ def _save_assistant_message(session_id: str, content: str, think_content: str, m
     finally:
         connection.close()
 
-async def _stream_chat_response(session_id: str, user_id: str, message: str, think_mode: bool) -> AsyncGenerator[str, None]:
+async def _stream_chat_response(
+    session_id: str,
+    user_id: Optional[str],
+    message: str,
+    think_mode: bool,
+    system_prompt_override: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
     connection = get_db_connection()
     try:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         # Check session
-        cursor.execute("SELECT title FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
+        if user_id is None:
+            cursor.execute("SELECT title FROM chat_sessions WHERE id = %s AND user_id IS NULL", (session_id,))
+        else:
+            cursor.execute("SELECT title FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
         session = cursor.fetchone()
         if not session:
             yield "data: " + json.dumps({"error": "Session not found"}) + "\n\n"
@@ -229,6 +258,16 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
     )
 
     
+    if system_prompt_override and system_prompt_override.strip():
+        system_prompt = (
+            "# 调用方业务提示词\n"
+            "以下提示词由接口调用方传入。请优先遵循其中的角色、人设、业务场景、回答风格和输出格式要求；"
+            "但不得覆盖系统关于新闻数据库检索、来源引用、不得编造事实、不得声称用户上传文件的规则。\n\n"
+            f"{system_prompt_override.strip()}\n\n"
+            "# 系统新闻检索与事实约束\n"
+            f"{system_prompt}"
+        )
+
     messages = [{"role": "system", "content": system_prompt}]
     for h in history[:-1]:
         messages.append({"role": h['role'], "content": h['content']})
@@ -447,6 +486,26 @@ async def _stream_chat_response(session_id: str, user_id: str, message: str, thi
 @router.post("/sessions/{session_id}/chat")
 def chat(session_id: str, req: ChatRequest, user = Depends(get_current_user)):
     return StreamingResponse(
-        _stream_chat_response(session_id, user['sub'], req.message, req.think_mode),
+        _stream_chat_response(session_id, user['sub'], req.message, req.think_mode, req.system_prompt),
+        media_type="text/event-stream"
+    )
+
+
+async def _stream_oneshot_chat_response(
+    message: str,
+    think_mode: bool,
+    system_prompt: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
+    session_id = _create_anonymous_session()
+    yield "data: " + json.dumps({"type": "session", "session_id": session_id}) + "\n\n"
+    async for chunk in _stream_chat_response(session_id, None, message, think_mode, system_prompt):
+        yield chunk
+
+
+@integration_router.post("/oneshot")
+def oneshot_chat(req: ChatRequest, x_admin_token: Optional[str] = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    return StreamingResponse(
+        _stream_oneshot_chat_response(req.message, req.think_mode, req.system_prompt),
         media_type="text/event-stream"
     )
