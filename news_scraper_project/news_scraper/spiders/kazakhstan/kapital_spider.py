@@ -39,7 +39,7 @@ class KapitalSpider(SmartSpider):
         cat_name = response.meta['cat_name']
         page = response.meta['page']
 
-        articles = response.css('article')
+        articles = response.css('div.ev article')
         if not articles:
             self.logger.info(f"No articles found for {cat_name} on page {page}")
             return
