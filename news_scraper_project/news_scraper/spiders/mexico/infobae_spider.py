@@ -1,5 +1,6 @@
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
+from email.utils import parsedate_to_datetime
 
 
 class MexicoInfobaeSpider(SmartSpider):
@@ -9,10 +10,9 @@ class MexicoInfobaeSpider(SmartSpider):
     language = 'es'
     source_timezone = 'America/Mexico_City'
     allowed_domains = ['infobae.com']
-    start_urls = ['https://www.infobae.com/mexico/ultimas-noticias/']
+    start_urls = ['https://www.infobae.com/arc/outboundfeeds/rss/category/mexico/']
     fallback_content_selector = '.article-body'
-    strict_date_required = False
-    MAX_PAGES = 200
+    strict_date_required = True
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
     custom_settings = {
@@ -25,39 +25,30 @@ class MexicoInfobaeSpider(SmartSpider):
     }
 
     async def start(self):
-        url = f"{self.start_urls[0]}?page=1"
-        yield scrapy.Request(
-            url,
-            callback=self.parse_list,
-            meta={'page': 1},
-        dont_filter=True,
-        )
-
-    def parse_list(self, response):
-        articles = response.css('a.feed-list-card::attr(href)').getall()
-        if not articles:
-            articles = response.css('.nd-feed-list-card a::attr(href)').getall()
-
-        has_valid_item_in_window = False
-
-        for link in articles:
-            full_url = response.urljoin(link)
-            if '/mexico/202' not in full_url:
-                continue
-            if self.should_process(full_url):
-                has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
-
-        current_page = response.meta.get('page', 1)
-        if has_valid_item_in_window and current_page < self.MAX_PAGES:
-            next_page = current_page + 1
-            next_url = f"{self.start_urls[0]}?page={next_page}"
+        for url in self.start_urls:
             yield scrapy.Request(
-                next_url,
-                callback=self.parse_list,
-                meta={'page': next_page},
-                dont_filter=True
+                url,
+                callback=self.parse_feed,
+                dont_filter=True,
             )
+
+    def parse_feed(self, response):
+        for item in response.xpath("//channel/item"):
+            url = item.xpath("./link/text()").get()
+            if not url:
+                continue
+            if '/mexico/' not in url:
+                continue
+
+            publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
+            if not self.should_process(url, publish_time):
+                continue
+
+            meta = {
+                'rss_title': item.xpath("./title/text()").get(),
+                'publish_time_hint': publish_time,
+            }
+            yield scrapy.Request(url, callback=self.parse_article, meta=meta)
 
     def parse_article(self, response):
         item = self.auto_parse_item(
@@ -65,8 +56,26 @@ class MexicoInfobaeSpider(SmartSpider):
             title_xpath="//h1/text()",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
+        if not item.get("title") or not item.get("content_plain"):
+            item["title"] = item.get("title") or response.meta.get("rss_title")
+            if not item.get("publish_time"):
+                item["publish_time"] = response.meta.get("publish_time_hint")
+
+        # Final safety check on publish_time (V2 requirement)
+        if item.get('publish_time') and not self.should_process(response.url, item['publish_time']):
+            self._stop_pagination = True
+            return
+
         item['author'] = response.css('.author-name::text').get() or 'Infobae Mexico'
         item['section'] = 'Ultimas Noticias'
 
         if item.get('content_plain') and len(item['content_plain']) > 200:
             yield item
+
+    def _parse_rss_datetime(self, value):
+        if not value:
+            return None
+        try:
+            return parsedate_to_datetime(value).replace(tzinfo=None)
+        except Exception:
+            return None
