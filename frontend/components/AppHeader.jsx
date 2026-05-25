@@ -30,6 +30,17 @@ export default function AppHeader({
     router.push("/login");
   };
 
+  const getVipText = () => {
+    if (!user || !user.vip_expire_at) return "普通用户";
+    const expire = new Date(user.vip_expire_at);
+    const now = new Date();
+    if (expire > now) {
+      const days = Math.ceil((expire - now) / (1000 * 60 * 60 * 24));
+      return `VIP 会员 (剩 ${days} 天)`;
+    }
+    return "VIP 已过期";
+  };
+
   return (
     <section className="topbar">
       <div className="brand">
@@ -52,23 +63,36 @@ export default function AppHeader({
             </div>
             
             {showDropdown && (
-              <div className="user-dropdown">
+              <div className="user-dropdown" style={{ width: '180px' }}>
                 <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', marginBottom: '4px' }}>
-                   <div style={{ fontSize: '12px', color: '#64748b' }}>当前账号</div>
-                   <div style={{ fontSize: '14px', color: '#18324b', fontWeight: 'bold', marginTop: '2px' }}>
+                   <div style={{ fontSize: '11px', color: '#64748b' }}>当前账号</div>
+                   <div style={{ fontSize: '14px', color: '#18324b', fontWeight: 'bold', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                      {user.nickname || user.username}
                    </div>
-                   <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                     角色: {user.role === 'admin' ? '管理员' : '普通用户'}
+                   <div style={{ fontSize: '11px', color: '#d97706', marginTop: '2px', fontWeight: 'bold' }}>
+                     {getVipText()}
                    </div>
                 </div>
-                <div className="dropdown-logout" onClick={handleLogout}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                
+                <div 
+                  className="dropdown-item" 
+                  onClick={() => { setShowDropdown(false); router.push("/profile"); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  <span style={{ fontSize: '13px' }}>个人中心</span>
+                </div>
+
+                <div className="dropdown-logout" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', borderTop: '1px solid #f1f5f9', marginTop: '4px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                     <polyline points="16 17 21 12 16 7"></polyline>
                     <line x1="21" y1="12" x2="9" y2="12"></line>
                   </svg>
-                  <span>退出登录</span>
+                  <span style={{ fontSize: '13px' }}>退出登录</span>
                 </div>
               </div>
             )}
