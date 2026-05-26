@@ -32,8 +32,13 @@ class EsElconfidencialSpider(SmartSpider):
         yield scrapy.Request(self.base_url.format(1), callback=self.parse, dont_filter=True)
 
     def parse(self, response):
-        # 1. 提取所有链接，并正则匹配日期指纹: /YYYY-MM-DD/
-        all_links = response.css('a::attr(href)').getall()
+        # 1. 提取主体区域的所有链接，并正则匹配日期指纹: /YYYY-MM-DD/
+        all_links = response.css('.lastMinuteEntry a::attr(href)').getall()
+        if not all_links:
+            all_links = response.css('section.templateContainer__content a::attr(href)').getall()
+        if not all_links:
+            self.logger.warning(f"Could not find links with restricted selector on {response.url}, falling back to all links.")
+            all_links = response.css('a::attr(href)').getall()
 
         current_page = response.meta.get('page', 1)
         has_valid_item_in_window = False
