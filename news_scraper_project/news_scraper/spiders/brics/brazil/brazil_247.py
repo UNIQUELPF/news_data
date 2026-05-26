@@ -1,7 +1,8 @@
 # 巴西247爬虫，使用 V2 现代化架构 (Sitemap + Smart Extraction)
 import scrapy
+import re
 from scrapy.spiders import SitemapSpider
-
+from scrapy.utils.sitemap import Sitemap
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -29,13 +30,96 @@ class Brazil247Spider(SitemapSpider, SmartSpider):
         for url in self.sitemap_urls:
             yield scrapy.Request(url, self._parse_sitemap, dont_filter=True)
 
-    def sitemap_filter(self, entries):
+    def _parse_sitemap(self, response):
+        if response.url.endswith("/sitemap.xml"):
+            body = self._get_sitemap_body(response)
+            if not body:
+                self.logger.warning(f"Ignoring invalid sitemap index: {response.url}")
+                return
+            
+            s = Sitemap(body)
+            if s.type == "sitemapindex":
+                urls = [entry['loc'] for entry in s if 'loc' in entry]
+                
+                # Sort sitemaps so sitemap-today.xml is first, then sitemap-57.xml.gz, sitemap-56.xml.gz, ..., sitemap-0.xml.gz
+                def get_sitemap_num(url):
+                    if 'today' in url:
+                        return 999999
+                    match = re.search(r'sitemap-(\d+)', url)
+                    return int(match.group(1)) if match else -1
+                
+                sorted_urls = sorted(urls, key=get_sitemap_num, reverse=True)
+                
+                if sorted_urls:
+                    first_url = sorted_urls[0]
+                    self.logger.info(f"Sitemap index parsed. Starting sequential crawl with: {first_url}")
+                    yield scrapy.Request(
+                        first_url, 
+                        callback=self.parse_sitemap_sequential, 
+                        priority=100,
+                        meta={'remaining_sitemaps': sorted_urls[1:]}
+                    )
+            return
+
+        # Fallback to standard _parse_sitemap if not the main index
+        for req in super()._parse_sitemap(response):
+            yield req
+
+    def parse_sitemap_sequential(self, response):
+        body = self._get_sitemap_body(response)
+        if not body:
+            self.logger.warning(f"Ignoring invalid sitemap: {response.url}")
+            return
+
+        s = Sitemap(body)
+        
+        has_new_articles = False
         cutoff_str = self.cutoff_date.isoformat() if getattr(self, "cutoff_date", None) else None
-        for entry in entries:
+        
+        valid_entries = []
+        for entry in s:
+            loc = entry.get("loc")
+            if not loc:
+                continue
             lastmod = entry.get("lastmod")
+            
+            # Filter by date
             if lastmod and cutoff_str and lastmod < cutoff_str:
                 continue
-            yield entry
+            
+            valid_entries.append(entry)
+            has_new_articles = True
+
+        self.logger.info(f"Parsed sitemap {response.url}: found {len(valid_entries)}/{len(list(Sitemap(body)))} valid entries (cutoff: {cutoff_str})")
+
+        # Yield requests for details
+        for entry in valid_entries:
+            loc = entry['loc']
+            for r, c in self._cbs:
+                if r.search(loc):
+                    yield scrapy.Request(
+                        loc, 
+                        callback=c,
+                        meta={
+                            "playwright": True
+                        },
+                        dont_filter=self.full_scan
+                    )
+                    break
+
+        # Chain to next sitemap if we found new articles in the current one and have remaining sitemaps
+        remaining = response.meta.get('remaining_sitemaps', [])
+        if has_new_articles and remaining:
+            next_url = remaining[0]
+            self.logger.info(f"Sitemap {response.url} has new/valid articles. Continuing crawl with next sitemap: {next_url}")
+            yield scrapy.Request(
+                next_url,
+                callback=self.parse_sitemap_sequential,
+                priority=100,
+                meta={'remaining_sitemaps': remaining[1:]}
+            )
+        else:
+            self.logger.info(f"Stopping sitemap crawl at {response.url}. has_new_articles={has_new_articles}, remaining={len(remaining)}")
 
     def parse_detail(self, response):
         item = self.auto_parse_item(

@@ -33,10 +33,10 @@ class BaCapitalSpider(SmartSpider):
         Parse listing page: https://capital.ba/category/privreda/
         """
         # Updated selector - site now uses SmartMag theme with article.l-post elements
-        articles = response.css('article.l-post')
+        articles = response.css('.main-content article.l-post')
 
         if not articles:
-            articles = response.css('article.grid-post')
+            articles = response.css('.main-content article.grid-post')
 
         if not articles:
             self.logger.warning(f"No articles found in main area of {response.url}.")
