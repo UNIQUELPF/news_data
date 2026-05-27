@@ -75,3 +75,8 @@ SCHEDULER = "scrapy_redis.scheduler.Scheduler"
 SCHEDULER_PERSIST = True
 # Redis connection details
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/1")
+
+# Mute verbose scrapy-playwright request/response debug logging
+import logging
+logging.getLogger("scrapy-playwright").setLevel(logging.INFO)
+

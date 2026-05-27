@@ -16,7 +16,7 @@ class TjPresidentSpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = None
 
-    base_list_url = 'https://controlpanel.president.tj/api/home-event?event_type=news&lang_id=3&page={}'
+    base_list_url = 'https://controlpanel.president.tj/api/event_search_by_group?event_type=news&lang_id=3&page={}'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -28,7 +28,11 @@ class TjPresidentSpider(SmartSpider):
     def parse(self, response):
         try:
             data = json.loads(response.text)
-            items = data.get('data', [])
+            nested_data = data.get('data') or {}
+            if isinstance(nested_data, dict):
+                items = nested_data.get('data') or []
+            else:
+                items = nested_data
         except Exception as e:
             self.logger.error(f"Failed to parse List JSON: {e}")
             return
