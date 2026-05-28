@@ -1,6 +1,7 @@
 # 阿尔及利亚aps爬虫，负责抓取对应站点、机构或栏目内容。
 
 import re
+from datetime import datetime
 
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
@@ -134,8 +135,34 @@ class AlgeriaApsSpider(SmartSpider):
                 for req in self._check_next_page(state, state['response_url']):
                     yield req
 
+    def parse_date(self, date_str: str) -> datetime:
+        if not date_str:
+            return None
+        # 移除阿拉伯语星期前缀（dateparser 无法直接解析带星期前缀的日期）
+        day_names = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"]
+        for day in day_names:
+            date_str = date_str.replace(day, "")
+        
+        # 映射阿尔及利亚法语音译月份到标准阿拉伯语月份
+        month_map = {
+            "جانفي": "يناير",
+            "فيفري": "فبراير",
+            "أفريل": "أبريل",
+            "جويلية": "يوليو",
+            "جوان": "يونيو",
+            "أوت": "أغسطس",
+            "ماي": "مايو"
+        }
+        for k, v in month_map.items():
+            date_str = date_str.replace(k, v)
+            
+        return super().parse_date(date_str.strip())
+
     def parse_detail(self, response):
-        item = self.auto_parse_item(response)
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="//article//div[contains(@class, 'text-gray-500')]//span/text()"
+        )
         state = response.meta.get('shared_state')
         hint_date = response.meta.get("publish_time_hint")
         if hint_date and item and not item.get("publish_time"):

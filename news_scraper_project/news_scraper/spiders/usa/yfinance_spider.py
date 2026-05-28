@@ -29,16 +29,17 @@ class USAYFinanceSpider(SmartSpider):
         yield scrapy.Request(self.start_urls[0], callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
-        articles = response.css('a.subtle-link.fin-size-small::attr(href)').getall()
-        if not articles:
-            articles = response.xpath('//ul//li//a[contains(@href, "/news/")]/@href').getall()
+        hrefs = response.css('a::attr(href)').getall()
+        articles = []
+        for href in hrefs:
+            full_url = response.urljoin(href)
+            # Filter for actual articles: must contain /news/ and end with .html
+            if '/news/' in full_url and full_url.split('?')[0].split('#')[0].endswith('.html'):
+                if full_url not in articles:
+                    articles.append(full_url)
 
         has_valid_item_in_window = False
-        for link in articles:
-            full_url = response.urljoin(link)
-            if '/news/' not in full_url:
-                continue
-
+        for full_url in articles:
             # strict_date_required=False allows passing None for publish_time
             if not self.should_process(full_url, None):
                 continue
@@ -54,7 +55,10 @@ class USAYFinanceSpider(SmartSpider):
             yield scrapy.Request(next_url, callback=self.parse, meta={'page': next_page})
 
     def parse_detail(self, response):
-        item = self.auto_parse_item(response)
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="//time[contains(@class, 'byline-attr-meta-time')]/@datetime | //time/@datetime"
+        )
 
         # Safety check: filter articles before cutoff date
         pub_time = item.get('publish_time')
