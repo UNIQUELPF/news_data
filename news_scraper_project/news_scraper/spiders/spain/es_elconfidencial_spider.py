@@ -18,9 +18,6 @@ class EsElconfidencialSpider(SmartSpider):
     use_curl_cffi = True
     fallback_content_selector = ".newsType__content, .innerArticle__body, article"
 
-    # 实时新闻入口
-    base_url = 'https://www.elconfidencial.com/ultima-hora-en-vivo/?page={}'
-
     custom_settings = {
         'CONCURRENT_REQUESTS': 16,
         'DOWNLOAD_DELAY': 0.5,
@@ -29,49 +26,54 @@ class EsElconfidencialSpider(SmartSpider):
     }
 
     async def start(self):
-        yield scrapy.Request(self.base_url.format(1), callback=self.parse, dont_filter=True)
+        # 实时新闻入口
+        url = 'https://www.elconfidencial.com/ultima-hora-en-vivo/'
+        yield scrapy.Request(url, callback=self.parse, dont_filter=True)
 
     def parse(self, response):
-        # 1. 提取主体区域的所有链接，并正则匹配日期指纹: /YYYY-MM-DD/
-        all_links = response.css('.lastMinuteEntry a::attr(href)').getall()
-        if not all_links:
-            all_links = response.css('section.templateContainer__content a::attr(href)').getall()
-        if not all_links:
-            self.logger.warning(f"Could not find links with restricted selector on {response.url}, falling back to all links.")
-            all_links = response.css('a::attr(href)').getall()
+        articles = response.css('.lastMinuteEntry')
+        self.logger.info(f"Found {len(articles)} articles on {response.url}")
 
-        current_page = response.meta.get('page', 1)
         has_valid_item_in_window = False
 
-        # 使用 set 去重
-        for link in set(all_links):
-            # 完整 URL 为: .../2026-03-31/slug/
-            date_match = re.search(r'/(\d{4})-(\d{2})-(\d{2})/', link)
-            if date_match:
-                y, m, d = date_match.groups()
-                try:
-                    pub_time = datetime(year=int(y), month=int(m), day=int(d))
-                except:
-                    continue
+        for article in articles:
+            # 提取链接
+            link_el = article.css('a::attr(href)').get()
+            if not link_el:
+                continue
+            url = response.urljoin(link_el)
 
-                if not self.should_process(link, pub_time):
-                    continue
+            # 优先从列表页 HTML 结构中提取时间
+            date_str = article.css('.lastMinuteEntry__time::text').get()
+            publish_time = self.parse_date(date_str.strip() if date_str else None)
 
-                has_valid_item_in_window = True
-                yield response.follow(
-                    link,
-                    self.parse_detail,
-                    meta={'publish_time_hint': pub_time}
-                )
+            # 兜底：如果 HTML 没提取到日期，尝试从 URL 提取
+            if not publish_time:
+                date_match = re.search(r'/(\d{4})-(\d{2})-(\d{2})/', url)
+                if date_match:
+                    y, m, d = date_match.groups()
+                    try:
+                        publish_time = datetime(year=int(y), month=int(m), day=int(d))
+                    except:
+                        pass
 
-        # 翻页逻辑
-        if has_valid_item_in_window:
-            next_page = current_page + 1
-            yield scrapy.Request(
-                self.base_url.format(next_page),
-                callback=self.parse,
-                meta={'page': next_page}
+            # SmartSpider 增量过滤闸口
+            if not self.should_process(url, publish_time):
+                continue
+
+            has_valid_item_in_window = True
+            yield response.follow(
+                url,
+                self.parse_detail,
+                meta={'publish_time_hint': publish_time}
             )
+
+        # 翻页逻辑：仅由窗口有效性与页面上“下一页”链接的实际存在性驱动
+        # 该站点未在静态 HTML 中公开下一页链接（使用前端 JS 滚动加载），因此不进行硬编码翻页以防失控
+        if has_valid_item_in_window:
+            next_page = response.css('a.next::attr(href)').get()
+            if next_page:
+                yield response.follow(next_page, callback=self.parse, dont_filter=True)
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
