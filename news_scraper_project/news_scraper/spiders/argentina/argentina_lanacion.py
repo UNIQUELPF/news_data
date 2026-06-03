@@ -28,7 +28,7 @@ class ArgentinaLaNacionSpider(SmartSpider):
 
 
     country = "阿根廷"
-    language = "en"
+    language = "es"
     source_timezone = "America/Argentina/Buenos_Aires"
     allowed_domains = ["lanacion.com.ar"]
     # 当前 spider 对应的数据库表名。
@@ -43,6 +43,11 @@ class ArgentinaLaNacionSpider(SmartSpider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DEFAULT_REQUEST_HEADERS": {
+            "Accept": "application/rss+xml,application/xml,text/html;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+        },
     }
     async def start(self):
         for url in self.start_urls:
@@ -52,12 +57,12 @@ class ArgentinaLaNacionSpider(SmartSpider):
         # 直接从经济 RSS 读取标题、时间、正文和作者，绕开付费墙干扰。
         for item in response.xpath("//channel/item"):
             url = item.xpath("./link/text()").get()
-            if not url or not self.should_process(url):
+            publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
+            if not url or not self.should_process(url, publish_time):
                 continue
             if "/economia/" not in url:
                 continue
 
-            publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
             if publish_time and publish_time < self.cutoff_date:
                 continue
 
@@ -77,9 +82,10 @@ class ArgentinaLaNacionSpider(SmartSpider):
                 "rss_title": title,
                 "rss_content": content,
                 "rss_publish_time": publish_time,
+                "publish_time_hint": publish_time,
                 "rss_author": author,
             }
-            yield scrapy.Request(url, callback=self.parse_detail, meta=meta)
+            yield scrapy.Request(url, callback=self.parse_detail, meta=meta, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
@@ -110,7 +116,7 @@ class ArgentinaLaNacionSpider(SmartSpider):
         if not value:
             return None
         try:
-            return parsedate_to_datetime(value).replace(tzinfo=None)
+            return self.parse_to_utc(parsedate_to_datetime(value))
         except Exception:
             return None
 

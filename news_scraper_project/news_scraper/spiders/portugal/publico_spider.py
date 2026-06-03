@@ -1,5 +1,5 @@
 import scrapy
-from datetime import datetime
+import json
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
@@ -23,6 +23,10 @@ class PortugalPublicoSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.2,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,  # Serial: one-by-one detail check
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -38,7 +42,7 @@ class PortugalPublicoSpider(SmartSpider):
 
         articles = response.css('h2.headline a::attr(href)').getall() or \
                    response.css('h4.headline a::attr(href)').getall() or \
-                   response.xpath('//a[contains(@href, "/noticia/")]/@href').getall()
+                   response.css('a[href*="/noticia/"]::attr(href)').getall()
 
         has_valid_item_in_window = False
         for link in articles:
@@ -133,19 +137,46 @@ class PortugalPublicoSpider(SmartSpider):
 
         return None
 
+    def _extract_publish_time(self, response):
+        raw_time = response.xpath(
+            "//meta[@property='article:published_time']/@content | "
+            "//meta[@name='article:published_time']/@content | "
+            "//time/@datetime"
+        ).get()
+        if raw_time:
+            import dateparser
+            return self.parse_to_utc(dateparser.parse(raw_time))
+
+        for raw in response.css('script[type="application/ld+json"]::text').getall():
+            if not raw.strip():
+                continue
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            candidates = parsed if isinstance(parsed, list) else [parsed]
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                raw_time = (
+                    candidate.get('datePublished')
+                    or candidate.get('dateCreated')
+                    or candidate.get('dateModified')
+                )
+                if raw_time:
+                    import dateparser
+                    return self.parse_to_utc(dateparser.parse(raw_time))
+        return None
+
     def parse_article(self, response):
         # Try custom extraction first (fixes title targeting + pays attention
         # to paywall boundary in body content).
         content_data = self._extract_content(response)
         if content_data and content_data.get('content_plain') and len(content_data['content_plain']) > 30:
-            publish_time = None
-            raw_time = response.xpath(
-                "//meta[@property='article:published_time']/@content"
-            ).get()
-            if raw_time:
-                import dateparser
-                publish_time = self.parse_to_utc(dateparser.parse(raw_time))
+            publish_time = self._extract_publish_time(response)
 
+            if not publish_time:
+                return
             if not self.should_process(response.url, publish_time):
                 self._stop_pagination = True
                 return
@@ -169,6 +200,8 @@ class PortugalPublicoSpider(SmartSpider):
                 title_xpath="//h1/text()",
                 publish_time_xpath="//meta[@property='article:published_time']/@content",
             )
+            if not item.get('publish_time'):
+                return
             if not self.should_process(response.url, item.get('publish_time')):
                 self._stop_pagination = True
                 return

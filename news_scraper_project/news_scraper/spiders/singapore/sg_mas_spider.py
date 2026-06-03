@@ -23,6 +23,10 @@ class SgMasSpider(SmartSpider):
             "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
         },
         "CURLL_CFFI_IMPERSONATE": "chrome120",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "CONCURRENT_REQUESTS": 2,
         "DOWNLOAD_DELAY": 1
     }
@@ -83,6 +87,9 @@ class SgMasSpider(SmartSpider):
             response,
             title_xpath="//meta[@property='og:title']/@content",
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
         item['author'] = "Monetary Authority of Singapore (MAS)"
         item['section'] = response.url.split("/")[4] if len(response.url.split("/")) > 4 else "Finance"
         if item.get('content_plain') and len(item['content_plain']) > 50:

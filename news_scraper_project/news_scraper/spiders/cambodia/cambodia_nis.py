@@ -35,7 +35,7 @@ class CambodiaNisSpider(CambodiaBaseSpider):
                 continue
             if publish_time and publish_time < self.cutoff_date:
                 continue
-            if not self.should_process(url):
+            if not self.should_process(url, publish_time):
                 continue
             detail_html = self._fetch_html(url)
             item = next(
@@ -62,7 +62,7 @@ class CambodiaNisSpider(CambodiaBaseSpider):
         if not title:
             return
         publish_time = fallback_publish_time
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
         content = self._extract_content(response, ["main", ".site-content", "body"])
         if not content:

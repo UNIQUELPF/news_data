@@ -16,6 +16,10 @@ class PakistanBaseSpider(scrapy.Spider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
 
     def __init__(self, full_scan="false", *args, **kwargs):
@@ -77,20 +81,43 @@ class PakistanBaseSpider(scrapy.Spider):
             return self.default_cutoff
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        images = self._extract_og_image(response)
+        raw_html = getattr(response, "text", "")
+        if raw_html:
+            from pipeline.content_engine import ContentEngine
+            content_data = ContentEngine.process(
+                raw_html=raw_html,
+                base_url=response.url,
+                fallback_selector=getattr(self, "fallback_content_selector", None),
+            ) or {}
+        else:
+            content_data = {}
+
+        images = content_data.get("images") or []
+        if not images:
+            images = self._extract_og_image(response)
+
+        content_cleaned = content_data.get("content_cleaned") or content
+        content_markdown = content_data.get("content_markdown") or content
+        content_plain = content_data.get("content_plain") or content
+
         return {
             "url": response.url,
             "title": title,
-            "content_plain": content,
-            "content": content,
+            "raw_html": raw_html,
+            "content_plain": content_plain,
+            "content_cleaned": content_cleaned,
+            "content_markdown": content_markdown,
+            "content": content_plain,
             "images": images,
-            "publish_time": publish_time or datetime.now(),
+            "publish_time": publish_time,
             "author": author,
             "language": language,
             "section": section,
         }
 
     def _extract_og_image(self, response):
+        if not hasattr(response, "text"):
+            return []
         img = response.xpath("//meta[@property='og:image']/@content").get()
         if img:
             return [response.urljoin(img)]

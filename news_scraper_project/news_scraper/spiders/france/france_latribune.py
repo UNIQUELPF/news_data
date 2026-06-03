@@ -20,6 +20,10 @@ class FranceLaTribuneSpider(FranceBaseSpider):
 
     fallback_content_selector = "article, main"
 
+    # Listing page has no dates; check dates on detail pages
+    strict_date_required = False
+    use_curl_cffi = True
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
@@ -27,21 +31,16 @@ class FranceLaTribuneSpider(FranceBaseSpider):
     def parse_listing(self, response):
         if self._stop_pagination:
             return
-        html = self._fetch_html(self.start_urls[0])
-        has_valid_item_in_window = False
-        urls = sorted(set(re.findall(r'/article/economie(?:/[a-z0-9\-]+)*/\d+/[a-z0-9\-]+', html)))
+        seen = set()
+        urls = sorted(set(re.findall(r'/article/economie(?:/[a-z0-9\-]+)*/\d+/[a-z0-9\-]+', response.text)))
         for href in urls:
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            seen.add(full_url)
+            if not self.should_process(full_url, None):
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                has_valid_item_in_window = True
-                yield item
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -62,7 +61,7 @@ class FranceLaTribuneSpider(FranceBaseSpider):
             self._stop_pagination = True
             return
 
-        content = self._extract_content(response, title)
+        content = self._do_extract_content(response, title)
         if not content:
             content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
         if not content:
@@ -78,7 +77,7 @@ class FranceLaTribuneSpider(FranceBaseSpider):
             section="economy",
         )
 
-    def _extract_content(self, response, title):
+    def _do_extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one("article")
         if not root:

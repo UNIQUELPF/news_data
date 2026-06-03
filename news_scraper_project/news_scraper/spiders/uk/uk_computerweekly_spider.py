@@ -21,15 +21,17 @@ class UkComputerweeklySpider(SmartSpider):
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
+            "news_scraper.middlewares.CurlCffiMiddleware": None,
         },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "CONCURRENT_REQUESTS": 2,
         "DOWNLOAD_DELAY": 1.0
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     def __init__(self, target_url=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -37,13 +39,40 @@ class UkComputerweeklySpider(SmartSpider):
 
     async def start(self):
         if self.target_url:
-            jina_url = f"https://r.jina.ai/{self.target_url}"
             yield scrapy.Request(
-                jina_url,
-                callback=self.parse_jina,
-                meta={"original_url": self.target_url},
-            dont_filter=True,
+                self.target_url,
+                callback=self.parse_detail,
+                dont_filter=True,
             )
+            return
+        yield scrapy.Request(
+            "https://www.computerweekly.com/news",
+            callback=self.parse_listing,
+            dont_filter=True,
+        )
+
+    def parse_listing(self, response):
+        links = response.css('a[href*="/news/"]::attr(href)').getall()
+        for link in sorted(set(links)):
+            if link.rstrip("/").endswith("/news"):
+                continue
+            yield response.follow(link, self.parse_detail)
+
+    def parse_detail(self, response):
+        item = self.auto_parse_item(
+            response,
+            title_xpath="string(//h1)",
+            publish_time_xpath=(
+                "//meta[@property='article:published_time']/@content | "
+                "//meta[@name='DC.date']/@content | "
+                "//time/@datetime"
+            ),
+        )
+        if not item.get("publish_time"):
+            return
+        item["author"] = "Computer Weekly"
+        item["section"] = "IT News"
+        yield item
 
     def parse_jina(self, response):
         """Parse Jina.ai markdown response for article content."""

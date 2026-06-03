@@ -24,6 +24,10 @@ class PhilippinesBaseSpider(SmartSpider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
     request_timeout = 30
 
@@ -35,13 +39,17 @@ class PhilippinesBaseSpider(SmartSpider):
         }
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+        normalized_time = self.parse_to_utc(publish_time) if publish_time else None
 
         # Extract images via ContentEngine with og:image fallback
         content_data = self.extract_content(response) or {}
         images = content_data.get("images") or []
         if not images:
-            meta_image = response.xpath("//meta[@property='og:image']/@content").get()
+            meta_image = (
+                response.xpath("//meta[@property='og:image']/@content").get()
+                if hasattr(response, "text")
+                else None
+            )
             if meta_image:
                 images = [response.urljoin(meta_image)]
 

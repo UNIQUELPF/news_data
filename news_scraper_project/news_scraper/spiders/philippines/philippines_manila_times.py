@@ -21,7 +21,12 @@ class PhilippinesManilaTimesSpider(PhilippinesBaseSpider):
 
     async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
+            yield scrapy.Request(
+                url,
+                callback=self.parse_listing,
+                meta={"handle_httpstatus_all": True},
+                dont_filter=True,
+            )
 
     def parse_listing(self, response):
         if self._stop_pagination:
@@ -69,6 +74,8 @@ class PhilippinesManilaTimesSpider(PhilippinesBaseSpider):
         )
         if not self.should_process(response.url, publish_time):
             self._stop_pagination = True
+            return
+        if not publish_time:
             return
 
         content = self._extract_content(response, title)

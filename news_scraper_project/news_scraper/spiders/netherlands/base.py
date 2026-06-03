@@ -8,7 +8,7 @@ import urllib3
 from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
 from pypdf import PdfReader
-from scrapy.http import HtmlResponse
+from scrapy.http import HtmlResponse, Request
 
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -22,6 +22,10 @@ class NetherlandsBaseSpider(SmartSpider):
     language = "en"
     source_timezone = "Europe/Amsterdam"
     custom_settings = {
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
@@ -138,8 +142,14 @@ class NetherlandsBaseSpider(SmartSpider):
     def _fetch_bytes(self, url, method="GET", json_data=None, headers=None):
         return self._fetch(url, method=method, json_data=json_data, headers=headers).content
 
-    def _make_response(self, url, html):
-        return HtmlResponse(url=url, body=(html or "").encode("utf-8"), encoding="utf-8")
+    def _make_response(self, url, html, meta=None):
+        request = Request(url=url, meta=meta or {})
+        return HtmlResponse(
+            url=url,
+            body=(html or "").encode("utf-8"),
+            encoding="utf-8",
+            request=request,
+        )
 
     def _html_to_text(self, html):
         if not html:

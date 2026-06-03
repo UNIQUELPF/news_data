@@ -12,7 +12,7 @@ class MalayMailSpider(SmartSpider):
     country = "马来西亚"
     language = "en"
     source_timezone = "Asia/Kuala_Lumpur"
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = "div.article-body, div.item-content"
 
     allowed_domains = ["malaymail.com"]

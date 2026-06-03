@@ -17,6 +17,10 @@ class MyanmarElevenSpider(SmartSpider):
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
         'DEFAULT_REQUEST_HEADERS': {
@@ -66,7 +70,7 @@ class MyanmarElevenSpider(SmartSpider):
     def parse_article_sync(self, response):
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1[@class='article-title']/text()",
+            title_xpath="//h1[not(contains(normalize-space(), 'Eleven Media Group'))]/text() | //meta[@property='og:title']/@content",
             publish_time_xpath="//span[@class='date-display-single']/text()",
         )
         item['author'] = 'Eleven Media Group'

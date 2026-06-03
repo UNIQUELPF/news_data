@@ -12,7 +12,7 @@ class OrientalDailySpider(SmartSpider):
     country = "马来西亚"
     language = "zh"
     source_timezone = "Asia/Kuala_Lumpur"
-    use_curl_cffi = True
+    use_curl_cffi = False
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
     fallback_content_selector = '[itemprop="articleBody"]'

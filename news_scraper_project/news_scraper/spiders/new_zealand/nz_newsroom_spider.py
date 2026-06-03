@@ -17,6 +17,10 @@ class NzNewsroomSpider(SmartSpider):
     strict_date_required = False
 
     custom_settings = {
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "DOWNLOADER_MIDDLEWARES": {
             "news_scraper.middlewares.CurlCffiMiddleware": 543,
             "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,

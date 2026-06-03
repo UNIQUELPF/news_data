@@ -20,7 +20,7 @@ class CambodiaTaxSpider(CambodiaBaseSpider):
         emitted = 0
         for href in response.css("a[href*='/en/article?key=']::attr(href)").getall():
             url = response.urljoin(href)
-            if not self.should_process(url):
+            if self.is_already_scraped(url):
                 continue
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
@@ -35,8 +35,10 @@ class CambodiaTaxSpider(CambodiaBaseSpider):
         )
         match = re.search(r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and publish_time < self.cutoff_date:
+        
+        if not self.should_process(response.url, publish_time):
             self._stop_pagination = True
             return
+            
         content = self._extract_content(response, [".page-panel-inner", ".main-content-wrapper", ".content"])
         yield self._build_item(response, title, content, publish_time, "General Department of Taxation", "en", "tax")

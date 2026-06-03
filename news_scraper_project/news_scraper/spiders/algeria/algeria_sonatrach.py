@@ -31,6 +31,7 @@ class AlgeriaSonatrachSpider(SmartSpider):
     country = "阿尔及利亚"
     language = "en"
     source_timezone = "Africa/Algiers"
+    strict_date_required = False
     allowed_domains = ["sonatrach.com"]
 
     fallback_content_selector = ".entry-content, article, main"
@@ -53,7 +54,7 @@ class AlgeriaSonatrachSpider(SmartSpider):
         has_valid_item_in_window = False
         for href in article_links:
             full_url = response.urljoin(href)
-            if not self.should_process(full_url) or "/category/" in full_url or "/wp-content/uploads/" in full_url:
+            if self.is_already_scraped(full_url) or "/category/" in full_url or "/wp-content/uploads/" in full_url:
                 continue
             has_valid_item_in_window = True
             yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
@@ -113,7 +114,10 @@ class AlgeriaSonatrachSpider(SmartSpider):
         }
 
     def parse_detail(self, response):
-        item = self.auto_parse_item(response)
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="normalize-space(//*[contains(@class, 'published')])",
+        )
         if not item.get("title") or not item.get("content_plain"):
             return
 
@@ -129,4 +133,3 @@ class AlgeriaSonatrachSpider(SmartSpider):
 
         if len(item.get("content_plain", "")) > 100:
             yield item
-

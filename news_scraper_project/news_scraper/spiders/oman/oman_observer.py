@@ -32,6 +32,7 @@ class OmanObserverSpider(OmanBaseSpider):
     start_urls = [
         "https://www.omanobserver.om/morearticles/business/economy",
     ]
+    strict_date_required = False
 
     async def start(self):
         for url in self.start_urls:

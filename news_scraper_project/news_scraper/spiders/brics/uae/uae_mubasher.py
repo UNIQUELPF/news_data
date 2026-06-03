@@ -28,7 +28,7 @@ class UaeMubasherSpider(SmartSpider):
     }
 
     async def start(self):
-        url = "https://www.mubasher.info/news/sa/now/latest"
+        url = "https://www.mubasher.info/news/ae/now/latest"
         yield scrapy.Request(url, callback=self.parse_list, meta={'page': 1}, dont_filter=True)
 
     def parse_list(self, response):
@@ -75,7 +75,7 @@ class UaeMubasherSpider(SmartSpider):
         if has_valid_item_in_window:
             current_page = response.meta.get('page', 1)
             next_page = current_page + 1
-            next_url = f"https://www.mubasher.info/news/sa/now/latest//{next_page}"
+            next_url = f"https://www.mubasher.info/news/ae/now/latest//{next_page}"
             yield scrapy.Request(next_url, callback=self.parse_list, meta={'page': next_page})
 
     def parse_detail(self, response):

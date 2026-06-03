@@ -2,10 +2,7 @@
 
 import scrapy
 import re
-from datetime import datetime
-from scrapy_playwright.page import PageMethod
 from news_scraper.spiders.smart_spider import SmartSpider
-from pipeline.content_engine import ContentEngine
 
 class CaixinSpider(SmartSpider):
     name = 'caixin'
@@ -18,51 +15,19 @@ class CaixinSpider(SmartSpider):
     allowed_domains = ['finance.caixin.com']
     start_urls = ['https://finance.caixin.com/']
 
+    use_curl_cffi = True
     fallback_content_selector = "div#the_content, div.content, div.article"
 
     custom_settings = {
         'CONCURRENT_REQUESTS': 2,
         'DOWNLOAD_DELAY': 1.5,
         'AUTOTHROTTLE_ENABLED': True,
-        'PLAYWRIGHT_LAUNCH_OPTIONS': {"headless": True, "timeout": 60000},
     }
 
     async def start(self):
-        # 确定滚动加载次数：如果是首次运行或强制全量扫描，则滚动 30 次；否则滚动 5 次。
-        is_first_run = (self.cutoff_date == self.earliest_date)
-        scroll_count = 30 if is_first_run else 5
-        self.logger.info(f"Caixin start request. First run: {is_first_run}, Scroll limit: {scroll_count}")
-
-        js_scroll = f"""
-        async () => {{
-            let attempts = 0;
-            while (attempts < {scroll_count}) {{
-                window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 1500));
-                
-                // 定位“加载更多文章”按钮并点击
-                const loadMore = document.querySelector('div#moreArticle.moreArt a, div#moreArticle a');
-                if (loadMore && loadMore.offsetParent !== null) {{
-                    loadMore.click();
-                    await new Promise(r => setTimeout(r, 2000));
-                }} else {{
-                    break;
-                }}
-                attempts++;
-            }}
-        }}
-        """
-
         for url in self.start_urls:
             yield scrapy.Request(
                 url,
-                meta={
-                    "playwright": True,
-                    "playwright_page_methods": [
-                        PageMethod("wait_for_selector", ".ywListCon"),
-                        PageMethod("evaluate", js_scroll),
-                    ],
-                },
                 callback=self.parse_list,
                 dont_filter=True,
             )
@@ -103,7 +68,7 @@ class CaixinSpider(SmartSpider):
                 yield scrapy.Request(
                     url,
                     callback=self.parse_detail,
-                    dont_filter=self.full_scan,
+                    dont_filter=True,
                     meta={
                         "title_hint": title,
                         "publish_time_hint": publish_time,

@@ -18,15 +18,17 @@ class UkMoneyweekSpider(SmartSpider):
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
+            "news_scraper.middlewares.CurlCffiMiddleware": None,
         },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "CONCURRENT_REQUESTS": 4,
         "DOWNLOAD_DELAY": 1
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     async def start(self):
         yield scrapy.Request(
@@ -62,6 +64,8 @@ class UkMoneyweekSpider(SmartSpider):
     def parse_detail(self, response):
         """Parse article detail page using SmartSpider auto extraction."""
         item = self.auto_parse_item(response)
+        if not item.get('publish_time'):
+            return
         item['author'] = response.css(
             'meta[name="author"]::attr(content)'
         ).get("MoneyWeek")

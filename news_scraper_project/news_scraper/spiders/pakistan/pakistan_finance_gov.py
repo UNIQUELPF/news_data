@@ -18,6 +18,7 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
     country = '巴基斯坦'
     allowed_domains = ["finance.gov.pk", "www.finance.gov.pk"]
     target_table = "pak_finance_gov"
+    use_curl_cffi = True
 
     fallback_content_selector = "article, main"
 
@@ -118,8 +119,10 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
             or response.xpath("//text()[contains(., 'Date')]/following::text()[1]").get(),
             languages=["en"],
         )
-        if not self.should_process(response.url, publish_time):
+        if publish_time and publish_time < self.cutoff_date:
             self._stop_pagination = True
+            return
+        if not publish_time:
             return
 
         content = self._extract_content(response, title)
@@ -139,21 +142,22 @@ class PakistanFinanceGovSpider(PakistanBaseSpider):
         )
 
     def parse_pdf(self, response, title, publish_time):
+        if not publish_time:
+            return
+
         content = self._extract_pdf_text(response.body)
         if not content:
             content = title
 
-        yield {
-            "title": title,
-            "content": content,
-            "publish_time": publish_time,
-            "url": response.url,
-            "source_country": "Pakistan",
-            "source_name": "Ministry of Finance Pakistan",
-            "language": "en",
-            "author": "Ministry of Finance Pakistan",
-            "section": "government",
-        }
+        yield self._build_item(
+            response=response,
+            title=title,
+            content=content,
+            publish_time=publish_time,
+            author="Ministry of Finance Pakistan",
+            language="en",
+            section="government",
+        )
 
     def _extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")

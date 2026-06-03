@@ -1,5 +1,4 @@
 # 芬兰stat爬虫，负责抓取对应站点、机构或栏目内容。
-
 import re
 
 from bs4 import BeautifulSoup
@@ -18,27 +17,26 @@ class FinlandStatSpider(FinlandBaseSpider):
     allowed_domains = ["stat.fi", "www.stat.fi"]
     start_urls = ["https://stat.fi/en"]
 
+    # Listing page has no dates; check dates on detail pages
+    strict_date_required = False
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
-        for link in soup.select("a[href]"):
-            href = (link.get("href") or "").strip()
+        seen = set()
+        for link in response.css("a[href]"):
+            href = (link.attrib.get("href") or "").strip()
             if not (href.startswith("/en/publication/") or href.startswith("/en/news/")):
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            seen.add(full_url)
+            if not self.should_process(full_url, None):
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                yield item
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -55,10 +53,10 @@ class FinlandStatSpider(FinlandBaseSpider):
             or self._find_date(response.text),
             languages=["en"],
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response)
+        content = self._do_extract_content(response)
         if not content:
             return
 
@@ -84,7 +82,7 @@ class FinlandStatSpider(FinlandBaseSpider):
                 return match.group(0)
         return ""
 
-    def _extract_content(self, response):
+    def _do_extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one("article") or soup.select_one(".page-content")
         if not root:
@@ -101,4 +99,3 @@ class FinlandStatSpider(FinlandBaseSpider):
             if text not in parts:
                 parts.append(text)
         return "\n\n".join(parts)
-

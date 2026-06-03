@@ -76,10 +76,14 @@ class TjAvestaSpider(SmartSpider):
         dt_obj = self._parse_date(raw_date)
         pub_time = self.parse_to_utc(dt_obj) if dt_obj else None
 
-        if pub_time and not self.should_process(response.url, pub_time):
+        pub_time = pub_time or response.meta.get("publish_time_hint")
+        if not pub_time:
+            return
+        if not self.should_process(response.url, pub_time):
             return
 
         item = self.auto_parse_item(response)
+        item['publish_time'] = pub_time
         if not item.get('content_plain'):
             paragraphs = response.css('div.content-inner p::text').getall()
             if not paragraphs:
@@ -91,6 +95,9 @@ class TjAvestaSpider(SmartSpider):
         item['author'] = 'Avesta.tj'
         item['section'] = 'Economic'
         item['title'] = title
+
+        if not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+            return
 
         yield item
 

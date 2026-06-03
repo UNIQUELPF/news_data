@@ -1,5 +1,6 @@
 # 比利时fsma爬虫，负责抓取对应站点、机构或栏目内容。
 
+import json
 from bs4 import BeautifulSoup
 
 import scrapy
@@ -9,6 +10,7 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumFsmaSpider(BelgiumBaseSpider):
     name = "belgium_fsma"
+    start_date = "2025-01-01"
 
     country_code = 'BEL'
 
@@ -42,7 +44,12 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
             return
 
         article_text = self._clean_text(" ".join(response.css("article ::text").getall()[:120]))
-        publish_time = self._parse_datetime(article_text, languages=["en"])
+        publish_time = self._parse_datetime(
+            self._extract_schema_date(response)
+            or response.xpath("//meta[@property='article:published_time']/@content").get()
+            or response.css("time[datetime]::attr(datetime)").get(),
+            languages=["en"],
+        )
         if publish_time and publish_time < self.cutoff_date:
             return
 
@@ -79,3 +86,19 @@ class BelgiumFsmaSpider(BelgiumBaseSpider):
                 parts.append(text)
         return "\n\n".join(parts)
 
+    def _extract_schema_date(self, response):
+        for raw in response.css('script[type="application/ld+json"]::text').getall():
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            stack = [data]
+            while stack:
+                node = stack.pop()
+                if isinstance(node, dict):
+                    if node.get("datePublished"):
+                        return node["datePublished"]
+                    stack.extend(node.values())
+                elif isinstance(node, list):
+                    stack.extend(node)
+        return None

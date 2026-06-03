@@ -1,7 +1,6 @@
 import scrapy
 from datetime import datetime
 from news_scraper.spiders.smart_spider import SmartSpider
-from scrapy_playwright.page import PageMethod
 
 
 class PlParkietSpider(SmartSpider):
@@ -25,33 +24,28 @@ class PlParkietSpider(SmartSpider):
         "CURLL_CFFI_IMPERSONATE": "chrome120",
         "CONCURRENT_REQUESTS": 2,
         "DOWNLOAD_DELAY": 1.5,
-        "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True}
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
 
     async def start(self):
         yield scrapy.Request(
             self.start_urls[0],
             callback=self.parse,
-            meta={
-                "playwright": True,
-                "playwright_include_page": True,
-                "playwright_page_methods": [
-                    PageMethod("wait_for_selector", "a.contentLink"),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                    PageMethod("wait_for_timeout", 2000),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                    PageMethod("wait_for_timeout", 2000),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                    PageMethod("wait_for_timeout", 2000),
-                ]
-            },
-        dont_filter=True,
+            dont_filter=True,
         )
 
-    async def parse(self, response):
-        page = response.meta.get("playwright_page")
-
+    def parse(self, response):
         links = response.css('a.contentLink::attr(href)').getall()
+        if not links:
+            links = response.css(
+                'a[href*="/art"]::attr(href), '
+                'a[href*="/gospodarka"]::attr(href), '
+                'a[href*="/firmy"]::attr(href), '
+                'a[href*="/wiadomosci"]::attr(href)'
+            ).getall()
         unique_links = list(set(links))
 
         has_valid_item_in_window = False
@@ -65,11 +59,7 @@ class PlParkietSpider(SmartSpider):
                 yield scrapy.Request(
                     link,
                     callback=self.parse_article,
-                    meta={"playwright": True}
                 )
-
-        if page:
-            await page.close()
 
     def parse_article(self, response):
         # Custom date extraction (DD.MM.YYYY HH:MM)

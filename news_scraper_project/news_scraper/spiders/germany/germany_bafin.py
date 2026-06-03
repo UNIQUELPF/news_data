@@ -18,6 +18,7 @@ class GermanyBafinSpider(GermanyBaseSpider):
     allowed_domains = ["bafin.de", "www.bafin.de"]
 
     fallback_content_selector = "#content, main, article"
+    strict_date_required = False
 
     start_urls = [
         "https://www.bafin.de/EN/die-bafin/aktuelles-presse/presse-social-media/pressemitteilungen/pressemitteilungen_node_en.html",

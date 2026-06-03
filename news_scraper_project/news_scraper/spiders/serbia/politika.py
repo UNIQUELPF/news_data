@@ -16,7 +16,11 @@ class PolitikaSpider(SmartSpider):
     fallback_content_selector = '#text-holder'
 
     custom_settings = {
-        'ROBOTSTXT_OBEY': False
+        'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
     }
 
     def parse(self, response):
@@ -67,6 +71,8 @@ class PolitikaSpider(SmartSpider):
         )
         if publish_time:
             item['publish_time'] = publish_time
+        if not item.get('publish_time'):
+            return
 
         item['author'] = response.css('.article-author::text, .article-info .bold::text').get() or "Politika"
         item['section'] = 'Kolumne'

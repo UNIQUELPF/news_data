@@ -17,6 +17,10 @@ class MyanmarBizTodaySpider(SmartSpider):
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
         'DEFAULT_REQUEST_HEADERS': {
@@ -94,7 +98,7 @@ class MyanmarBizTodaySpider(SmartSpider):
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1[@class='entry-title']/text()",
+            title_xpath="//h1/text() | //meta[@property='og:title']/@content",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
         item['author'] = response.css('.td-post-author-name a::text').get() or 'Myanmar Business Today'

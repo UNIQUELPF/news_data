@@ -21,7 +21,7 @@ class AustriaBmawSpider(AustriaBaseSpider):
     country = '奥地利'
     allowed_domains = ["bmaw.gv.at", "www.bmaw.gv.at", "bmwet.gv.at", "www.bmwet.gv.at"]
     start_urls = [
-        "https://www.bmaw.gv.at/Presse/AktuellePressemeldungen.html",
+        "https://www.bmwet.gv.at/Presse/AktuellePressemeldungen.html",
     ]
     fallback_content_selector = "article, main"
     strict_date_required = False

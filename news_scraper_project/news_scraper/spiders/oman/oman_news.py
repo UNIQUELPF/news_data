@@ -36,8 +36,10 @@ class OmanNewsSpider(OmanBaseSpider):
     ]
 
     fallback_content_selector = "article, main"
+    strict_date_required = False
 
     async def start(self):
+        self._stop_pagination = False
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, meta={"dont_verify_ssl": True}, dont_filter=True)
 

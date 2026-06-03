@@ -38,9 +38,11 @@ class AustriaBmfSpider(AustriaBaseSpider):
     def parse_listing(self, response):
         match = re.search(r"/(\d{4})\.html", response.url)
         current_year = int(match.group(1)) if match else 2026
+        current_page = response.meta.get('page', 1)
 
         links = response.css('a[href*="/presse/pressemeldungen/"]::attr(href)').getall()
         valid_links = []
+        month_pages = []
         next_year_url = None
 
         for href in links:
@@ -49,14 +51,25 @@ class AustriaBmfSpider(AustriaBaseSpider):
                 continue
             if not full_url.endswith(".html"):
                 continue
+            if re.search(r"/presse/pressemeldungen/\d{4}/[^/]+-\d{4}\.html$", full_url):
+                if full_url not in month_pages:
+                    month_pages.append(full_url)
+                continue
             if f"/{current_year}/" in full_url:
-                valid_links.append(full_url)
+                if full_url not in valid_links:
+                    valid_links.append(full_url)
             elif full_url.endswith(f"/{current_year-1}.html"):
                 next_year_url = full_url
 
+        for month_url in month_pages:
+            yield scrapy.Request(
+                month_url,
+                callback=self.parse_listing,
+                meta={'page': current_page}
+            )
+
         # If we have no links for this year, we check if we should stop or try the next year directly.
         # But to be safe, if we don't have links and no next_year_url, we just stop.
-        current_page = response.meta.get('page', 1)
         if not valid_links:
             if next_year_url and current_page < self.MAX_PAGES:
                 self.logger.info(f"[{self.name}] No valid links on page {current_page} (Year {current_year}). Trying next year: {next_year_url}")
@@ -82,7 +95,8 @@ class AustriaBmfSpider(AustriaBaseSpider):
                 url,
                 callback=self.parse_detail,
                 errback=self._handle_detail_error,
-                meta={'shared_state': state}
+                meta={'shared_state': state},
+                dont_filter=self.full_scan,
             )
 
     def _check_next_page(self, state, response_url):

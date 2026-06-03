@@ -31,7 +31,7 @@ class IrelandIndependentSpider(IrelandBaseSpider):
 
     async def start(self):
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
+            yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True, meta={"playwright": True})
 
     def parse_listing(self, response):
         if self._stop_pagination:
@@ -45,7 +45,7 @@ class IrelandIndependentSpider(IrelandBaseSpider):
             if "/business/" not in full_url or not self.should_process(full_url):
                 continue
             has_valid_item_in_window = True
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(full_url, callback=self.parse_detail, meta={"playwright": True})
 
     def parse_detail(self, response):
         # 经济类详情页：提取标题、时间、正文后入库。

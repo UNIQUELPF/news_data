@@ -41,7 +41,7 @@ class KyrgyzstanNbkrSpider(KyrgyzstanBaseSpider):
                 full_url = urljoin(source_url, href.replace("&amp;", "&"))
                 if not self.should_process(full_url):
                     continue
-                item = next(self.parse_detail(scrapy.Request(url=full_url), fallback_title=title), None)
+                item = next(self.parse_detail(self._make_response(full_url, ""), fallback_title=title), None)
                 if item:
                     yield item
                     emitted += 1

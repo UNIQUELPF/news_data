@@ -15,7 +15,7 @@ class RoWallstreetSpider(SmartSpider):
     fallback_content_selector = '.article-content, article, main'
 
     use_curl_cffi = True
-    strict_date_required = False
+    strict_date_required = True
 
     # Romanian months mapping (abbreviated/full)
     MONTHS_RO = {
@@ -179,6 +179,8 @@ class RoWallstreetSpider(SmartSpider):
         item['author'] = 'Wall-Street.ro'
         item['section'] = 'Economy'
 
+        if not item.get('publish_time'):
+            return
         if not self.should_process(response.url, item.get('publish_time')):
             self.has_hit_date_limit = True
             return

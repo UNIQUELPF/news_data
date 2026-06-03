@@ -72,6 +72,8 @@ class PhilippinesBworldSpider(PhilippinesBaseSpider):
         if not self.should_process(response.url, publish_time):
             self._stop_pagination = True
             return
+        if not publish_time:
+            return
 
         content = self._clean_text((schema or {}).get("articleBody")) or self._extract_content(response, title)
         if not content:

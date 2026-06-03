@@ -14,7 +14,7 @@ class SinchewSpider(SmartSpider):
     language = "zh"
     source_timezone = "Asia/Kuala_Lumpur"
     strict_date_required = False  # Dates unavailable on list API (relative time only)
-    use_curl_cffi = True
+    use_curl_cffi = False
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
     allowed_domains = ["sinchew.com.my"]

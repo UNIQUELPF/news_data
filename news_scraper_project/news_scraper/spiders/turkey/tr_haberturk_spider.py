@@ -14,49 +14,37 @@ class TrHaberturkSpider(SmartSpider):
 
     allowed_domains = ['haberturk.com']
 
-    # 无限加载接口
-    base_url = 'https://www.haberturk.com/infinite/ekonomi/tumhaberler/p{}'
+    start_url = 'https://www.haberturk.com/ekonomi'
 
     custom_settings = {
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'CONCURRENT_REQUESTS': 8,
         'DOWNLOAD_DELAY': 1,
         'ROBOTSTXT_OBEY': False,
+        "DOWNLOADER_MIDDLEWARES": {
+            "news_scraper.middlewares.CurlCffiMiddleware": None,
+        },
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     strict_date_required = True
     fallback_content_selector = "article"
 
     async def start(self):
-        yield scrapy.Request(self.base_url.format(1), callback=self.parse, meta={'page': 1}, dont_filter=True)
+        yield scrapy.Request(self.start_url, callback=self.parse, dont_filter=True)
 
     def parse(self, response):
-        # 提取文章链接
-        # Haberturk 的无限加载返回的是 HTML 片段
-        links = response.css('a.block::attr(href)').getall()
-
-        # 过滤广告和非相关链接
-        valid_links = []
-        for link in set(links):
-            if '-ekonomi' in link or any(char.isdigit() for char in link.split('-')[-1]):
-                valid_links.append(link)
-
-        has_valid_item_in_window = False
-
-        for link in valid_links:
-            has_valid_item_in_window = True
+        links = response.css('a::attr(href)').getall()
+        for link in sorted(set(links)):
+            if '-ekonomi' not in link:
+                continue
+            if not any(char.isdigit() for char in link):
+                continue
             yield response.follow(link, self.parse_detail)
-
-        # Pagination: 只要当前页有数据返回，就继续翻页
-        if has_valid_item_in_window:
-            current_page = response.meta.get('page', 1)
-            next_page = current_page + 1
-            yield scrapy.Request(
-                self.base_url.format(next_page),
-                callback=self.parse,
-                meta={'page': next_page},
-            )
 
     def parse_detail(self, response):
         # 1. JSON-LD 提取 (最精准)
@@ -95,7 +83,9 @@ class TrHaberturkSpider(SmartSpider):
                 except Exception:
                     pass
 
-        pub_time_utc = self.parse_to_utc(pub_time) if pub_time else self.parse_to_utc(datetime.now())
+        if not pub_time:
+            return
+        pub_time_utc = self.parse_to_utc(pub_time)
 
         # 3. SmartSpider 日期窗口 + 去重过滤
         if not self.should_process(response.url, pub_time_utc):

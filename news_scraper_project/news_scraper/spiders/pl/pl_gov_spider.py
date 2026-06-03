@@ -24,7 +24,10 @@ class PlGovSpider(SmartSpider):
         "CURLL_CFFI_IMPERSONATE": "chrome120",
         "CONCURRENT_REQUESTS": 1,  # Serial: listing has no dates, detail check one-by-one
         "DOWNLOAD_DELAY": 1.2,
-        "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True}
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
 
     MAX_PAGES = 50
@@ -83,7 +86,7 @@ class PlGovSpider(SmartSpider):
                 url,
                 callback=self.parse_article,
                 errback=self._handle_detail_error,
-                meta={"playwright": True, 'shared_state': state}
+                meta={'shared_state': state}
             )
 
     def _check_next_page(self, state, response_url):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 DOMESTIC_CATEGORY_ALIASES = {
     "政治": "政治",
     "经济": "经济",

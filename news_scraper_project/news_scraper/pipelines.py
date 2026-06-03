@@ -152,7 +152,7 @@ class PostgresPipeline:
             self.enabled = False
             spider.logger.error(f"Postgres pipeline unavailable: {exc}")
 
-    def close_spider(self):
+    def close_spider(self, spider):
         if self.cursor:
             self.cursor.close()
         if self.connection:

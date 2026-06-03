@@ -63,6 +63,9 @@ class EsAdminSpider(SmartSpider):
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         # 针对不同域名的内容提取覆盖
         url_str = response.url
@@ -79,5 +82,8 @@ class EsAdminSpider(SmartSpider):
 
         item['author'] = 'Administración del Estado'
         item['section'] = 'Noticias'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         yield item

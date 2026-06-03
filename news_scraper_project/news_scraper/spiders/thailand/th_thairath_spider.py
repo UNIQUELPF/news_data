@@ -119,6 +119,9 @@ class ThThairathSpider(SmartSpider):
                         pub_time = self.parse_to_utc(dt)
                     except Exception:
                         pass
+                pub_time = pub_time or response.meta.get('publish_time_hint')
+                if not pub_time:
+                    return
 
                 if not self.should_process(response.url, pub_time):
                     return
@@ -131,11 +134,13 @@ class ThThairathSpider(SmartSpider):
                 images = []
                 og_image = response.css('meta[property="og:image"]::attr(content)').get()
                 if og_image:
-                    images.append(response.urljoin(og_image))
+                    images.append({"url": response.urljoin(og_image), "alt": title})
 
                 item = {
                     'url': response.url,
                     'title': title,
+                    'content_cleaned': content_html,
+                    'content_markdown': content,
                     'content_plain': content,
                     'raw_html': response.text,
                     'publish_time': pub_time,
@@ -146,6 +151,8 @@ class ThThairathSpider(SmartSpider):
                     'author': content_data.get('author') or 'Thairath',
                     'images': images,
                 }
+                if not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+                    return
                 yield item
                 return
             except Exception as e:
@@ -153,10 +160,15 @@ class ThThairathSpider(SmartSpider):
 
         # ---- Fallback: standard HTML extraction via auto_parse_item ----
         item = self.auto_parse_item(response)
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         if not self.should_process(response.url, item.get('publish_time')):
             return
 
         item['author'] = 'Thairath'
         item['section'] = 'Politic'
+        if not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+            return
         yield item

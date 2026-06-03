@@ -44,7 +44,9 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
                 detail_html = self._fetch_html(full_url)
             except Exception:
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+            detail_response = self._make_response(full_url, detail_html)
+            detail_response.meta["feed_publish_time"] = publish_time
+            item = next(self.parse_detail(detail_response), None)
             if item:
                 has_valid_item_in_window = True
                 yield item
@@ -62,7 +64,7 @@ class NetherlandsCbsSpider(NetherlandsBaseSpider):
             response.xpath("//meta[@property='article:published_time']/@content").get()
             or self._clean_text(" ".join(response.css("body ::text").getall()[:100])),
             languages=["en"],
-        )
+        ) or response.meta.get("feed_publish_time")
         if not self.should_process(response.url, publish_time):
             self._stop_pagination = True
             return

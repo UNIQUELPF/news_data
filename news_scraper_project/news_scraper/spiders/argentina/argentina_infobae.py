@@ -28,7 +28,7 @@ class ArgentinaInfobaeSpider(SmartSpider):
 
 
     country = "阿根廷"
-    language = "en"
+    language = "es"
     source_timezone = "America/Argentina/Buenos_Aires"
     allowed_domains = ["infobae.com"]
     # 当前 spider 对应的数据库表名。
@@ -54,24 +54,27 @@ class ArgentinaInfobaeSpider(SmartSpider):
         # RSS 里已经有发布时间和文章链接，适合作为稳定的列表入口。
         for item in response.xpath("//channel/item"):
             url = item.xpath("./link/text()").get()
-            if not url or not self.should_process(url):
+            publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
+            if not url or not self.should_process(url, publish_time):
                 continue
             if "/economia/" not in url:
                 continue
 
-            publish_time = self._parse_rss_datetime(item.xpath("./pubDate/text()").get())
             if publish_time and publish_time < self.cutoff_date:
                 continue
 
             meta = {
                 "rss_title": self._clean_text(item.xpath("./title/text()").get()),
                 "rss_publish_time": publish_time,
+                "publish_time_hint": publish_time,
                 "rss_description": self._clean_html(item.xpath("./description/text()").get()),
             }
-            yield scrapy.Request(url, callback=self.parse_detail, meta=meta)
+            yield scrapy.Request(url, callback=self.parse_detail, meta=meta, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
+        if not item.get("publish_time"):
+            item["publish_time"] = response.meta.get("rss_publish_time")
         if not item.get("title") or not item.get("content_plain"):
             # Fall back to RSS data if detail page extraction fails
             item["title"] = item.get("title") or response.meta.get("rss_title")
@@ -98,7 +101,7 @@ class ArgentinaInfobaeSpider(SmartSpider):
         if not value:
             return None
         try:
-            return parsedate_to_datetime(value).replace(tzinfo=None)
+            return self.parse_to_utc(parsedate_to_datetime(value))
         except Exception:
             return None
 

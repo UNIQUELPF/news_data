@@ -14,7 +14,7 @@ class TheEdgeSpider(SmartSpider):
     source_timezone = "Asia/Kuala_Lumpur"
     allowed_domains = ["theedgemalaysia.com"]
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = "[class*=\"newsdetailsContent\"]"
 
     custom_settings = {

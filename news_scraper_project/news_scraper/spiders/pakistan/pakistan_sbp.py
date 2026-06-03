@@ -4,7 +4,6 @@ import re
 from datetime import datetime
 
 import scrapy
-from scrapy_playwright.page import PageMethod
 
 from news_scraper.spiders.pakistan.base import PakistanBaseSpider
 
@@ -13,8 +12,6 @@ class PakistanSbpSpider(PakistanBaseSpider):
     name = "pakistan_sbp"
 
     country_code = 'PAK'
-
-    playwright = True
 
     country = '巴基斯坦'
     allowed_domains = ["sbp.org.pk", "www.sbp.org.pk"]
@@ -26,6 +23,10 @@ class PakistanSbpSpider(PakistanBaseSpider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 1,
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
 
     async def start(self):
@@ -34,13 +35,6 @@ class PakistanSbpSpider(PakistanBaseSpider):
             yield scrapy.Request(
                 url,
                 callback=self.parse_listing,
-                meta={
-                    "playwright": True,
-                    "playwright_context": "pakistan_sbp",
-                    "playwright_page_methods": [
-                        PageMethod("wait_for_function", "() => document.title !== 'Just a moment...'", timeout=30000),
-                    ],
-                },
                 dont_filter=True,
             )
 
@@ -66,10 +60,6 @@ class PakistanSbpSpider(PakistanBaseSpider):
             yield scrapy.Request(
                 full_url,
                 callback=self.parse_year_page,
-                meta={
-                    "playwright": True,
-                    "playwright_context": "pakistan_sbp",
-                },
                 dont_filter=self.full_scan,
             )
 
@@ -110,14 +100,12 @@ class PakistanSbpSpider(PakistanBaseSpider):
             if publish_time and publish_time < self.cutoff_date:
                 self._stop_pagination = True
                 continue
+            if not publish_time:
+                continue
             yield scrapy.Request(
                 full_url,
                 callback=self.parse_pdf,
                 cb_kwargs={"title": title, "publish_time": publish_time},
-                meta={
-                    "playwright": True,
-                    "playwright_context": "pakistan_sbp",
-                },
                 dont_filter=self.full_scan,
             )
 
@@ -126,14 +114,12 @@ class PakistanSbpSpider(PakistanBaseSpider):
         if not content:
             content = title
 
-        yield {
-            "title": title,
-            "content": content,
-            "publish_time": publish_time,
-            "url": response.url,
-            "source_country": "Pakistan",
-            "source_name": "State Bank of Pakistan",
-            "language": "en",
-            "author": "State Bank of Pakistan",
-            "section": "press",
-        }
+        yield self._build_item(
+            response=response,
+            title=title,
+            content=content,
+            publish_time=publish_time,
+            author="State Bank of Pakistan",
+            language="en",
+            section="press",
+        )

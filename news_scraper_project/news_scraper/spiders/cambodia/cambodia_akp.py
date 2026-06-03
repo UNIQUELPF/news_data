@@ -19,7 +19,7 @@ class CambodiaAkpSpider(CambodiaBaseSpider):
         emitted = 0
         for href in response.css("a[href*='/post/detail/']::attr(href)").getall():
             url = response.urljoin(href)
-            if not self.should_process(url):
+            if self.is_already_scraped(url):
                 continue
             yield scrapy.Request(url, callback=self.parse_detail)
             emitted += 1
@@ -36,8 +36,10 @@ class CambodiaAkpSpider(CambodiaBaseSpider):
         text = self._clean_text(" ".join(response.css(".youtube-video *::text").getall()))
         match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2},\s+\d{4}", text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
-        if publish_time and publish_time < self.cutoff_date:
+        
+        if not self.should_process(response.url, publish_time):
             return
+            
         content = self._extract_content(response, [".youtube-video", "body"])
         if not content:
             return

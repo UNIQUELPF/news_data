@@ -39,8 +39,18 @@ class QatarInvestSpider(QatarBaseSpider):
             return
 
         page_text = self._clean_text(" ".join(response.css("main *::text").getall()))
-        match = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}", page_text)
+        match = re.search(
+            r"\b\d{1,2}\s+"
+            r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+            r"\s+\d{4}\b",
+            page_text,
+        )
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
+        if not publish_time:
+            meta_time = response.xpath(
+                "//meta[contains(@property, 'date') or contains(@name, 'date')]/@content"
+            ).get()
+            publish_time = self._parse_datetime(meta_time, languages=["en"])
         if not self.should_process(response.url, publish_time):
             return
 
@@ -51,7 +61,7 @@ class QatarInvestSpider(QatarBaseSpider):
         if not content:
             return
 
-        yield self._build_item(
+        item = self._build_item(
             response=response,
             title=title,
             content=content,
@@ -60,3 +70,5 @@ class QatarInvestSpider(QatarBaseSpider):
             language="en",
             section="investment",
         )
+        if item:
+            yield item

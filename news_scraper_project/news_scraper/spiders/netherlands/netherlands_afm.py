@@ -1,5 +1,7 @@
 # 荷兰金融市场管理局爬虫，抓取监管新闻与公告。
 
+import re
+
 from bs4 import BeautifulSoup
 
 import scrapy
@@ -30,8 +32,6 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
             if href.rstrip("/") == "/en/sector/actueel":
                 continue
             full_url = response.urljoin(href.split("?")[0])
-            if not self.should_process(full_url):
-                continue
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
@@ -56,7 +56,12 @@ class NetherlandsAfmSpider(NetherlandsBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en", "nl"],
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not publish_time:
+            body_text = self._clean_text(" ".join(response.css("body ::text").getall()[:140]))
+            date_match = re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", body_text)
+            if date_match:
+                publish_time = self.parse_date(date_match.group(0))
+        if not publish_time or not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, ["main", "article", ".article", ".content"])

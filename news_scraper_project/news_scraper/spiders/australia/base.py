@@ -35,7 +35,7 @@ class AustraliaBaseSpider(SmartSpider):
         }
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+        normalized_time = publish_time
 
         # Extract images via ContentEngine with og:image fallback
         content_data = self.extract_content(response) or {}

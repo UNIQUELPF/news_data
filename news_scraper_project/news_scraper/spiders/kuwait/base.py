@@ -21,6 +21,7 @@ class KuwaitBaseSpider(SmartSpider):
     country = "科威特"
     language = "en"
     source_timezone = "Asia/Kuwait"
+    strict_date_required = False
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,

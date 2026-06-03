@@ -26,6 +26,7 @@ class LaosBaseSpider(SmartSpider):
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
     request_timeout = 30
+    strict_date_required = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

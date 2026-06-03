@@ -29,13 +29,17 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
             full_url = self._clean_text((node.link.text if node.link else "")).split("?")[0]
             if "/en/" not in full_url:
                 continue
-            if not self.should_process(full_url):
+            pubDate_text = node.pubDate.text if node.pubDate else None
+            publish_time = self._parse_datetime(pubDate_text, languages=["en"]) if pubDate_text else None
+            if not self.should_process(full_url, publish_time):
                 continue
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
+            detail_response = self._make_response(full_url, detail_html)
+            detail_response.meta["feed_publish_time"] = publish_time
+            item = next(self.parse_detail(detail_response), None)
             if item:
                 yield item
                 emitted += 1
@@ -55,8 +59,8 @@ class NetherlandsDnbSpider(NetherlandsBaseSpider):
             response.xpath("//meta[@property='article:published_time']/@content").get()
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en"],
-        )
-        if publish_time and publish_time < self.cutoff_date:
+        ) or response.meta.get("feed_publish_time")
+        if not publish_time or not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, ["main", "article", ".article-content", ".content"])

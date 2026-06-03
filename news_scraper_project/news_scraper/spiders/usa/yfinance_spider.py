@@ -29,14 +29,22 @@ class USAYFinanceSpider(SmartSpider):
         yield scrapy.Request(self.start_urls[0], callback=self.parse, meta={'page': 1}, dont_filter=True)
 
     def parse(self, response):
-        hrefs = response.css('a::attr(href)').getall()
+        candidate_links = response.css('a.subtle-link.fin-size-small::attr(href)').getall()
+        candidate_links.extend(response.xpath('//ul//li//a[contains(@href, "/news/")]/@href').getall())
+        candidate_links.extend(response.css('a[href*="/news/"]::attr(href)').getall())
+
         articles = []
-        for href in hrefs:
-            full_url = response.urljoin(href)
-            # Filter for actual articles: must contain /news/ and end with .html
-            if '/news/' in full_url and full_url.split('?')[0].split('#')[0].endswith('.html'):
-                if full_url not in articles:
-                    articles.append(full_url)
+        for link in candidate_links:
+            full_url = response.urljoin(link).split('?')[0].split('#')[0]
+            if '/news/' not in full_url or full_url.rstrip('/').endswith('/news'):
+                continue
+            if any(section in full_url for section in ['/news/us/', '/news/politics/', '/news/world/', '/news/science/']):
+                continue
+            # Yahoo article URLs in this runtime end with .html; this avoids topic/category pages.
+            if not full_url.endswith('.html'):
+                continue
+            if full_url not in articles:
+                articles.append(full_url)
 
         has_valid_item_in_window = False
         for full_url in articles:
@@ -62,6 +70,8 @@ class USAYFinanceSpider(SmartSpider):
 
         # Safety check: filter articles before cutoff date
         pub_time = item.get('publish_time')
+        if not pub_time:
+            return
         if pub_time and self.cutoff_date and pub_time < self.cutoff_date:
             return
 

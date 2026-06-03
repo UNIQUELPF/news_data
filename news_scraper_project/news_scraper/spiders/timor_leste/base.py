@@ -24,6 +24,13 @@ class TimorLesteBaseSpider(SmartSpider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOADER_MIDDLEWARES": {
+            "news_scraper.middlewares.CurlCffiMiddleware": None,
+        },
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
     request_timeout = 30
 
@@ -35,7 +42,7 @@ class TimorLesteBaseSpider(SmartSpider):
         }
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+        normalized_time = self.parse_to_utc(publish_time) if publish_time else None
 
         # Extract images via ContentEngine with og:image fallback
         content_data = self.extract_content(response) or {}
@@ -63,7 +70,6 @@ class TimorLesteBaseSpider(SmartSpider):
             "url": response.url,
             "title": title,
             "raw_html": self._response_text(response),
-            "content": content,
             "content_cleaned": content_cleaned,
             "content_markdown": content_markdown,
             "content_plain": content,

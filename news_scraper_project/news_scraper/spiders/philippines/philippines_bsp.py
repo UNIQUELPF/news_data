@@ -61,7 +61,9 @@ class PhilippinesBspSpider(PhilippinesBaseSpider):
             return
 
         publish_time = self._parse_datetime(row.get("PDate"), languages=["en"])
-        if publish_time and publish_time < self.cutoff_date:
+        if not publish_time:
+            return
+        if publish_time < self.cutoff_date:
             return
 
         content = self._clean_text(self._html_to_text(row.get("Content") or ""))

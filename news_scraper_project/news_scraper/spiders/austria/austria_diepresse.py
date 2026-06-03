@@ -27,6 +27,7 @@ class AustriaDiePresseSpider(AustriaBaseSpider):
     ]
 
     fallback_content_selector = "article, main"
+    strict_date_required = False
 
     async def start(self):
         for url in self.start_urls:

@@ -15,7 +15,7 @@ class SgBusinessTimesSpider(SmartSpider):
 
     # 商业时报隐藏的分页 API (v1)
     api_url = 'https://www.businesstimes.com.sg/_plat/api/v1/articles/sections?size=20&sections=singapore_economy-policy&page={}'
-    use_curl_cffi = True
+    use_curl_cffi = False
     _next_page_yielded = False
 
     async def start(self):
@@ -28,13 +28,16 @@ class SgBusinessTimesSpider(SmartSpider):
 
     custom_settings = {
         'DOWNLOADER_MIDDLEWARES': {
-            'news_scraper.middlewares.CurlCffiMiddleware': 543,
-            'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
         },
-        'CURLL_CFFI_IMPERSONATE': 'chrome120',
         'DEFAULT_REQUEST_HEADERS': {
-            'referer': 'https://www.businesstimes.com.sg/singapore/economy-policy',
-            'x-requested-with': 'XMLHttpRequest'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.businesstimes.com.sg/singapore/economy-policy',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
         },
         'CONCURRENT_REQUESTS': 1,
         'DOWNLOAD_DELAY': 2
@@ -87,6 +90,9 @@ class SgBusinessTimesSpider(SmartSpider):
             response,
             title_xpath="//h1/text()",
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
         if not self.should_process(response.url, item.get('publish_time')):
             self._stop_pagination = True
             return

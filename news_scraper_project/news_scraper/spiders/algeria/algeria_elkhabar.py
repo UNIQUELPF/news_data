@@ -25,8 +25,10 @@ class AlgeriaElkhabarSpider(SmartSpider):
 
 
     country = "阿尔及利亚"
-    language = "en"
+    language = "ar"
     source_timezone = "Africa/Algiers"
+    dateparser_settings = {"DATE_ORDER": "DMY"}
+    strict_date_required = False
     allowed_domains = ["elkhabar.com"]
     # 当前 spider 对应的数据库表名。
 
@@ -57,13 +59,13 @@ class AlgeriaElkhabarSpider(SmartSpider):
             full_url = response.urljoin(href)
             if full_url.rstrip("/") == "https://www.elkhabar.com/economie":
                 continue
-            if "?page=" in full_url or not self.should_process(full_url):
+            if "?page=" in full_url or self.is_already_scraped(full_url):
                 continue
             has_valid_item_in_window = True
             unique_links.append(full_url)
 
         for article_url in unique_links:
-            yield scrapy.Request(article_url, callback=self.parse_detail)
+            yield scrapy.Request(article_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
         if self._stop_pagination:
             return
@@ -76,7 +78,10 @@ class AlgeriaElkhabarSpider(SmartSpider):
                 yield scrapy.Request(next_url, callback=self.parse_listing, meta={"page": next_page})
 
     def parse_detail(self, response):
-        item = self.auto_parse_item(response)
+        item = self.auto_parse_item(
+            response,
+            publish_time_xpath="normalize-space(//article//header//p[contains(., '/')])",
+        )
         if not item.get("title") or not item.get("content_plain"):
             return
 
@@ -93,4 +98,3 @@ class AlgeriaElkhabarSpider(SmartSpider):
 
         if len(item.get("content_plain", "")) > 100:
             yield item
-

@@ -50,6 +50,8 @@ class TimorLesteGovPortalSpider(TimorLesteBaseSpider):
             self._clean_text(" ".join(response.css(".date::text, .tit::text, body ::text").getall()[:80])),
             languages=["pt", "en"],
         )
+        if not publish_time:
+            return
         if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, title)

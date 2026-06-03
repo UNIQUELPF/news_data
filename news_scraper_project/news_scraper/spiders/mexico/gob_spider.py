@@ -1,5 +1,6 @@
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
+from scrapy_playwright.page import PageMethod
 
 
 class MexicoGobSpider(SmartSpider):
@@ -12,6 +13,8 @@ class MexicoGobSpider(SmartSpider):
     start_urls = ['https://www.gob.mx/se/archivo/prensa?idiom=es']
     fallback_content_selector = '.article-body'
     strict_date_required = False
+    use_curl_cffi = False
+    playwright = True
     MAX_PAGES = 30
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
@@ -19,6 +22,10 @@ class MexicoGobSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
+        'PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT': 60000,
+        'PLAYWRIGHT_LAUNCH_OPTIONS': {
+            'headless': True,
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         }
@@ -29,8 +36,14 @@ class MexicoGobSpider(SmartSpider):
         yield scrapy.Request(
             url,
             callback=self.parse_list,
-            meta={'page': 1},
-        dont_filter=True,
+            meta={
+                'page': 1,
+                'playwright': True,
+                'playwright_page_methods': [
+                    PageMethod("wait_for_selector", "body", timeout=10000),
+                ]
+            },
+            dont_filter=True,
         )
 
     def parse_list(self, response):
@@ -46,7 +59,16 @@ class MexicoGobSpider(SmartSpider):
             full_url = response.urljoin(link)
             if self.should_process(full_url):
                 has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+                yield scrapy.Request(
+                    full_url,
+                    callback=self.parse_article,
+                    meta={
+                        'playwright': True,
+                        'playwright_page_methods': [
+                            PageMethod("wait_for_selector", "body", timeout=10000),
+                        ]
+                    }
+                )
 
         current_page = response.meta.get('page', 1)
         if has_valid_item_in_window and current_page < self.MAX_PAGES:
@@ -55,7 +77,13 @@ class MexicoGobSpider(SmartSpider):
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
-                meta={'page': next_page},
+                meta={
+                    'page': next_page,
+                    'playwright': True,
+                    'playwright_page_methods': [
+                        PageMethod("wait_for_selector", "body", timeout=10000),
+                    ]
+                },
                 dont_filter=True
             )
 

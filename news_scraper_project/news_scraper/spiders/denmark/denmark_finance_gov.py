@@ -1,5 +1,5 @@
 # 丹麦finance gov爬虫，负责抓取对应站点、机构或栏目内容。
-
+# en.fm.dk listing 页面无日期，需在详情页提取日期
 import re
 
 from bs4 import BeautifulSoup
@@ -18,27 +18,31 @@ class DenmarkFinanceGovSpider(DenmarkBaseSpider):
     allowed_domains = ["en.fm.dk", "fm.dk"]
     start_urls = ["https://en.fm.dk/news/news/"]
 
+    # Listing page has no dates, we get dates on detail pages
+    strict_date_required = False
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
-        for link in soup.select("a[href]"):
-            href = link.get("href")
+        """
+        Parse listing page: https://en.fm.dk/news/news/
+        Links with /news/news/<slug> are article links. No date on listing page.
+        """
+        seen = set()
+        for link in response.css("a[href]"):
+            href = link.attrib.get("href", "")
             if not href or "/news/news/" not in href or href.rstrip("/") == "/news/news":
                 continue
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            seen.add(full_url)
+            # Don't filter by date at listing step — no date available
+            if not self.should_process(full_url, None):
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                yield item
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -50,10 +54,11 @@ class DenmarkFinanceGovSpider(DenmarkBaseSpider):
             return
 
         publish_time = self._extract_publish_time(response)
-        if publish_time and publish_time < self.cutoff_date:
+        # Now apply date check on detail page
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response)
+        content = self._do_extract_content(response)
         if not content:
             return
 
@@ -68,13 +73,19 @@ class DenmarkFinanceGovSpider(DenmarkBaseSpider):
         )
 
     def _extract_publish_time(self, response):
-        text = self._clean_text(" ".join(response.css("main ::text").getall()[:80]))
+        # Look for DD.MM.YYYY in page text
+        text = self._clean_text(" ".join(response.css("main ::text, article ::text").getall()[:120]))
         match = re.search(r"\b(\d{2}\.\d{2}\.\d{4})\b", text)
         if match:
             return self._parse_datetime(match.group(1), languages=["en"])
-        return self._parse_datetime(text, languages=["en"])
+        # Also try meta date
+        meta_date = response.xpath("//meta[@name='date']/@content").get() or \
+                    response.xpath("//meta[@property='article:published_time']/@content").get()
+        if meta_date:
+            return self._parse_datetime(meta_date, languages=["en"])
+        return None
 
-    def _extract_content(self, response):
+    def _do_extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main")
         if not root:

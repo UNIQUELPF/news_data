@@ -25,8 +25,9 @@ class AlgeriaHorizonsSpider(SmartSpider):
 
 
     country = "阿尔及利亚"
-    language = "en"
+    language = "fr"
     source_timezone = "Africa/Algiers"
+    strict_date_required = False
     allowed_domains = ["horizons.dz"]
     # 当前 spider 对应的数据库表名。
 
@@ -55,13 +56,13 @@ class AlgeriaHorizonsSpider(SmartSpider):
         unique_links = []
         for href in article_links:
             full_url = response.urljoin(href)
-            if "/category/" in full_url or not self.should_process(full_url):
+            if "/category/" in full_url or self.is_already_scraped(full_url):
                 continue
             has_valid_item_in_window = True
             unique_links.append(full_url)
 
         for article_url in unique_links:
-            yield scrapy.Request(article_url, callback=self.parse_detail)
+            yield scrapy.Request(article_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
         if self._stop_pagination:
             return
@@ -88,4 +89,3 @@ class AlgeriaHorizonsSpider(SmartSpider):
 
         if len(item.get("content_plain", "")) > 100:
             yield item
-

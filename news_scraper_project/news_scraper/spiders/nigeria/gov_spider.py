@@ -16,6 +16,10 @@ class NigeriaGovSpider(SmartSpider):
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
         'DEFAULT_REQUEST_HEADERS': {

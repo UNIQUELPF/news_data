@@ -1,6 +1,8 @@
 # 卡塔尔国家通讯社爬虫，抓取英文经济和政府新闻。
 import re
+from urllib.parse import parse_qs, urlparse
 
+import dateparser
 import scrapy
 
 from news_scraper.spiders.qatar.base import QatarBaseSpider
@@ -28,25 +30,36 @@ class QatarQnaSpider(QatarBaseSpider):
                 return
 
     def parse_detail(self, response):
-        title = self._clean_text(
-            response.css(".news-details h1::text").get()
-            or response.css("h1::text").get()
-            or response.xpath("//meta[@property='og:title']/@content").get()
-        )
+        title = ""
+        for selector in (
+            ".news-details h1::text",
+            ".news-details-title::text",
+            ".news-details-title *::text",
+            "h1::text",
+        ):
+            title = self._clean_text(" ".join(response.css(selector).getall()))
+            if title:
+                break
+        if not title:
+            title = self._clean_text(response.xpath("//meta[@property='og:title']/@content").get())
         if not title:
             return
 
         page_text = self._clean_text(" ".join(response.css(".news-details *::text").getall()))
         match = re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", page_text)
         publish_time = self._parse_datetime(match.group(0), languages=["en"]) if match else None
+        if not publish_time:
+            date_param = parse_qs(urlparse(response.url).query).get("date", [None])[0]
+            parsed = dateparser.parse(date_param, languages=["en"], settings={"DATE_ORDER": "DMY"}) if date_param else None
+            publish_time = self.parse_to_utc(parsed) if parsed else None
         if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response, [".news-details", "main"])
+        content = self._extract_content(response, [".news-details-holder-description", ".news-details", "main"])
         if not content:
             return
 
-        yield self._build_item(
+        item = self._build_item(
             response=response,
             title=title,
             content=content,
@@ -55,3 +68,5 @@ class QatarQnaSpider(QatarBaseSpider):
             language="en",
             section="economy",
         )
+        if item:
+            yield item

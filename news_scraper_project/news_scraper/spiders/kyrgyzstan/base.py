@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class KyrgyzstanBaseSpider(SmartSpider):
     country_code = "KGZ"
-    country = "??????"
+    country = "吉尔吉斯斯坦"
     language = "en"
     source_timezone = "Asia/Bishkek"
     fallback_content_selector = "article, main, .content"
@@ -27,6 +27,7 @@ class KyrgyzstanBaseSpider(SmartSpider):
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     }
     request_timeout = 30
+    strict_date_required = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

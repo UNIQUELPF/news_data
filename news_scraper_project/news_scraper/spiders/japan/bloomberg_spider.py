@@ -1,6 +1,8 @@
 import scrapy
 import json
+import re
 from urllib.parse import urljoin
+from scrapy_playwright.page import PageMethod
 
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -16,7 +18,6 @@ class BloombergSpider(SmartSpider):
     allowed_domains = ['bloomberg.com']
     start_urls = ['https://www.bloomberg.com/jp/economics']
 
-    use_curl_cffi = True
     fallback_content_selector = '.body-copy, article'
 
     # Bloomberg API list endpoints don't expose publish dates on item cards,
@@ -27,24 +28,56 @@ class BloombergSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 2.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
-        'DEFAULT_REQUEST_HEADERS': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'PLAYWRIGHT_LAUNCH_OPTIONS': {
+            'headless': True,
+            'timeout': 60000,
         },
     }
 
     async def start(self):
+        js_scroll = """
+        async () => {
+            for (let i = 0; i < 5; i++) {
+                window.scrollBy(0, window.innerHeight * 2);
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+        """
         for url in self.start_urls:
-            yield scrapy.Request(url, callback=self.parse_list, dont_filter=True)
+            yield scrapy.Request(
+                url,
+                callback=self.parse_list,
+                dont_filter=True,
+                meta={
+                    "playwright": True,
+                    "playwright_include_page": True,
+                    "playwright_page_methods": [
+                        PageMethod("wait_for_load_state", "domcontentloaded"),
+                        PageMethod("evaluate", js_scroll),
+                        PageMethod("wait_for_timeout", 2000),
+                    ],
+                }
+            )
 
     # ------------------------------------------------------------------
     # Listing page – embedded JSON
     # ------------------------------------------------------------------
-    def parse_list(self, response):
-        """Extract article links from the initialState JSON blob on the listing page."""
-        scripts = response.xpath('//script[contains(text(), "initialState")]/text()').getall()
+    async def parse_list(self, response):
+        """Extract article links from DOM after scroll and scrape sequentially using the same page context."""
+        page = response.meta.get("playwright_page")
+        if not page:
+            self.logger.error("No playwright page found in meta!")
+            return
 
         found_urls = set()
+        
+        # 1. Extract from standard a href links in the DOM
+        links = response.xpath("//a[contains(@href, '/news/articles/')]/@href").getall()
+        for link in links:
+            found_urls.add(response.urljoin(link))
+            
+        # 2. Extract from embedded initialState JSON blob as fallback
+        scripts = response.xpath('//script[contains(text(), "initialState")]/text()').getall()
         for script_text in scripts:
             try:
                 data = json.loads(script_text)
@@ -53,62 +86,33 @@ class BloombergSpider(SmartSpider):
                 pass
 
         self.logger.info(
-            f"Bloomberg List: Found {len(found_urls)} initial article links from JSON."
+            f"Bloomberg List: Found {len(found_urls)} initial article links after scroll & JSON."
         )
 
-        has_valid_item_in_window = False
-        for url in found_urls:
-            if not self.should_process(url):          # dedup-only (strict_date_required=False)
-                continue
-            has_valid_item_in_window = True
-            yield scrapy.Request(url, callback=self.parse_detail,
-                                 dont_filter=self.full_scan)
-
-        # ------------------------------------------------------------------
-        # API pagination – deeper history (offsets 10..190, step 10)
-        # ------------------------------------------------------------------
-        for offset in range(10, 200, 10):
-            api_url = (
-                'https://www.bloomberg.com/lineup-next/api/paginate'
-                f'?id=story-list-1&page=jp-economics&offset={offset}'
-                '&variation=archive&type=lineup_content&locale=ja'
-            )
-            yield scrapy.Request(api_url, callback=self.parse_api_json,
-                                 dont_filter=True)
-
-    # ------------------------------------------------------------------
-    # API pagination handler
-    # ------------------------------------------------------------------
-    def parse_api_json(self, response):
         try:
-            data = json.loads(response.text)
-        except Exception as e:
-            self.logger.error(f"Failed to parse Bloomberg API JSON: {e}")
-            return
-
-        # Locate the items list inside the paginated payload
-        items = []
-        if 'story-list-1' in data:
-            items = data['story-list-1'].get('items', [])
-        else:
-            items = self._deep_find_items(data) or []
-
-        has_valid_item_in_window = False
-        for item in items:
-            raw_url = item.get('url')
-            if not raw_url:
-                continue
-            url = response.urljoin(raw_url)
-            if not self.should_process(url):
-                continue
-            has_valid_item_in_window = True
-            yield scrapy.Request(url, callback=self.parse_detail,
-                                 dont_filter=self.full_scan)
-
-        if not has_valid_item_in_window:
-            self.logger.info(
-                f"API offset exhausted – no new URLs on {response.url}"
-            )
+            for url in found_urls:
+                if not self.should_process(url):          # dedup-only (strict_date_required=False)
+                    continue
+                
+                self.logger.info(f"Sequentially scraping detail via single page context: {url}")
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    await page.wait_for_timeout(2000)
+                    
+                    html_content = await page.content()
+                    fake_response = scrapy.http.HtmlResponse(
+                        url=url,
+                        body=html_content,
+                        encoding='utf-8'
+                    )
+                    
+                    # Manual extraction using parse_detail selector
+                    for item in self.parse_detail(fake_response):
+                        yield item
+                except Exception as ex:
+                    self.logger.error(f"Sequential scrape error on {url}: {ex}")
+        finally:
+            await page.close()
 
     # ------------------------------------------------------------------
     # Detail page

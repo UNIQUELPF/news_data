@@ -1,4 +1,3 @@
-from datetime import datetime
 import json
 
 import dateparser
@@ -22,6 +21,10 @@ class QatarBaseSpider(SmartSpider):
     custom_settings = {
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
     }
     request_timeout = 30
 
@@ -33,7 +36,9 @@ class QatarBaseSpider(SmartSpider):
         }
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+        if not publish_time:
+            return None
+        normalized_time = self.parse_to_utc(publish_time)
 
         # Extract images via ContentEngine with og:image fallback
         content_data = self.extract_content(response) or {}

@@ -1,5 +1,4 @@
 import scrapy
-from datetime import datetime
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -18,6 +17,10 @@ class PortugalCMSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -41,6 +44,8 @@ class PortugalCMSpider(SmartSpider):
         has_valid_item_in_window = False
         for link in articles:
             full_url = response.urljoin(link)
+            if '/economia/detalhe/' not in full_url:
+                continue
             if self.should_process(full_url):
                 has_valid_item_in_window = True
                 yield scrapy.Request(full_url, callback=self.parse_article)
@@ -58,6 +63,8 @@ class PortugalCMSpider(SmartSpider):
             title_xpath="//meta[@property='og:title']/@content",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
+        if not item.get('publish_time'):
+            return
         item['author'] = 'Correio da Manhã'
         item['section'] = 'Economia'
         if not self.should_process(response.url, item.get('publish_time')):

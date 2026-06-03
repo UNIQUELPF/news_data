@@ -97,6 +97,9 @@ class PlaceraSESpider(SmartSpider):
     def parse_detail(self, response):
         """Parse article detail page using standardized extraction."""
         item = self.auto_parse_item(response)
+        item['publish_time'] = response.meta.get("publish_time_hint") or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         # Clean title: remove " | Placera.se" suffix
         if item.get('title'):
@@ -110,5 +113,8 @@ class PlaceraSESpider(SmartSpider):
 
         item['author'] = 'Placera'
         item['section'] = 'Nyheter'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         yield item

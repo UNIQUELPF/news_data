@@ -1,5 +1,5 @@
 import scrapy
-from datetime import datetime
+import json
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -19,6 +19,10 @@ class PortugalDNSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -75,12 +79,45 @@ class PortugalDNSpider(SmartSpider):
                 dont_filter=True,
             )
 
+    def _extract_article_schema(self, response):
+        for raw in response.css('script[type="application/ld+json"]::text').getall():
+            if not raw.strip():
+                continue
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            candidates = parsed if isinstance(parsed, list) else [parsed]
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get('@type') in ('NewsArticle', 'Article'):
+                    return candidate
+                graph = candidate.get('@graph')
+                if isinstance(graph, list):
+                    for entry in graph:
+                        if isinstance(entry, dict) and entry.get('@type') in ('NewsArticle', 'Article'):
+                            return entry
+        return None
+
     def parse_article(self, response):
+        schema = self._extract_article_schema(response) or {}
         item = self.auto_parse_item(
             response,
             title_xpath="//h1/text()",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
+        if schema.get('headline'):
+            item['title'] = schema['headline']
+        raw_publish_time = (
+            schema.get('datePublished')
+            or schema.get('dateCreated')
+            or schema.get('dateModified')
+        )
+        if raw_publish_time and not item.get('publish_time'):
+            item['publish_time'] = self.parse_date(raw_publish_time)
+        if not item.get('publish_time'):
+            return
         item['author'] = response.css('.article-author::text').get() or 'Global Media Group'
         item['section'] = 'Economia'
         if item.get('content_plain') and len(item['content_plain']) > 50:

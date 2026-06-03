@@ -72,6 +72,9 @@ class FinewsCHSpider(SmartSpider):
             title_xpath="//h2[contains(@class, 'item-title')]/text() | //h1/text()",
             publish_time_xpath="//span[contains(@class, 'article-date')]/@content | //meta[@property='article:published_time']/@content"
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         author = response.css('span.author-name::text').get()
         item['author'] = author.strip() if author else 'finews.com'

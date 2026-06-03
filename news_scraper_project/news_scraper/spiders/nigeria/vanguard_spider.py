@@ -1,5 +1,6 @@
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
+from scrapy_playwright.page import PageMethod
 
 
 class NigeriaVanguardSpider(SmartSpider):
@@ -13,11 +14,17 @@ class NigeriaVanguardSpider(SmartSpider):
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
     strict_date_required = False
+    use_curl_cffi = False
+    playwright = True
 
     custom_settings = {
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
+        'PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT': 60000,
+        'PLAYWRIGHT_LAUNCH_OPTIONS': {
+            'headless': True,
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -27,8 +34,14 @@ class NigeriaVanguardSpider(SmartSpider):
         yield scrapy.Request(
             'https://www.vanguardngr.com/category/business/',
             callback=self.parse_list,
-            meta={'page': 1},
-        dont_filter=True,
+            meta={
+                'page': 1,
+                'playwright': True,
+                'playwright_page_methods': [
+                    PageMethod("wait_for_selector", "body", timeout=10000),
+                ]
+            },
+            dont_filter=True,
         )
 
     def parse_list(self, response):
@@ -40,7 +53,16 @@ class NigeriaVanguardSpider(SmartSpider):
             full_url = response.urljoin(link)
             if '/202' in full_url and self.should_process(full_url):
                 has_valid_item_in_window = True
-                yield scrapy.Request(full_url, callback=self.parse_article)
+                yield scrapy.Request(
+                    full_url,
+                    callback=self.parse_article,
+                    meta={
+                        'playwright': True,
+                        'playwright_page_methods': [
+                            PageMethod("wait_for_selector", "body", timeout=10000),
+                        ]
+                    }
+                )
 
         if has_valid_item_in_window:
             page = response.meta.get('page', 1)
@@ -49,7 +71,13 @@ class NigeriaVanguardSpider(SmartSpider):
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
-                meta={'page': next_page},
+                meta={
+                    'page': next_page,
+                    'playwright': True,
+                    'playwright_page_methods': [
+                        PageMethod("wait_for_selector", "body", timeout=10000),
+                    ]
+                },
                 dont_filter=True
             )
 

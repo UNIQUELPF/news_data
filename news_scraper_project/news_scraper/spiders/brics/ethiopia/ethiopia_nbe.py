@@ -49,10 +49,10 @@ class EthiopiaNBESpider(SmartSpider):
 
             publish_time_utc = self.parse_to_utc(publish_time) if publish_time else None
 
-            if self.should_process(url, publish_time_utc):
+            if publish_time_utc is None or self.should_process(url, publish_time_utc):
                 has_valid_item_in_window = True
                 meta_dict = {'publish_time_hint': publish_time_utc}
-                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict, dont_filter=self.full_scan)
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict, dont_filter=True)
 
         if has_valid_item_in_window:
             pagination = response.css('a.page-numbers::attr(href)').getall()
@@ -66,6 +66,10 @@ class EthiopiaNBESpider(SmartSpider):
             title_xpath="//meta[@property='og:title']/@content | //h1/text()",
             publish_time_xpath="//span[contains(@class, 'elementor-post-info__item--type-date')]//time/text() | //time/text()",
         )
+
+        if not item.get('publish_time'):
+            self.logger.warning(f"Missing publish_time after detail parse: {response.url}")
+            return
         
         # Ensure the main image is captured
         og_image = response.xpath("//meta[@property='og:image']/@content").get()

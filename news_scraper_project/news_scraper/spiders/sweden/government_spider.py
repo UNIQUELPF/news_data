@@ -72,6 +72,9 @@ class GovernmentSESpider(SmartSpider):
 
         # Fallback: URL-based date extraction
         if not item.get('publish_time'):
+            item['publish_time'] = response.meta.get("publish_time_hint")
+
+        if not item.get('publish_time'):
             date_match = re.search(r'/articles/(\d{4})/(\d{2})/', response.url)
             if date_match:
                 try:
@@ -82,5 +85,10 @@ class GovernmentSESpider(SmartSpider):
 
         item['author'] = 'Government of Sweden'
         item['section'] = 'Economic Policy'
+
+        if not item.get('publish_time'):
+            return
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         yield item

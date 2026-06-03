@@ -15,7 +15,7 @@ class MalaysiakiniSpider(SmartSpider):
     allowed_domains = ["malaysiakini.com"]
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = "article"
 
     # Listing API only provides SIDs and titles -- no date_pub.

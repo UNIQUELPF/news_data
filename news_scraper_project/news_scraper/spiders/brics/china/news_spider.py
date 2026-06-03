@@ -2,7 +2,6 @@ import scrapy
 import re
 from datetime import datetime
 import dateparser
-from scrapy_playwright.page import PageMethod
 from news_scraper.spiders.smart_spider import SmartSpider
 from pipeline.content_engine import ContentEngine
 
@@ -21,7 +20,7 @@ class NewsCNSpider(SmartSpider):
     # Chinese sites always use Year-Month-Day order
     dateparser_settings = {"DATE_ORDER": "YMD"}
     
-    use_curl_cffi = True
+    use_curl_cffi = False
     allowed_domains = ['news.cn']
     
     # Tight selector for Xinhuanet article body (includes unconventional span#detailContent)
@@ -59,38 +58,10 @@ class NewsCNSpider(SmartSpider):
         'CONCURRENT_REQUESTS': 2,
         'DOWNLOAD_DELAY': 1.5,
         'AUTOTHROTTLE_ENABLED': True,
-        'PLAYWRIGHT_LAUNCH_OPTIONS': {"headless": True, "timeout": 60000},
     }
 
     async def start(self):
         """Unified start logic with smart scrolling and date-based termination."""
-        target_date_str = self.cutoff_date.strftime('%Y%m%d') if self.cutoff_date else '20260101'
-        
-        js_scroll = f"""
-        async () => {{
-            let stopCount = 0;
-            for (let i = 0; i < 30; i++) {{
-                window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 1500));
-                
-                const links = Array.from(document.querySelectorAll('a[href*="/202"]'));
-                const earlyLinks = links.filter(l => {{
-                    const m = l.href.match(/\\/(\\d{{8}})\\//);
-                    return m && m[1] < "{target_date_str}";
-                }});
-                
-                if (earlyLinks.length > 5) stopCount++;
-                if (stopCount >= 2) break;
-
-                const loadMore = document.querySelector('.xpage-more-btn.look, .xpage-more-btn, #loadMore, .more');
-                if (loadMore && loadMore.offsetParent !== null) {{
-                    loadMore.click();
-                    await new Promise(r => setTimeout(r, 1500));
-                }}
-            }}
-        }}
-        """
-
         for _, config in self.CHANNELS.items():
             urls = []
             if 'url' in config:
@@ -103,11 +74,6 @@ class NewsCNSpider(SmartSpider):
                 yield scrapy.Request(
                     url,
                     meta={
-                        "playwright": True,
-                        "playwright_page_methods": [
-                            PageMethod("wait_for_selector", config['wait_selector'], timeout=10000),
-                            PageMethod("evaluate", js_scroll),
-                        ],
                         "channel_config": config,
                         "section_hint": section_name
                     },
@@ -152,7 +118,7 @@ class NewsCNSpider(SmartSpider):
             yield scrapy.Request(
                 abs_url,
                 callback=self.parse_detail,
-                dont_filter=self.full_scan,
+                dont_filter=True,
                 meta={
                     "section_hint": section_hint,
                     "publish_time_hint": publish_time,
@@ -193,7 +159,7 @@ class NewsCNSpider(SmartSpider):
         """Refined detail parsing with explicit XPaths."""
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1[contains(@class,'atitle')]/text() | //div[contains(@class,'header-content')]/h1/text() | //h1[@id='title']/text()",
+            title_xpath="//h1[contains(@class,'atitle')]/text() | //div[contains(@class,'header-content')]/h1/text() | //h1[@id='title']/text() | //h1/text()",
         )
 
         # 1. Custom precise publish time extraction (with time components)

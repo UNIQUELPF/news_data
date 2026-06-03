@@ -18,23 +18,24 @@ class FranceBanqueFranceSpider(FranceBaseSpider):
     allowed_domains = ["banque-france.fr", "www.banque-france.fr"]
     start_urls = ["https://www.banque-france.fr/fr/actualites"]
 
+    # Listing page has no dates; check dates on detail pages
+    strict_date_required = False
+    use_curl_cffi = True
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        for href in sorted(set(re.findall(r'/fr/actualites/[a-z0-9\-]+', html))):
+        seen = set()
+        for href in sorted(set(re.findall(r'/fr/actualites/[a-z0-9\-]+', response.text))):
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            seen.add(full_url)
+            if not self.should_process(full_url, None):
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                yield item
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -50,10 +51,10 @@ class FranceBanqueFranceSpider(FranceBaseSpider):
             or self._clean_text(" ".join(response.css("main ::text").getall()[:80])),
             languages=["fr", "en"],
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response, title)
+        content = self._do_extract_content(response, title)
         if not content:
             content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
         if not content:
@@ -69,7 +70,7 @@ class FranceBanqueFranceSpider(FranceBaseSpider):
             section="central_bank",
         )
 
-    def _extract_content(self, response, title):
+    def _do_extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one("article")
         if not root:

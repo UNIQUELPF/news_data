@@ -1,5 +1,5 @@
 import scrapy
-from datetime import datetime
+import json
 from dateutil import parser as dateutil_parser
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -18,6 +18,10 @@ class PortugalGovSpider(SmartSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'DEFAULT_REQUEST_HEADERS': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -32,7 +36,13 @@ class PortugalGovSpider(SmartSpider):
     def parse_list(self, response):
         self.logger.info(f"Received response from {response.url} with length {len(response.text)}")
         # 更加宽松的链接提取逻辑
-        articles = response.xpath('//a[contains(@href, "/noticia?")]/@href').getall()
+        articles = response.xpath(
+            '//a[contains(@href, "/comunicacao/noticia")]/@href | '
+            '//a[contains(@href, "/comunicacao/noticias/")]/@href | '
+            '//a[contains(@href, "noticia")]/@href'
+        ).getall()
+        if not articles:
+            articles = self._extract_next_data_links(response)
         self.logger.info(f"Discovered {len(articles)} potential articles on {response.url}")
 
         has_valid_item_in_window = False
@@ -51,6 +61,34 @@ class PortugalGovSpider(SmartSpider):
             next_url = f"{self.start_urls[0]}?p={page}"
             yield scrapy.Request(next_url, callback=self.parse_list, meta={'page': page}, dont_filter=True)
 
+    def _extract_next_data_links(self, response):
+        raw = response.css('script#__NEXT_DATA__::text').get()
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+
+        links = []
+
+        def walk(value):
+            if isinstance(value, dict):
+                for key in ('url', 'href', 'path'):
+                    candidate = value.get(key)
+                    if isinstance(candidate, str) and '/comunicacao/noticia' in candidate:
+                        if candidate.rstrip('/').split('?')[0].endswith('/comunicacao/noticias'):
+                            continue
+                        links.append(candidate)
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+
+        walk(data)
+        return list(dict.fromkeys(links))
+
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
@@ -68,6 +106,9 @@ class PortugalGovSpider(SmartSpider):
                 item['publish_time'] = self.parse_to_utc(pub_time)
             except Exception as e:
                 self.logger.warning(f"Date parse failed for {pub_time_raw}: {e}")
+
+        if not item.get('publish_time'):
+            return
 
         # Date-based circuit breaker: stop pagination when article is too old
         if not self.should_process(response.url, item.get('publish_time')):

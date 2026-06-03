@@ -20,15 +20,17 @@ class UkBusinessinsiderSpider(SmartSpider):
 
     custom_settings = {
         "DOWNLOADER_MIDDLEWARES": {
-            "news_scraper.middlewares.CurlCffiMiddleware": 543,
-            "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
+            "news_scraper.middlewares.CurlCffiMiddleware": None,
         },
-        "CURLL_CFFI_IMPERSONATE": "chrome120",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler",
+        },
         "CONCURRENT_REQUESTS": 4,
         "DOWNLOAD_DELAY": 1
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     async def start(self):
         yield scrapy.Request(
@@ -120,13 +122,15 @@ class UkBusinessinsiderSpider(SmartSpider):
             if pub_date:
                 break
 
-        if pub_date and not self.should_process(response.url, pub_date):
+        if not pub_date:
+            return
+        pub_date = self.parse_to_utc(pub_date)
+        if not self.should_process(response.url, pub_date):
             return
 
         item = self.auto_parse_item(response)
 
-        if pub_date:
-            item['publish_time'] = self.parse_to_utc(pub_date)
+        item['publish_time'] = pub_date
 
         # Override title from manual extraction (cleaner than ContentEngine for this site)
         title = "".join(response.css('h1 *::text, .headline *::text').getall()).strip()

@@ -46,7 +46,7 @@ class CanadaStatcanSpider(CanadaBaseSpider):
             response.xpath("//meta[@name='dcterms.issued']/@content").get()
             or response.xpath("//meta[@name='dcterms.modified']/@content").get()
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
         content = self._extract_content(response, ["main"])
         if not content:

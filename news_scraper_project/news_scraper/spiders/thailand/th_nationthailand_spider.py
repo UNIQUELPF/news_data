@@ -15,12 +15,23 @@ class ThNationthailandSpider(SmartSpider):
 
     base_api_url = 'https://api.nationthailand.com/api/v1.0/categories/news?page={}'
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = ".detail"
     strict_date_required = True
 
     custom_settings = {
+        'DOWNLOADER_MIDDLEWARES': {
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'DEFAULT_REQUEST_HEADERS': {
+            'Referer': 'https://www.nationthailand.com/news',
+            'Accept': 'application/json, text/plain, */*',
+        },
         'CONCURRENT_REQUESTS': 8,
         'DOWNLOAD_DELAY': 1
     }
@@ -89,11 +100,17 @@ class ThNationthailandSpider(SmartSpider):
 
     def parse_article(self, response):
         item = self.auto_parse_item(response)
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         if not self.should_process(response.url, item.get('publish_time')):
             return
 
         item['author'] = response.css('meta[name="author"]::attr(content)').get() or 'Nation Thailand'
         item['section'] = 'News'
+
+        if not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+            return
 
         yield item

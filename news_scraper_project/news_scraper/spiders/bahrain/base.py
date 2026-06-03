@@ -59,7 +59,7 @@ class BahrainBaseSpider(scrapy.Spider):
             "content_plain": content,
             "content": content,
             "images": images,
-            "publish_time": publish_time or datetime.now(),
+            "publish_time": publish_time,
             "author": author,
             "language": language,
             "section": section,

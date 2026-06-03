@@ -77,6 +77,8 @@ class PakistanEconomySpider(PakistanBaseSpider):
         )
         if publish_time and publish_time < self.cutoff_date:
             return
+        if not publish_time:
+            return
 
         content = self._clean_text((data or {}).get("articleBody")) or self._extract_content(response, title)
         if not content:

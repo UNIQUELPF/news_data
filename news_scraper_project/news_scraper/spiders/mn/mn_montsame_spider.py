@@ -1,6 +1,5 @@
 import scrapy
 import re
-from scrapy_playwright.page import PageMethod
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -22,6 +21,10 @@ class MnMontsameSpider(SmartSpider):
     MAX_PAGES = 100
 
     custom_settings = {
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy.core.downloader.handlers.http.HTTPDownloadHandler",
+            "https": "scrapy.core.downloader.handlers.http.HTTPDownloadHandler",
+        },
         "DOWNLOADER_MIDDLEWARES": {
             "news_scraper.middlewares.CurlCffiMiddleware": None,
             "news_scraper.middlewares.BatchDelayMiddleware": 600,
@@ -35,12 +38,6 @@ class MnMontsameSpider(SmartSpider):
             yield scrapy.Request(
                 url,
                 callback=self.parse,
-                meta={
-                    "playwright": True,
-                    "playwright_page_methods": [
-                        PageMethod("wait_for_selector", ".news-box", timeout=20000),
-                    ]
-                },
                 dont_filter=True,
             )
 
@@ -84,12 +81,9 @@ class MnMontsameSpider(SmartSpider):
                 callback=self.parse_article,
                 errback=self._handle_detail_error,
                 meta={
-                    "playwright": True,
-                    "playwright_page_methods": [
-                        PageMethod("wait_for_selector", ".news-title", timeout=20000),
-                    ],
                     "shared_state": state
-                }
+                },
+                dont_filter=True,
             )
 
     def _check_next_page(self, state, response_url):
@@ -107,12 +101,9 @@ class MnMontsameSpider(SmartSpider):
                 next_page_url,
                 callback=self.parse,
                 meta={
-                    "playwright": True,
-                    "playwright_page_methods": [
-                        PageMethod("wait_for_selector", ".news-box", timeout=20000),
-                    ],
                     "page": page + 1
-                }
+                },
+                dont_filter=True,
             )
 
     def _handle_detail_error(self, failure):

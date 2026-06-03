@@ -1,4 +1,5 @@
 import scrapy
+import json
 from news_scraper.spiders.smart_spider import SmartSpider
 
 class CashCHSpider(SmartSpider):
@@ -64,9 +65,24 @@ class CashCHSpider(SmartSpider):
             title_xpath="//h1/text() | //span[contains(@class, 'article-title')]/text()",
             publish_time_xpath="//meta[@property='article:published_time']/@content"
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            for script in response.xpath('//script[@type="application/ld+json"]/text()').getall():
+                try:
+                    data = json.loads(script)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict) and data.get('datePublished'):
+                    item['publish_time'] = self.parse_date(data.get('datePublished'))
+                    break
+        if not item.get('publish_time'):
+            return
 
         author = response.css('span.author::text').get()
         item['author'] = author.strip() if author else 'cash.ch'
         item['section'] = 'Top News'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         yield item

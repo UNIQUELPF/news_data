@@ -108,9 +108,12 @@ class USAForbesSpider(SmartSpider):
                         try:
                             pub_dt = datetime.fromisoformat(pub_ts.replace('Z', '+00:00'))
                         except (ValueError, AttributeError):
-                            pub_dt = datetime.now()
+                            pub_dt = None
                 else:
-                    pub_dt = datetime.now()
+                    pub_dt = None
+
+                if not pub_dt:
+                    continue
 
                 pub_dt = pub_dt.replace(tzinfo=None)
 

@@ -9,6 +9,8 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumPortalSpider(BelgiumBaseSpider):
     name = "belgium_belgium_portal"
+    start_date = "2025-01-01"
+    strict_date_required = False
 
     country_code = 'BEL'
 
@@ -22,11 +24,15 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
         soup = BeautifulSoup(html, "html.parser")
+        processed_urls = set()
         for link in soup.select("a[href]"):
             href = link.get("href")
             if not href or "/en/news/" not in href or href.endswith("/overview"):
                 continue
             full_url = response.urljoin(href)
+            if full_url in processed_urls:
+                continue
+            processed_urls.add(full_url)
             if not self.should_process(full_url) or full_url.endswith("/overview"):
                 continue
             try:
@@ -46,8 +52,13 @@ class BelgiumPortalSpider(BelgiumBaseSpider):
         if not title:
             return
 
-        node_text = self._clean_text(" ".join(response.css(".node ::text, main ::text").getall()[:120]))
-        publish_time = self._parse_datetime(node_text, languages=["en"])
+        date_text = self._clean_text(
+            response.css("time::text").get()
+            or response.css("time::attr(datetime)").get()
+        )
+        if date_text.lower().startswith("date:"):
+            date_text = date_text.split(":", 1)[1].strip()
+        publish_time = self._parse_datetime(date_text, languages=["en"])
         if publish_time and publish_time < self.cutoff_date:
             return
 

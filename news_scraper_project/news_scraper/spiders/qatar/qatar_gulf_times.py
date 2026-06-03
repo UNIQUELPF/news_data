@@ -48,7 +48,7 @@ class QatarGulfTimesSpider(QatarBaseSpider):
         if not content:
             return
 
-        yield self._build_item(
+        item = self._build_item(
             response=response,
             title=title,
             content=content,
@@ -57,3 +57,5 @@ class QatarGulfTimesSpider(QatarBaseSpider):
             language="en",
             section="business",
         )
+        if item:
+            yield item

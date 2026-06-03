@@ -1,4 +1,5 @@
 # 阿根廷ambito爬虫，负责抓取对应站点、机构或栏目内容。
+import json
 
 import scrapy
 from news_scraper.spiders.smart_spider import SmartSpider
@@ -25,8 +26,9 @@ class ArgentinaAmbitoSpider(SmartSpider):
 
 
     country = "阿根廷"
-    language = "en"
+    language = "es"
     source_timezone = "America/Argentina/Buenos_Aires"
+    strict_date_required = False
     allowed_domains = ["ambito.com"]
     # 当前 spider 对应的数据库表名。
 
@@ -55,16 +57,19 @@ class ArgentinaAmbitoSpider(SmartSpider):
 
         for href in article_links:
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            if self.is_already_scraped(full_url):
                 continue
             if "/economia/" not in full_url and "/finanzas/" not in full_url:
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         item = self.auto_parse_item(response)
         if not item.get("title") or not item.get("content_plain"):
             return
+
+        if not item.get("publish_time"):
+            item["publish_time"] = self._parse_jsonld_date(response)
 
         publish_time = item.get("publish_time")
         if not self.should_process(response.url, publish_time):
@@ -79,3 +84,18 @@ class ArgentinaAmbitoSpider(SmartSpider):
         if len(item.get("content_plain", "")) > 100:
             yield item
 
+    def _parse_jsonld_date(self, response):
+        for raw_script in response.css('script[type="application/ld+json"]::text').getall():
+            try:
+                payload = json.loads(raw_script)
+            except json.JSONDecodeError:
+                continue
+
+            nodes = payload if isinstance(payload, list) else [payload]
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                raw_date = node.get("datePublished") or node.get("dateCreated")
+                if raw_date:
+                    return self.parse_date(raw_date)
+        return None

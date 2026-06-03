@@ -1,6 +1,7 @@
 # 东帝汶tatoli爬虫，负责抓取对应站点、机构或栏目内容。
 
 import re
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 
@@ -32,9 +33,17 @@ class TimorLesteTatoliSpider(TimorLesteBaseSpider):
             full_url = full_url.rstrip("/")
             if not self.should_process(full_url):
                 continue
-            year_match = re.search(r"/(20\d{2})/", full_url)
-            if year_match and int(year_match.group(1)) < self.cutoff_date.year:
-                continue
+            url_date_match = re.search(r"/(20\d{2})/(\d{2})/(\d{2})/", full_url)
+            if url_date_match:
+                url_date = self.parse_to_utc(
+                    datetime(
+                        int(url_date_match.group(1)),
+                        int(url_date_match.group(2)),
+                        int(url_date_match.group(3)),
+                    )
+                )
+                if url_date < self.cutoff_date:
+                    continue
             try:
                 detail_html = self._fetch_html(full_url)
             except Exception:
@@ -60,6 +69,8 @@ class TimorLesteTatoliSpider(TimorLesteBaseSpider):
             or " ".join(response.css("body ::text").getall()[:100]),
             languages=["en"],
         )
+        if not publish_time:
+            return
         if not self.should_process(response.url, publish_time):
             self._stop_pagination = True
             return
@@ -80,7 +91,12 @@ class TimorLesteTatoliSpider(TimorLesteBaseSpider):
 
     def _extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
-        root = soup.select_one("article") or soup.select_one(".single-content") or soup.select_one("main")
+        root = (
+            soup.select_one(".post-content")
+            or soup.select_one("article")
+            or soup.select_one(".single-content")
+            or soup.select_one("main")
+        )
         if not root:
             return ""
         for unwanted in root.select("script, style, nav, footer, header, aside, form, .sharedaddy, .jp-relatedposts"):

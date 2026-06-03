@@ -15,10 +15,21 @@ class EsElconfidencialSpider(SmartSpider):
     allowed_domains = ['elconfidencial.com']
 
     strict_date_required = True
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = ".newsType__content, .innerArticle__body, article"
 
     custom_settings = {
+        'DOWNLOADER_MIDDLEWARES': {
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
+        },
+        'DEFAULT_REQUEST_HEADERS': {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.elconfidencial.com/',
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'CONCURRENT_REQUESTS': 16,
         'DOWNLOAD_DELAY': 0.5,
         'ROBOTSTXT_OBEY': False,

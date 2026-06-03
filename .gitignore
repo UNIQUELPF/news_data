@@ -46,3 +46,8 @@ scratch/
 .gemini/
 .env*
 docker-compose.override.yml
+
+# Spider maintenance local artifacts
+*checklist*.md
+*report*.md
+skills/

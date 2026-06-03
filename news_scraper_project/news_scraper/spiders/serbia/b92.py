@@ -17,7 +17,11 @@ class B92Spider(SmartSpider):
     fallback_content_selector = '#article-content'
 
     custom_settings = {
-        'ROBOTSTXT_OBEY': False
+        'ROBOTSTXT_OBEY': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
     }
 
     def parse(self, response):
@@ -65,6 +69,9 @@ class B92Spider(SmartSpider):
             response,
             title_xpath="//meta[@property='og:title']/@content",
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
         item['author'] = response.css('.article-author::text').get() or "B92"
         item['section'] = 'Vesti'
         if item.get('content_plain') and len(item['content_plain']) > 50:

@@ -19,28 +19,29 @@ class FranceInseeSpider(FranceBaseSpider):
     allowed_domains = ["insee.fr", "www.insee.fr"]
     start_urls = ["https://www.insee.fr/fr/accueil"]
 
+    # Listing page has no dates; check dates on detail pages
+    strict_date_required = False
+    use_curl_cffi = True
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        urls = sorted(set(re.findall(r'https://www\.insee\.fr/fr/statistiques/\d+|/fr/statistiques/\d+', html)))
+        seen = set()
+        urls = sorted(set(re.findall(r'https://www\.insee\.fr/fr/statistiques/\d+|/fr/statistiques/\d+', response.text)))
         for href in urls:
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
-                continue
             if not self.full_scan:
                 article_id = re.search(r"/(\d+)$", full_url)
                 if article_id and int(article_id.group(1)) < 8000000:
                     continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            if full_url in seen:
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                yield item
+            seen.add(full_url)
+            if not self.should_process(full_url, None):
+                continue
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -56,10 +57,10 @@ class FranceInseeSpider(FranceBaseSpider):
             or self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["fr", "en"],
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response, title)
+        content = self._do_extract_content(response, title)
         if not content:
             content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
         if not content:
@@ -75,7 +76,7 @@ class FranceInseeSpider(FranceBaseSpider):
             section="statistics",
         )
 
-    def _extract_content(self, response, title):
+    def _do_extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one("article")
         if not root:

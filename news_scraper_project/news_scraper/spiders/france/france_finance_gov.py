@@ -20,6 +20,10 @@ class FranceFinanceGovSpider(FranceBaseSpider):
 
     fallback_content_selector = "article, main"
 
+    # Listing page has no dates; check dates on detail pages
+    strict_date_required = False
+    use_curl_cffi = True
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
@@ -27,11 +31,9 @@ class FranceFinanceGovSpider(FranceBaseSpider):
     def parse_listing(self, response):
         if self._stop_pagination:
             return
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
-        has_valid_item_in_window = False
-        for link in soup.select("a[href]"):
-            href = (link.get("href") or "").strip()
+        seen = set()
+        for link in response.css("a[href]"):
+            href = (link.attrib.get("href") or "").strip()
             if not href.startswith("https://presse.economie.gouv.fr/") and not href.startswith("/"):
                 continue
             full_url = response.urljoin(href)
@@ -42,16 +44,12 @@ class FranceFinanceGovSpider(FranceBaseSpider):
                 continue
             if any(path.startswith(prefix) for prefix in ("/agendas", "/medias", "/selection", "/le-ministere")):
                 continue
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
+            seen.add(full_url)
+            if not self.should_process(full_url, None):
                 continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html)), None)
-            if item:
-                has_valid_item_in_window = True
-                yield item
+            yield scrapy.Request(full_url, callback=self.parse_detail)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -74,7 +72,7 @@ class FranceFinanceGovSpider(FranceBaseSpider):
             self._stop_pagination = True
             return
 
-        content = self._extract_content(response, title)
+        content = self._do_extract_content(response, title)
         if not content:
             content = self._clean_text(response.xpath("//meta[@name='description']/@content").get())
         if not content:
@@ -90,7 +88,7 @@ class FranceFinanceGovSpider(FranceBaseSpider):
             section="finance",
         )
 
-    def _extract_content(self, response, title):
+    def _do_extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one("article")
         if not root:

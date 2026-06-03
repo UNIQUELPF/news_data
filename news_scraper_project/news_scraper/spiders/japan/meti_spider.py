@@ -9,7 +9,7 @@ class MetiSpider(SmartSpider):
     country = '日本'
     language = 'ja'
     source_timezone = 'Asia/Tokyo'
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     fallback_content_selector = 'div.main.w1000, div#main'
 
@@ -30,6 +30,7 @@ class MetiSpider(SmartSpider):
             'https://www.meti.go.jp/press/index.html',
             callback=self.parse_list_ul,
             dont_filter=True,
+            meta={"playwright": True},
         )
 
         # 2. 抓取 2026 年各月存档 (回溯至 2026-01-01)
@@ -39,6 +40,7 @@ class MetiSpider(SmartSpider):
                 archive_url,
                 callback=self.parse_list_ul,
                 dont_filter=True,
+                meta={"playwright": True},
             )
 
     def parse_list_ul(self, response):
@@ -67,6 +69,7 @@ class MetiSpider(SmartSpider):
                 meta={
                     'title_hint': li.css('div.txt_box a.cut_txt::text').get(),
                     'publish_time_hint': publish_time,
+                    'playwright': True,
                 },
             )
 
@@ -95,6 +98,7 @@ class MetiSpider(SmartSpider):
                     meta={
                         'title_hint': dd.css('a::text').get(),
                         'publish_time_hint': publish_time,
+                        'playwright': True,
                     },
                 )
 

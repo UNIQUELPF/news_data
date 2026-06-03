@@ -9,6 +9,7 @@ class BahrainTraSpider(SmartSpider):
     """
     name = "bahrain_tra"
     source_timezone = 'Asia/Bahrain'
+    start_date = "2025-01-01"
     
     country_code = 'BHR'
     country = '巴林'
@@ -20,7 +21,7 @@ class BahrainTraSpider(SmartSpider):
     ]
     
     # Precise selector for the main content
-    fallback_content_selector = "main"
+    fallback_content_selector = ".subpage-content-topsection"
 
     # Listing page has no dates; allow processing without dates
     strict_date_required = False
@@ -59,9 +60,9 @@ class BahrainTraSpider(SmartSpider):
         date_text = response.css(".date-time::text").get()
         if date_text:
             date_text = date_text.strip()
-            parsed = dateparser.parse(date_text, languages=["ar"], settings={"TIMEZONE": "UTC"})
+            parsed = dateparser.parse(date_text, languages=["ar"])
             if parsed:
-                publish_time = parsed.replace(tzinfo=None)
+                publish_time = self.parse_to_utc(parsed)
 
         # 3. Content Extraction (Rich Content Mode)
         content_data = self.extract_content(response)

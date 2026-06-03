@@ -25,7 +25,7 @@ class ArgentinaCnvSpider(SmartSpider):
 
 
     country = "阿根廷"
-    language = "en"
+    language = "es"
     source_timezone = "America/Argentina/Buenos_Aires"
     allowed_domains = ["argentina.gob.ar"]
 
@@ -45,15 +45,22 @@ class ArgentinaCnvSpider(SmartSpider):
 
     def parse_listing(self, response):
         article_links = response.css('a[href*="/noticias/"]::attr(href)').getall()
+        publish_times = response.css("time::attr(datetime)").getall()
 
         has_valid_item_in_window = False
 
-        for href in article_links:
+        for index, href in enumerate(article_links):
             full_url = response.urljoin(href)
-            if "/noticias/" not in full_url or not self.should_process(full_url):
+            publish_time = self.parse_date(publish_times[index]) if index < len(publish_times) else None
+            if "/noticias/" not in full_url or not self.should_process(full_url, publish_time):
                 continue
             has_valid_item_in_window = True
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_detail,
+                meta={"publish_time_hint": publish_time},
+                dont_filter=self.full_scan,
+            )
 
         if self._stop_pagination:
             return
@@ -80,4 +87,3 @@ class ArgentinaCnvSpider(SmartSpider):
 
         if len(item.get("content_plain", "")) > 100:
             yield item
-

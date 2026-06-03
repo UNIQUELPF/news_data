@@ -42,7 +42,7 @@ class AustriaOenbSpider(AustriaBaseSpider):
             full_url = response.urljoin(href)
             if not full_url.endswith(".html"):
                 continue
-            date_match = re.search(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html", full_url)
+            date_match = re.search(r"/Pressearchiv/(?:\d{4}/)?(\d{4})(\d{2})(\d{2})(?:_\d+)?\.html", full_url)
             publish_time = None
             if date_match:
                 publish_time = self._parse_datetime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", languages=["de", "en"])
@@ -56,7 +56,7 @@ class AustriaOenbSpider(AustriaBaseSpider):
         archive_page = response.css('a[href*="/Presse/Pressearchiv.html"]::attr(href)').get()
         if archive_page:
             full_archive = response.urljoin(archive_page)
-            if self.should_process(full_archive):
+            if self.full_scan or not self.is_already_scraped(full_archive):
                 yield scrapy.Request(full_archive, callback=self.parse_archive)
 
     def parse_archive(self, response):
@@ -67,7 +67,7 @@ class AustriaOenbSpider(AustriaBaseSpider):
             full_url = response.urljoin(href)
             if not full_url.endswith(".html"):
                 continue
-            date_match = re.search(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html", full_url)
+            date_match = re.search(r"/Pressearchiv/(?:\d{4}/)?(\d{4})(\d{2})(\d{2})(?:_\d+)?\.html", full_url)
             publish_time = None
             if date_match:
                 publish_time = self._parse_datetime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", languages=["de", "en"])
@@ -87,7 +87,7 @@ class AustriaOenbSpider(AustriaBaseSpider):
             response.xpath("//meta[@property='article:published_time']/@content").get()
             or response.xpath("//time/@datetime").get()
             or response.xpath("//time/text()").get()
-            or response.re_first(r"/Pressearchiv/(\d{4})(\d{2})(\d{2})\.html"),
+            or self._date_from_url(response.url),
             languages=["de", "en"],
         )
         if not self.should_process(response.url, publish_time):
@@ -128,3 +128,8 @@ class AustriaOenbSpider(AustriaBaseSpider):
                 parts.append(text)
         return "\n\n".join(parts)
 
+    def _date_from_url(self, url):
+        match = re.search(r"/Pressearchiv/(?:\d{4}/)?(\d{4})(\d{2})(\d{2})(?:_\d+)?\.html", url)
+        if not match:
+            return None
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"

@@ -11,6 +11,7 @@ class MyanmarIrrawaddySpider(SmartSpider):
     allowed_domains = ['irrawaddy.com']
     start_urls = ['https://www.irrawaddy.com/category/news']
     fallback_content_selector = '.entry-content'
+    use_curl_cffi = True
     strict_date_required = False
     MAX_PAGES = 60
     dateparser_settings = {"DATE_ORDER": "DMY"}
@@ -60,7 +61,7 @@ class MyanmarIrrawaddySpider(SmartSpider):
     def parse_article(self, response):
         item = self.auto_parse_item(
             response,
-            title_xpath="//h1[@class='entry-title']/text()",
+            title_xpath="//header//h1/text() | //h1/text() | //meta[@property='og:title']/@content",
             publish_time_xpath="//meta[@property='article:published_time']/@content",
         )
         item['author'] = response.css('.entry-author a::text').get() or 'The Irrawaddy'

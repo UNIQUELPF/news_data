@@ -32,10 +32,16 @@ class USAArsTechnicaSpider(SmartSpider):
     def parse(self, response):
         # Site redesigned - articles are now card-grid elements
         articles = response.css('article[id^="card-"] > a[href*="/20"]::attr(href)').getall()
+        if not articles:
+            articles = response.css('a[href*="/20"]::attr(href)').getall()
 
         has_valid_item_in_window = False
         for link in set(articles):
-            if not link or not link.startswith('https'):
+            if not link or '#comments' in link:
+                continue
+
+            link = response.urljoin(link).split('#')[0]
+            if not link.startswith('https://arstechnica.com/'):
                 continue
 
             # Extract date from URL pattern: /2026/03/15/title/

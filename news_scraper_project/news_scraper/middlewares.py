@@ -24,7 +24,7 @@ class BatchDelayMiddleware:
             time.sleep(self.delay)
             spider.logger.info("*** Resuming crawl... ***")
 
-    def process_request(self, request):
+    def process_request(self, request, spider):
         return None
 
 
@@ -36,7 +36,7 @@ class CurlCffiMiddleware:
     def from_crawler(cls, crawler):
         return cls(crawler)
 
-    def process_request(self, request):
+    def process_request(self, request, spider):
         spider = getattr(self.crawler, "spider", None)
 
         # Skip requests marked for Playwright
@@ -56,7 +56,14 @@ class CurlCffiMiddleware:
                     if k_str not in ignore_headers:
                         headers[k.decode('utf-8')] = v[0].decode('utf-8')
                         
-                response = curl_requests.get(request.url, impersonate='chrome120', timeout=30, headers=headers)
+                verify = getattr(spider, "curl_cffi_verify", False)
+                response = curl_requests.get(
+                    request.url,
+                    impersonate='chrome120',
+                    timeout=30,
+                    headers=headers,
+                    verify=verify,
+                )
                 spider.logger.debug(f"CurlCffi: Successfully fetched {request.url} (Status: {response.status_code})")
                 return HtmlResponse(
                     url=request.url,

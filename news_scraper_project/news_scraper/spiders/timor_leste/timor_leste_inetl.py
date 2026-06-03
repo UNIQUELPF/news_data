@@ -54,6 +54,8 @@ class TimorLesteInetlSpider(TimorLesteBaseSpider):
             or " ".join(response.css("body ::text").getall()[:100]),
             languages=["en", "pt"],
         )
+        if not publish_time:
+            return
         if publish_time and publish_time < self.cutoff_date:
             return
         content = self._extract_content(response, title)

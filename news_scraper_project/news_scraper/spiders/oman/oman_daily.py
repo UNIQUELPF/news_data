@@ -92,7 +92,8 @@ class OmanDailySpider(OmanBaseSpider):
 
         next_page = state.get('next_page_url')
         if next_page and page < self.MAX_PAGES:
-            next_page_full = response_urljoin_helper(response_url, next_page)
+            from urllib.parse import urljoin
+            next_page_full = urljoin(response_url, next_page)
             self.logger.info(f"[{self.name}] Proceeding to page {page + 1}: {next_page_full}")
             yield scrapy.Request(
                 next_page_full,
@@ -142,10 +143,6 @@ class OmanDailySpider(OmanBaseSpider):
             if state['pending_count'] == 0:
                 for req in self._check_next_page(state, response.url):
                     yield req
-
-def response_urljoin_helper(base_url, relative_url):
-    from urllib.parse import urljoin
-    return urljoin(base_url, relative_url)
 
     def _extract_content(self, response, title):
         soup = BeautifulSoup(response.text, "html.parser")

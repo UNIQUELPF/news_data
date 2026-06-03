@@ -24,31 +24,27 @@ class IndiaGadgets360Spider(SmartSpider):
     }
 
     async def start(self):
-        # Using the AJAX endpoint for cleaner data and more reliable pagination
         base_urls = [
             "https://www.gadgets360.com/news",
         ]
         for base_url in base_urls:
-            ajax_url = f"{base_url}?pagesize=20&page=1&content_type=news&isAjax=1"
+            next_url = f"{base_url}?page=1"
             yield scrapy.Request(
-                ajax_url, 
+                next_url, 
                 callback=self.parse_list, 
                 dont_filter=True, 
-                meta={'page': 1, 'base_url': base_url},
-                headers={'X-Requested-With': 'XMLHttpRequest'}
+                meta={'page': 1, 'base_url': base_url}
             )
 
     def parse_list(self, response):
-        # The AJAX endpoint returns HTML fragments (wrapped in <ul><li>)
-        items = response.css('li')
+        items = response.css('div.caption_box')
         if not items:
-            self.logger.warning(f"No AJAX items found on {response.url}.")
+            self.logger.warning(f"No items found on {response.url}.")
             return
 
         has_valid_item_in_window = False
         for item in items:
-            # Link and date extraction remains the same as they are part of the fragment
-            url_node = item.css('.caption_box a::attr(href)').get()
+            url_node = item.css('a::attr(href)').get()
             date_text = item.css('.dateline::text').get()
             
             if not url_node:
@@ -72,13 +68,12 @@ class IndiaGadgets360Spider(SmartSpider):
             page = response.meta.get('page', 1)
             next_page = page + 1
             base_url = response.meta.get('base_url')
-            next_url = f"{base_url}?pagesize=20&page={next_page}&content_type=news&isAjax=1"
+            next_url = f"{base_url}?page={next_page}"
             yield scrapy.Request(
                 next_url,
                 callback=self.parse_list,
                 dont_filter=True,
-                meta={'page': next_page, 'base_url': base_url},
-                headers={'X-Requested-With': 'XMLHttpRequest'}
+                meta={'page': next_page, 'base_url': base_url}
             )
 
     def parse_detail(self, response):

@@ -12,7 +12,7 @@ class IndiaEconomicTimesSpider(SmartSpider):
     target_table = "ind_economic_times"
     
     source_timezone = 'Asia/Kolkata'
-    use_curl_cffi = True
+    use_curl_cffi = False
     dateparser_settings = {"DATE_ORDER": "DMY"}
     
     fallback_content_selector = ".artText, .article_content, .Normal, .artText-fixed"
@@ -79,7 +79,8 @@ class IndiaEconomicTimesSpider(SmartSpider):
                 yield scrapy.Request(
                     url,
                     callback=self.parse_detail,
-                    meta={'section_hint': section, 'publish_time_hint': publish_time}
+                    meta={'section_hint': section, 'publish_time_hint': publish_time},
+                    dont_filter=True
                 )
 
         # Pagination logic

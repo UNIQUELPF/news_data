@@ -90,7 +90,9 @@ class TrSabahSpider(SmartSpider):
                 except Exception:
                     pass
 
-        pub_time_utc = self.parse_to_utc(pub_time) if pub_time else self.parse_to_utc(datetime.now())
+        if not pub_time:
+            return
+        pub_time_utc = self.parse_to_utc(pub_time)
 
         # 3. SmartSpider 日期窗口 + 去重过滤
         if not self.should_process(response.url, pub_time_utc):

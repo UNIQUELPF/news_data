@@ -12,21 +12,28 @@ class SgChannelNewsAsiaSpider(SmartSpider):
     language = 'en'
     source_timezone = 'Asia/Singapore'
     allowed_domains = ['channelnewsasia.com', 'algolianet.com', 'algolia.net']
-    fallback_content_selector = '.text-long'
+    fallback_content_selector = '.content-wrapper'
 
     algolia_app_id = 'KKWFBQ38XF'
     algolia_api_key = 'e4b61225b5a00162761c501328a58ac7'
     algolia_index = 'cnarevamp-ezrqv5hx'
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     _next_page_yielded = False
 
     custom_settings = {
         'DOWNLOADER_MIDDLEWARES': {
-            'news_scraper.middlewares.CurlCffiMiddleware': 543,
-            'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
         },
-        'CURLL_CFFI_IMPERSONATE': 'chrome120',
+        'DEFAULT_REQUEST_HEADERS': {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
+            'Referer': 'https://www.channelnewsasia.com/singapore',
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'CONCURRENT_REQUESTS': 1,
         'DOWNLOAD_DELAY': 2
     }
@@ -36,7 +43,8 @@ class SgChannelNewsAsiaSpider(SmartSpider):
 
     def get_algolia_request(self, page_num):
         # 使用更为稳健的 URL 参数编码方式，规避 POST 中的 400 冲突
-        params = f'facetFilters=[["type:article"]]&hitsPerPage=30&page={page_num}'
+        facet_filters = quote('[["type:article"],["categories:Singapore"]]')
+        params = f'facetFilters={facet_filters}&hitsPerPage=30&page={page_num}'
         # 完整的 Algolia REST GET 端点 (Search Only)
         url = f'https://{self.algolia_app_id}-dsn.algolia.net/1/indexes/{self.algolia_index}?x-algolia-application-id={self.algolia_app_id}&x-algolia-api-key={self.algolia_api_key}&{params}'
 
@@ -65,7 +73,7 @@ class SgChannelNewsAsiaSpider(SmartSpider):
             href = hit.get('link_absolute')
             ts = hit.get('field_release_date')
 
-            if href and ts:
+            if href and ts and '/singapore/' in href:
                 pub_date = datetime.fromtimestamp(int(ts))
                 if self.should_process(href, pub_date):
                     yield scrapy.Request(href, self.parse_article, meta={'publish_time_hint': pub_date, 'from_page': current_page})
@@ -75,6 +83,9 @@ class SgChannelNewsAsiaSpider(SmartSpider):
             response,
             title_xpath="//h1/text()",
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
         if not self.should_process(response.url, item.get('publish_time')):
             self._stop_pagination = True
             return

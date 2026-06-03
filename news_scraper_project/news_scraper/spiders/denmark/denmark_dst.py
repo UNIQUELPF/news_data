@@ -1,8 +1,5 @@
 # 丹麦dst爬虫，负责抓取对应站点、机构或栏目内容。
-
 import re
-
-from bs4 import BeautifulSoup
 
 import scrapy
 
@@ -23,8 +20,13 @@ class DenmarkDstSpider(DenmarkBaseSpider):
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
+        """
+        Parse listing page: https://www.dst.dk/en/Statistik/udgivelser
+        Each item has a .release-row div with .rel-type-date and .flash-link a[href]
+        Example date text: "Publication / 28.4.2026"
+        """
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, "html.parser")
         for row in soup.select(".release-row"):
             link = row.select_one(".flash-link a[href]")
             if not link:
@@ -33,22 +35,26 @@ class DenmarkDstSpider(DenmarkBaseSpider):
             if not href:
                 continue
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
-                continue
-            rel_text = self._clean_text(" ".join(row.select_one(".rel-type-date").stripped_strings)) if row.select_one(".rel-type-date") else ""
-            publish_time = self._extract_publish_time(rel_text)
-            if publish_time and publish_time < self.cutoff_date:
-                continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
-                continue
-            detail_response = self._make_response(full_url, detail_html)
-            item = next(self.parse_detail(detail_response, publish_time=publish_time), None)
-            if item:
-                yield item
 
-    def parse_detail(self, response, publish_time=None):
+            rel_text = ""
+            rel_node = row.select_one(".rel-type-date")
+            if rel_node:
+                rel_text = self._clean_text(rel_node.get_text(" ", strip=True))
+
+            publish_time = self._extract_publish_time(rel_text)
+
+            if not self.should_process(full_url, publish_time):
+                continue
+
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_detail,
+                meta={"publish_time": publish_time},
+            )
+
+    def parse_detail(self, response):
+        publish_time = response.meta.get("publish_time")
+
         title = self._clean_text(
             response.xpath("//meta[@property='og:title']/@content").get()
             or response.css("h1::text").get()
@@ -57,13 +63,15 @@ class DenmarkDstSpider(DenmarkBaseSpider):
         if not title or title == "Vi kan ikke finde siden, du leder efter":
             return
 
-        final_publish_time = publish_time or self._extract_publish_time(
-            self._clean_text(" ".join(response.css("main ::text").getall()[:120]))
-        )
-        if final_publish_time and final_publish_time < self.cutoff_date:
+        if not publish_time:
+            publish_time = self._extract_publish_time(
+                self._clean_text(" ".join(response.css("main ::text").getall()[:120]))
+            )
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response)
+        from bs4 import BeautifulSoup
+        content = self._do_extract_content(response)
         if not content:
             return
 
@@ -72,7 +80,7 @@ class DenmarkDstSpider(DenmarkBaseSpider):
             response=response,
             title=title,
             content=content,
-            publish_time=final_publish_time,
+            publish_time=publish_time,
             author="Statistics Denmark",
             language="en",
             section=section,
@@ -81,12 +89,14 @@ class DenmarkDstSpider(DenmarkBaseSpider):
     def _extract_publish_time(self, text):
         if not text:
             return None
+        # Matches "28.4.2026" or "28.04.2026"
         match = re.search(r"\b(\d{1,2}\.\d{1,2}\.\d{4})\b", text)
         if match:
             return self._parse_datetime(match.group(1), languages=["en"])
         return self._parse_datetime(text, languages=["en"])
 
-    def _extract_content(self, response):
+    def _do_extract_content(self, response):
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one(".alymainarea") or soup.select_one("main")
         if not root:

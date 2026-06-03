@@ -2,7 +2,6 @@ import scrapy
 import re
 import json
 from datetime import datetime
-from scrapy.selector import Selector
 from news_scraper.spiders.smart_spider import SmartSpider
 
 
@@ -16,78 +15,38 @@ class ThBangkokpostSpider(SmartSpider):
     allowed_domains = ['bangkokpost.com']
     start_url = 'https://www.bangkokpost.com/business/general'
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     fallback_content_selector = "article"
     strict_date_required = True
 
     custom_settings = {
+        'DOWNLOADER_MIDDLEWARES': {
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'DEFAULT_REQUEST_HEADERS': {
+            'Referer': 'https://www.bangkokpost.com/business',
+        },
         'CONCURRENT_REQUESTS': 8,
         'DOWNLOAD_DELAY': 1,
-        'PLAYWRIGHT_LAUNCH_OPTIONS': {'headless': True},
     }
 
     async def start(self):
         yield scrapy.Request(
             self.start_url,
-            meta={
-                "playwright": True,
-                "playwright_include_page": True,
-                "playwright_page_init_callback": self.block_resources,
-            },
             callback=self.parse,
-        dont_filter=True,
+            dont_filter=True,
         )
 
-    async def block_resources(self, page, request):
-        """Block unnecessary resources to speed up Playwright rendering."""
-        if request.resource_type in ["image", "media", "font", "stylesheet"]:
-            await request.abort()
-            return
-        if "googletagservices" in request.url or "google-analytics" in request.url:
-            await request.abort()
-            return
-
-    async def parse(self, response):
-        page = response.meta["playwright_page"]
-
-        has_valid_item_in_window = False
-
-        # Initial batch of articles
-        links = response.css('h3 a::attr(href)').getall()
-        for link in links:
+    def parse(self, response):
+        links = response.css('a::attr(href)').getall()
+        for link in set(links):
             if '/business/general/' in link:
                 yield response.follow(link, self.parse_article)
-                has_valid_item_in_window = True
-
-        # Click MORE while we still found articles in the previous batch
-        for _ in range(30):
-            if not has_valid_item_in_window:
-                break
-            try:
-                more_button = await page.wait_for_selector('#page--link a', timeout=5000)
-                if not more_button:
-                    break
-
-                await more_button.click()
-                await page.wait_for_timeout(2000)
-
-                content = await page.content()
-                new_selector = Selector(text=content)
-                new_links = new_selector.css('h3 a::attr(href)').getall()
-
-                batch_has_items = False
-                for link in new_links:
-                    if '/business/general/' in link:
-                        yield response.follow(link, self.parse_article)
-                        batch_has_items = True
-
-                has_valid_item_in_window = batch_has_items
-            except Exception as e:
-                self.logger.info(f"Stop clicking MORE: {e}")
-                break
-
-        await page.close()
 
     def parse_article(self, response):
         # ---- Date extraction with extensive fallbacks ----
@@ -169,5 +128,8 @@ class ThBangkokpostSpider(SmartSpider):
 
         item['author'] = response.css('meta[name="author"]::attr(content)').get() or 'Bangkok Post'
         item['section'] = 'Business/General'
+
+        if not item.get('publish_time') or not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+            return
 
         yield item

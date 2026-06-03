@@ -30,6 +30,10 @@ class SgZaobaoSpider(SmartSpider):
             'referer': 'https://www.zaobao.com.sg/finance/singapore',
             'x-requested-with': 'XMLHttpRequest'
         },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
         'CONCURRENT_REQUESTS': 1,
         'DOWNLOAD_DELAY': 2
     }
@@ -66,7 +70,7 @@ class SgZaobaoSpider(SmartSpider):
 
             has_valid_item_in_window = True
             full_url = response.urljoin(href)
-            yield response.follow(full_url, self.parse_article)
+            yield response.follow(full_url, self.parse_article, meta={'publish_time_hint': pub_date})
 
         # 继续翻页 API (circuit breaker: 仅在当前页有有效文章时翻页)
         if has_valid_item_in_window:
@@ -85,6 +89,8 @@ class SgZaobaoSpider(SmartSpider):
         )
         # 保留原有 LD+JSON 日期解析作为补充
         pub_time = item.get('publish_time')
+        if not pub_time:
+            pub_time = response.meta.get('publish_time_hint')
         if not pub_time:
             ld_json_scripts = response.css('script[type="application/ld+json"]::text').getall()
             for raw in ld_json_scripts:

@@ -21,7 +21,7 @@ class Bg24chasaSpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
     
     # Precise selector: strictly locked to the article container including featured images
     fallback_content_selector = "article.entry-content, div.entry-content, .single-post-content"

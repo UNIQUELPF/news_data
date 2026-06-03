@@ -1,5 +1,5 @@
 import scrapy
-import json
+from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -15,7 +15,7 @@ class IqElaphSpider(SmartSpider):
 
     api_url_tmpl = "https://api.elaph.com/v2/web/com/marticles/index/economics/{}"
 
-    use_curl_cffi = False
+    use_curl_cffi = True
 
     fallback_content_selector = '.content-body'
 
@@ -45,12 +45,13 @@ class IqElaphSpider(SmartSpider):
             self.logger.error(f"Elaph API returned {response.status}. Body preview: {response.text[:500]}")
             return
         try:
-            res_data = json.loads(response.text)
-            articles = res_data.get('data', [])
+            self.logger.info(f"Elaph API body preview: {response.text[:200]}")
+            soup = BeautifulSoup(response.text, "xml")
+            articles = soup.find_all("item")
             page = response.meta.get('page', 1)
             self.logger.info(f"Elaph API: Page {page} fetched {len(articles)} items with status {response.status}")
         except Exception as e:
-            self.logger.error(f"JSON Parse Error: {e} at {response.url}")
+            self.logger.error(f"XML Parse Error: {e} at {response.url}")
             return
 
         if not articles:
@@ -58,15 +59,17 @@ class IqElaphSpider(SmartSpider):
 
         has_valid_item_in_window = False
         for art in articles:
-            ts = art.get('RelativeTime', 0)
-            if not ts:
+            ts = art.find("RelativeTime")
+            ts_text = ts.text.strip() if ts else None
+            if not ts_text:
                 continue
 
             # API returns Unix timestamps (UTC seconds since epoch)
-            pub_date = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+            pub_date = datetime.fromtimestamp(int(ts_text), tz=timezone.utc)
             pub_date_utc = self.parse_to_utc(pub_date)
 
-            rel_url = art.get('PostingURL')
+            rel_url_el = art.find("PostingURL")
+            rel_url = rel_url_el.text.strip() if rel_url_el else None
             if not rel_url:
                 continue
 

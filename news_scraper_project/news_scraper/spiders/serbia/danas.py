@@ -22,6 +22,13 @@ class DanasSpider(SmartSpider):
         'https://www.danas.rs/rubrika/svet/'
     ]
 
+    custom_settings = {
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
+    }
+
     # Serbian month mapping (genitive case)
     SR_MONTHS = {
         'januara': 1, 'februara': 2, 'marta': 3, 'aprila': 4,
@@ -149,4 +156,7 @@ class DanasSpider(SmartSpider):
             item['author'] = 'Danas.rs'
             item['section'] = 'Vesti/Ekonomija'
 
-        yield item
+        if not item.get('publish_time'):
+            return
+        if self.should_process(response.url, item.get('publish_time')):
+            yield item

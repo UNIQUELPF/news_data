@@ -64,7 +64,9 @@ class NetherlandsRvoSpider(NetherlandsBaseSpider):
                 continue
             full_url = response.urljoin(url_path)
 
-            if not self.should_process(full_url):
+            created = entry.get("created")
+            publish_time = self._parse_datetime(created, languages=["en"]) if created else None
+            if not self.should_process(full_url, publish_time):
                 continue
 
             has_valid_item_in_window = True
@@ -76,6 +78,7 @@ class NetherlandsRvoSpider(NetherlandsBaseSpider):
                 continue
 
             fake_resp = self._make_response(full_url, detail_html)
+            fake_resp.meta["api_publish_time"] = publish_time
             try:
                 item = next(self.parse_detail(fake_resp))
                 if item:
@@ -112,7 +115,7 @@ class NetherlandsRvoSpider(NetherlandsBaseSpider):
                 response.xpath("//meta[@property='article:published_time']/@content").get()
                 or self._clean_text(" ".join(response.css("body ::text").getall()[:100])),
                 languages=["en"],
-            )
+            ) or response.meta.get("api_publish_time")
         if not content:
             content = self._extract_content(response, ["article", "main", ".page-content", ".content"])
 

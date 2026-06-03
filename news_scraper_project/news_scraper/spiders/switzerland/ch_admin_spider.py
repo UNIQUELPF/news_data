@@ -1,5 +1,6 @@
-import scrapy
 import json
+import scrapy
+from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
 
 class ChAdminSpider(SmartSpider):
@@ -95,16 +96,32 @@ class ChAdminSpider(SmartSpider):
         )
 
         # Override/Set specific fields
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
         item['author'] = 'Swiss Federal News Service'
         item['section'] = 'Federal Government'
 
-        # Content fallback: if ContentEngine didn't capture enough, use API description
-        if not item.get('content_plain') or len(item['content_plain']) < 5:
-            desc = entry.get('content', {}).get('metadata', {}).get('description')
+        # The detail page is a thin shell; the API response carries the article body.
+        api_parts = entry.get('text') or []
+        if api_parts:
+            html = "\n".join(api_parts)
+            soup = BeautifulSoup(html, 'lxml')
+            plain = "\n\n".join(
+                text.strip() for text in soup.stripped_strings if len(text.strip()) > 1
+            )
+            item['content_cleaned'] = html
+            item['content_markdown'] = plain
+            item['content_plain'] = plain
+        elif not item.get('content_plain') or len(item['content_plain']) < 200:
+            desc = entry.get('description') or entry.get('content', {}).get('metadata', {}).get('description')
             if desc:
+                item['content_cleaned'] = f"<p>{desc}</p>"
+                item['content_markdown'] = desc
                 item['content_plain'] = desc
-                if not item.get('content_html'):
-                    item['content_html'] = f"<p>{desc}</p>"
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         if item.get('title') or (item.get('content_plain') and len(item['content_plain']) > 5):
             yield item

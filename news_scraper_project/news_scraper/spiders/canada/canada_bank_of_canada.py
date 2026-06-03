@@ -32,7 +32,7 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
                 continue
             if not url.startswith("https://www.bankofcanada.ca/20"):
                 continue
-            if not self.should_process(url):
+            if self.is_already_scraped(url):
                 continue
             detail_html = self._fetch_html(url)
             item_obj = next(
@@ -62,7 +62,7 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
             or response.xpath("//meta[@property='article:published_time']/@content").get()
             or response.xpath("//meta[@name='publication_date']/@content").get()
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
         content = self._extract_content(response, ["main", "article"])
         if not content:
@@ -70,3 +70,4 @@ class CanadaBankOfCanadaSpider(CanadaBaseSpider):
         if not content:
             return
         yield self._build_item(response, title, content, publish_time, "Bank of Canada", "en", "central-bank")
+

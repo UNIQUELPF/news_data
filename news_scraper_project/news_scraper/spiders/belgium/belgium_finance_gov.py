@@ -9,6 +9,8 @@ from news_scraper.spiders.belgium.base import BelgiumBaseSpider
 
 class BelgiumFinanceGovSpider(BelgiumBaseSpider):
     name = "belgium_finance_gov"
+    start_date = "2025-01-01"
+    strict_date_required = False
 
     country_code = 'BEL'
 
@@ -23,11 +25,15 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
     def parse_listing(self, response):
         html = self._fetch_html(self.start_urls[0])
         soup = BeautifulSoup(html, "html.parser")
+        processed_urls = set()
         for link in soup.select("a[href]"):
             href = link.get("href")
             if not href or "/en/news/" not in href:
                 continue
             full_url = response.urljoin(href)
+            if full_url in processed_urls:
+                continue
+            processed_urls.add(full_url)
             if full_url.rstrip("/") == self.start_urls[0].rstrip("/") or not self.should_process(full_url):
                 continue
             try:
@@ -48,8 +54,12 @@ class BelgiumFinanceGovSpider(BelgiumBaseSpider):
         if not title or title == "FPS Finance":
             return
 
-        article_text = self._clean_text(" ".join(response.css("article ::text, main ::text").getall()[:160]))
-        publish_time = self._parse_datetime(article_text, languages=["en"])
+        date_text = (
+            response.xpath("//meta[@property='article:published_time']/@content").get()
+            or response.css("time[datetime]::attr(datetime)").get()
+            or self._clean_text(response.css("time::text").get())
+        )
+        publish_time = self._parse_datetime(date_text, languages=["en"])
         if publish_time and publish_time < self.cutoff_date:
             return
 

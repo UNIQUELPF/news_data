@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
 
+import scrapy
 from news_scraper.spiders.france.base import FranceBaseSpider
 
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
@@ -52,15 +53,8 @@ class FranceAmfSpider(FranceBaseSpider):
                     break
                 continue
 
-            try:
-                detail_html = self._fetch_html(url)
-            except Exception as e:
-                self.logger.warning(f"Failed to fetch {url}: {e}")
-                continue
+            yield scrapy.Request(url, callback=self.parse_detail)
 
-            item = next(self.parse_detail(self._make_response(url, detail_html)), None)
-            if item:
-                yield item
 
     def parse_detail(self, response):
         title = self._clean_text(

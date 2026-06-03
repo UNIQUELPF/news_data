@@ -137,25 +137,28 @@ def response_urljoin_helper(base_url, relative_url):
     from urllib.parse import urljoin
     return urljoin(base_url, relative_url)
 
-    def _extract_content(self, response):
-        soup = BeautifulSoup(response.text, "html.parser")
-        root = (
-            soup.select_one("article")
-            or soup.select_one("[itemprop='articleBody']")
-            or soup.select_one("main")
-        )
-        if not root:
-            return ""
 
-        for unwanted in root.select("script, style, nav, footer, header, aside, form, .share, .related, .paywall"):
-            unwanted.decompose()
+def _extract_trend_content(spider, response):
+    soup = BeautifulSoup(response.text, "html.parser")
+    root = (
+        soup.select_one("article")
+        or soup.select_one("[itemprop='articleBody']")
+        or soup.select_one("main")
+    )
+    if not root:
+        return ""
 
-        parts = []
-        for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
-            text = self._clean_text(node.get_text(" ", strip=True))
-            if not text or len(text) < 30:
-                continue
-            if text not in parts:
-                parts.append(text)
-        return "\n\n".join(parts)
+    for unwanted in root.select("script, style, nav, footer, header, aside, form, .share, .related, .paywall"):
+        unwanted.decompose()
 
+    parts = []
+    for node in root.find_all(["p", "h2", "h3", "li"], recursive=True):
+        text = spider._clean_text(node.get_text(" ", strip=True))
+        if not text or len(text) < 30:
+            continue
+        if text not in parts:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+AustriaTrendSpider._extract_content = _extract_trend_content

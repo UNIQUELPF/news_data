@@ -1,5 +1,6 @@
 import scrapy
 import re
+import dateparser
 from datetime import datetime
 from news_scraper.spiders.smart_spider import SmartSpider
 
@@ -51,8 +52,10 @@ class IndiaEntrackrSpider(SmartSpider):
             publish_time = None
             if date_str:
                 try:
+                    match = re.search(r'[A-Za-z]{3,9}\s+\d{1,2},\s+20\d{2}\s+\d{1,2}:\d{2}\s+IST', date_str)
+                    date_str = match.group(0) if match else date_str
                     # Clean whitespace and parse
-                    parsed = dateparser.parse(date_str)
+                    parsed = dateparser.parse(date_str, settings={'TIMEZONE': self.source_timezone})
                     if parsed:
                         publish_time = self.parse_to_utc(parsed)
                         self.logger.debug(f"Parsed list date for {url}: {publish_time}")
@@ -67,7 +70,8 @@ class IndiaEntrackrSpider(SmartSpider):
                 yield scrapy.Request(
                     url, 
                     callback=self.parse_detail,
-                    meta={'publish_time_hint': publish_time}
+                    meta={'publish_time_hint': publish_time},
+                    dont_filter=True
                 )
 
         # Pagination: follow the 'Next' link ONLY if we found valid items on this page

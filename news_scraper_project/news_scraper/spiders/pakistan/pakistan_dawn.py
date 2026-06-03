@@ -79,8 +79,10 @@ class PakistanDawnSpider(PakistanBaseSpider):
             or response.css("time::attr(datetime), time::text").get(),
             languages=["en"],
         )
-        if not self.should_process(response.url, publish_time):
+        if publish_time and publish_time < self.cutoff_date:
             self._stop_pagination = True
+            return
+        if not publish_time:
             return
 
         content = self._clean_text((data or {}).get("articleBody")) or self._extract_content(response, title)

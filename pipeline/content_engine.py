@@ -45,7 +45,7 @@ class ContentEngine:
                 include_formatting=True, # Keep bold, italics, etc.
                 include_comments=False,
                 favor_recall=True,       # Be more permissive
-                target_language='en'     # Help text density calculation
+                target_language=None     # Allow any language (including non-English)
             )
 
             # 2. Check if we need to switch to Fidelity Mode (BS4 Fallback)

@@ -1,5 +1,4 @@
 # 丹麦finanstilsynet爬虫，负责抓取对应站点、机构或栏目内容。
-
 import html
 import json
 import re
@@ -25,9 +24,13 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html_text = self._fetch_html(self.start_urls[0])
+        """
+        Parse listing page using the dynamic API endpoint.
+        """
+        html_text = response.text
         config = self._extract_dynamic_config(html_text)
         if not config:
+            self.logger.warning("Could not extract dynamic config from finanstilsynet listing page")
             return
 
         payload = {
@@ -52,7 +55,8 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
                     headers=headers,
                 )
             )
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch finanstilsynet API: {e}")
             return
 
         page_html = result.get("pageHtml", "")
@@ -62,23 +66,26 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             if not link:
                 continue
             full_url = link.get("href")
-            if not full_url or not self.should_process(full_url):
+            if not full_url:
                 continue
+
             publish_time = None
             date_node = card.select_one("[data-date]")
             if date_node:
                 publish_time = self._parse_datetime(date_node.get("data-date"), languages=["da", "en"])
-            if publish_time and publish_time < self.cutoff_date:
-                continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
-                continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html), publish_time=publish_time), None)
-            if item:
-                yield item
 
-    def parse_detail(self, response, publish_time=None):
+            if not self.should_process(full_url, publish_time):
+                continue
+
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_detail,
+                meta={"publish_time": publish_time},
+            )
+
+    def parse_detail(self, response):
+        publish_time = response.meta.get("publish_time")
+
         title = self._clean_text(
             response.xpath("//meta[@property='og:title']/@content").get()
             or response.css("h1::text").get()
@@ -87,14 +94,15 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
         if not title:
             return
 
-        final_publish_time = publish_time or self._parse_datetime(
-            self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
-            languages=["da", "en"],
-        )
-        if final_publish_time and final_publish_time < self.cutoff_date:
+        if not publish_time:
+            publish_time = self._parse_datetime(
+                self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
+                languages=["da", "en"],
+            )
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response)
+        content = self._do_extract_content(response)
         if not content:
             return
 
@@ -102,7 +110,7 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             response=response,
             title=title,
             content=content,
-            publish_time=final_publish_time,
+            publish_time=publish_time,
             author="Finanstilsynet",
             language="da",
             section="financial_regulation",
@@ -117,7 +125,7 @@ class DenmarkFinanstilsynetSpider(DenmarkBaseSpider):
             return None
         return json.loads(html.unescape(match.group(1)))
 
-    def _extract_content(self, response):
+    def _do_extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
         candidates = soup.select(".rich-text")
         root = max(candidates, key=lambda node: len(node.get_text(" ", strip=True)), default=None)

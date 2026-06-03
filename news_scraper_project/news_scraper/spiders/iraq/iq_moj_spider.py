@@ -90,7 +90,7 @@ class IqMojSpider(SmartSpider):
         item = self.auto_parse_item(
             response,
             title_xpath="//h1[contains(@class, 'article-title')]/text()",
-            publish_time_xpath="//span[contains(@class, 'meta-date')]/text()"
+            publish_time_xpath="normalize-space(//span[contains(@class, 'meta-date')])"
         )
 
         # Refine publish_time: prefer the hint from the listing page, then fall
@@ -100,8 +100,9 @@ class IqMojSpider(SmartSpider):
             item['publish_time'] = publish_time_hint
 
         if not item.get('publish_time'):
-            date_raw = response.css('span.meta-date::text').get('').strip()
+            date_raw = response.xpath("normalize-space(//span[contains(@class, 'meta-date')])").get()
             if date_raw:
+                date_raw = date_raw.strip()
                 try:
                     # Normalise Arabic AM/PM before parsing
                     date_norm = date_raw.replace('صباحًا', 'AM').replace('مساءً', 'PM')

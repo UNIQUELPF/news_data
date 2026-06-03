@@ -79,11 +79,15 @@ class TjKhovarSpider(SmartSpider):
         dt_obj = self._parse_date(raw_date)
         pub_time = self.parse_to_utc(dt_obj) if dt_obj else None
 
-        if pub_time and not self.should_process(response.url, pub_time):
+        pub_time = pub_time or response.meta.get("publish_time_hint")
+        if not pub_time:
+            return
+        if not self.should_process(response.url, pub_time):
             self._stop_pagination = True
             return
 
         item = self.auto_parse_item(response)
+        item['publish_time'] = pub_time
 
         # Always do bs4 full-text extraction from .shortcode-content
         all_text_nodes = response.css('.shortcode-content *::text').getall()
@@ -97,6 +101,9 @@ class TjKhovarSpider(SmartSpider):
         item['author'] = author
         item['section'] = 'Economic'
         item['title'] = title
+
+        if not item.get('content_plain') or len(item.get('content_plain', '')) < 50:
+            return
 
         yield item
 

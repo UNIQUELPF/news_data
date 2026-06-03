@@ -13,15 +13,15 @@ class BrazilIBGESpider(SmartSpider):
     allowed_domains = ["agenciadenoticias.ibge.gov.br"]
     dateparser_settings = {"DATE_ORDER": "DMY"}
 
-    use_curl_cffi = False
-    playwright = True
+    use_curl_cffi = True
+    playwright = False
     custom_settings = {
         "USER_AGENT": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
         )
     }
-    fallback_content_selector = "article.item-page"
+    fallback_content_selector = ".texto--single"
 
     async def start(self):
         url = "https://agenciadenoticias.ibge.gov.br/agencia-noticias.html?start=0"
@@ -54,10 +54,14 @@ class BrazilIBGESpider(SmartSpider):
             publish_time = self.parse_to_utc(parsed_date)
             if self.should_process(url, publish_time):
                 has_valid_item_in_window = True
-                meta_dict = {"publish_time_hint": publish_time}
+                title = item.css("a::text").get()
+                meta_dict = {
+                    "publish_time_hint": publish_time,
+                    "title_hint": title.strip() if title else None,
+                }
                 if getattr(self, "playwright", False):
                     meta_dict["playwright"] = True
-                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict)
+                yield scrapy.Request(url, callback=self.parse_detail, meta=meta_dict, dont_filter=True)
 
         if has_valid_item_in_window:
             start_index = response.meta.get("start_index", 0) + 20

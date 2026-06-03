@@ -75,8 +75,7 @@ class IndiaCnbctv18Spider(SmartSpider):
             publish_time = None
             if created_at:
                 try:
-                    # SmartSpider.parse_to_utc handles string parsing + tz conversion
-                    publish_time = self.parse_to_utc(created_at)
+                    publish_time = self.parse_date(created_at)
                 except:
                     pass
 
@@ -85,7 +84,8 @@ class IndiaCnbctv18Spider(SmartSpider):
                 yield scrapy.Request(
                     url, 
                     callback=self.parse_detail, 
-                    meta={'publish_time_hint': publish_time}
+                    meta={'publish_time_hint': publish_time},
+                    dont_filter=True
                 )
 
         # Pagination

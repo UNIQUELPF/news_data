@@ -3,7 +3,11 @@ import scrapy
 from datetime import datetime
 from bs4 import BeautifulSoup
 from news_scraper.spiders.smart_spider import SmartSpider
-from scrapy_playwright.page import PageMethod
+
+try:
+    from scrapy_playwright.page import PageMethod
+except ImportError:
+    PageMethod = None
 
 
 class USAReutersSpider(SmartSpider):
@@ -33,18 +37,20 @@ class USAReutersSpider(SmartSpider):
 
     async def start(self):
         for section, url in self.section_urls.items():
-            yield scrapy.Request(
-                url,
-                callback=self.parse_section_page,
-                meta={
-                    'section_hint': section,
+            meta = {'section_hint': section}
+            if PageMethod:
+                meta.update({
                     'playwright': True,
                     'playwright_page_methods': [
                         PageMethod('wait_for_load_state', 'domcontentloaded'),
                         PageMethod('wait_for_timeout', 2000),
                     ],
-                },
-            dont_filter=True,
+                })
+            yield scrapy.Request(
+                url,
+                callback=self.parse_section_page,
+                meta=meta,
+                dont_filter=True,
             )
 
     def parse_section_page(self, response):
@@ -85,14 +91,15 @@ class USAReutersSpider(SmartSpider):
                 continue
 
             has_valid_item_in_window = True
-            meta = {
-                'section_hint': section,
-                'playwright': True,
-                'playwright_page_methods': [
-                    PageMethod('wait_for_load_state', 'domcontentloaded'),
-                    PageMethod('wait_for_timeout', 1500),
-                ],
-            }
+            meta = {'section_hint': section}
+            if PageMethod:
+                meta.update({
+                    'playwright': True,
+                    'playwright_page_methods': [
+                        PageMethod('wait_for_load_state', 'domcontentloaded'),
+                        PageMethod('wait_for_timeout', 1500),
+                    ],
+                })
             if publish_time:
                 meta['publish_time_hint'] = publish_time
             yield scrapy.Request(full_url, callback=self.parse_detail, meta=meta)

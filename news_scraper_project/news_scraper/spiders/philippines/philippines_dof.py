@@ -82,6 +82,8 @@ class PhilippinesDofSpider(PhilippinesBaseSpider):
         )
         if publish_time and publish_time < self.cutoff_date:
             return
+        if not publish_time:
+            return
 
         content = self._extract_content(response, title)
         if not content:

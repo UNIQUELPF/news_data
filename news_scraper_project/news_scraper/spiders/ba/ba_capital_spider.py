@@ -18,7 +18,7 @@ class BaCapitalSpider(SmartSpider):
         "AUTOTHROTTLE_ENABLED": True,
     }
 
-    use_curl_cffi = True
+    use_curl_cffi = False
 
     async def start(self):
         """Initial requests entry point."""
@@ -73,8 +73,7 @@ class BaCapitalSpider(SmartSpider):
                 link, 
                 callback=self.parse_detail,
                 meta={
-                    "publish_time_hint": publish_time, 
-                    "playwright": True
+                    "publish_time_hint": publish_time,
                 },
                 dont_filter=self.full_scan
             )

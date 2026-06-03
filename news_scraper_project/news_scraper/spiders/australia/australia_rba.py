@@ -26,9 +26,9 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        for href in response.css("a::attr(href)").getall():
+        for href in response.css('a[itemprop="url"]::attr(href)').getall():
             full_url = response.urljoin(href)
-            if not self.should_process(full_url):
+            if not self.full_scan and self.is_already_scraped(full_url):
                 continue
             if "/media-releases/" not in full_url and "/speeches/" not in full_url:
                 continue
@@ -36,7 +36,7 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
                 continue
             if not self._should_fetch_url(full_url):
                 continue
-            yield scrapy.Request(full_url, callback=self.parse_detail)
+            yield scrapy.Request(full_url, callback=self.parse_detail, dont_filter=self.full_scan)
 
     def parse_detail(self, response):
         title = self._clean_text(
@@ -48,11 +48,13 @@ class AustraliaRbaSpider(AustraliaBaseSpider):
 
         publish_time = self._parse_datetime(
             response.xpath("//meta[@property='article:published_time']/@content").get()
+            or response.xpath("//meta[@name='dc.date']/@content").get()
+            or response.xpath("//meta[@name='dcterms.created']/@content").get()
             or response.css("time::attr(datetime), time::text").get()
             or response.css(".date::text").get(),
             languages=["en"],
         )
-        if publish_time and publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
         content = self._extract_content(response, title)

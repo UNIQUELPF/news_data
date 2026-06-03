@@ -14,19 +14,22 @@ class SwissinfoSpider(SmartSpider):
     use_curl_cffi = False
     strict_date_required = True
     fallback_content_selector = ".article-main"
+    custom_settings = {
+        'DOWNLOADER_MIDDLEWARES': {
+            'news_scraper.middlewares.CurlCffiMiddleware': None,
+        },
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http11.HTTP11DownloadHandler',
+        },
+        'DEFAULT_REQUEST_HEADERS': {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.swissinfo.ch/eng/latest-news/',
+        },
+    }
 
     def _playwright_meta(self):
-        return {
-            'playwright': True,
-            'playwright_include_body': True,
-            'playwright_page_init_callback': lambda page, request: page.route(
-                "**/*",
-                lambda route: route.abort()
-                if route.request.resource_type in ["image", "media", "font", "stylesheet"]
-                else route.continue_()
-            ),
-            'playwright_page_goto_params': {"wait_until": "domcontentloaded", "timeout": 60000}
-        }
+        return {}
 
     async def start(self):
         yield scrapy.Request(
@@ -92,10 +95,16 @@ class SwissinfoSpider(SmartSpider):
             title_xpath="//h1/text()",
             publish_time_xpath="//time/@datetime"
         )
+        item['publish_time'] = response.meta.get('publish_time_hint') or item.get('publish_time')
+        if not item.get('publish_time'):
+            return
 
         author = response.css('.author::text').get()
         item['author'] = author.strip() if author else 'swissinfo.ch'
         item['section'] = 'Latest News'
+
+        if not self.should_process(response.url, item.get('publish_time')):
+            return
 
         if item.get('title') or (item.get('content_plain') and len(item.get('content_plain', '')) > 5):
             yield item

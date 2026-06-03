@@ -30,7 +30,7 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
         except Exception:
             return
 
-        has_valid_item_in_window = False
+        rows = []
         for row in payload.get("data", []):
             attrs = row.get("attributes", {})
             title = self._clean_text(attrs.get("title"))
@@ -40,6 +40,12 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 attrs.get("publishedAt") or attrs.get("updatedAt") or attrs.get("createdAt"),
                 languages=["en", "pt"],
             )
+            if not publish_time:
+                continue
+            rows.append((publish_time, title, attrs))
+
+        has_valid_item_in_window = False
+        for publish_time, title, attrs in sorted(rows, key=lambda item: item[0], reverse=True):
             if not self.should_process(response.url, publish_time):
                 self._stop_pagination = True
                 break
@@ -49,7 +55,7 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 continue
             for href in links:
                 full_url = href if href.startswith("http") else f"{self.base_domain}{href}"
-                if not self.should_process(full_url):
+                if not self.should_process(full_url, publish_time):
                     continue
                 has_valid_item_in_window = True
                 yield scrapy.Request(
@@ -59,17 +65,22 @@ class TimorLesteFinanceGovSpider(TimorLesteBaseSpider):
                 )
 
     def parse_pdf(self, response, title, publish_time):
+        if not publish_time:
+            return
         content = self._extract_pdf_text(response.body, max_pages=6)
-        if not content:
-            content = title
+        if not content or len(content) < 50:
+            return
         yield {
             "title": title,
-            "content": content,
+            "content_cleaned": content,
+            "content_markdown": content,
+            "content_plain": content,
+            "raw_html": "",
             "publish_time": publish_time,
             "url": response.url,
-            "source_country": "Timor-Leste",
-            "source_name": "Ministry of Finance Timor-Leste",
             "language": "en",
             "author": "Ministry of Finance Timor-Leste",
             "section": "government",
+            "country_code": self.country_code,
+            "country": self.country,
         }

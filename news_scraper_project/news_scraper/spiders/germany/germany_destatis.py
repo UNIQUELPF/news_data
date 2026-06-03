@@ -18,33 +18,35 @@ class GermanyDestatisSpider(GermanyBaseSpider):
     allowed_domains = ["destatis.de", "www.destatis.de"]
     start_urls = ["https://www.destatis.de/EN/Press/press_node.html"]
 
+    use_curl_cffi = True
+    strict_date_required = False
+
     async def start(self):
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse_listing, dont_filter=True)
 
     def parse_listing(self, response):
-        html = self._fetch_html(self.start_urls[0])
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(response.text, "html.parser")
+        seen = set()
         for card in soup.select(".c-result"):
             link = card.select_one(".c-result__heading a[href]")
             if not link:
                 continue
             full_url = response.urljoin(link.get("href").split("?")[0])
-            if not self.should_process(full_url):
+            if full_url in seen:
                 continue
+            seen.add(full_url)
             date_text = self._clean_text(card.select_one(".c-result__date").get_text(" ", strip=True) if card.select_one(".c-result__date") else "")
             publish_time = self._parse_datetime(date_text, languages=["en"])
-            if publish_time and publish_time < self.cutoff_date:
+            if not self.should_process(full_url, publish_time):
                 continue
-            try:
-                detail_html = self._fetch_html(full_url)
-            except Exception:
-                continue
-            item = next(self.parse_detail(self._make_response(full_url, detail_html), publish_time=publish_time), None)
-            if item:
-                yield item
+            yield scrapy.Request(
+                full_url,
+                callback=self.parse_detail,
+                meta={"publish_time": publish_time}
+            )
 
-    def parse_detail(self, response, publish_time=None):
+    def parse_detail(self, response):
         title = self._clean_text(
             response.xpath("//meta[@property='og:title']/@content").get()
             or response.css("h1::text").get()
@@ -53,14 +55,14 @@ class GermanyDestatisSpider(GermanyBaseSpider):
         if not title:
             return
 
-        final_publish_time = publish_time or self._parse_datetime(
+        publish_time = response.meta.get("publish_time") or self._parse_datetime(
             self._clean_text(" ".join(response.css("body ::text").getall()[:120])),
             languages=["en"],
         )
-        if final_publish_time and final_publish_time < self.cutoff_date:
+        if not self.should_process(response.url, publish_time):
             return
 
-        content = self._extract_content(response)
+        content = self._do_extract_content(response)
         if not content:
             return
 
@@ -68,13 +70,13 @@ class GermanyDestatisSpider(GermanyBaseSpider):
             response=response,
             title=title,
             content=content,
-            publish_time=final_publish_time,
+            publish_time=publish_time,
             author="Destatis",
             language="en",
             section="statistics",
         )
 
-    def _extract_content(self, response):
+    def _do_extract_content(self, response):
         soup = BeautifulSoup(response.text, "html.parser")
         root = soup.select_one("main") or soup.select_one(".main")
         if not root:

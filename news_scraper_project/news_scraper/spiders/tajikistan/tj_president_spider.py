@@ -88,13 +88,19 @@ class TjPresidentSpider(SmartSpider):
 
         title = detail.get('title', '').strip()
         pub_time = response.meta.get('pub_time')
+        if not pub_time:
+            return
 
         content = detail.get('text', '').strip()
+        if not content or len(content) < 50:
+            return
 
         item = {
             'url': f"https://www.president.tj/event/news/{response.meta.get('news_id')}",
             'title': title,
-            'content': content,
+            'content_cleaned': content,
+            'content_markdown': content,
+            'content_plain': content,
             'raw_html': response.text,
             'publish_time': pub_time,
             'author': 'President.tj',

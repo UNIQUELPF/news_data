@@ -79,7 +79,9 @@ class TrTbmmSpider(SmartSpider):
             except Exception:
                 self.logger.warning(f"Failed to parse date string: {pub_time_str}")
 
-        pub_time_utc = self.parse_to_utc(pub_time) if pub_time else self.parse_to_utc(datetime.now())
+        if not pub_time:
+            return
+        pub_time_utc = self.parse_to_utc(pub_time)
 
         self.logger.info(f"Checking article: {title} | Date: {pub_time_utc} | URL: {response.url}")
 
