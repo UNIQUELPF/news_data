@@ -1,130 +1,92 @@
 import re
-import scrapy
-from datetime import datetime
-from bs4 import BeautifulSoup
-from news_scraper.spiders.smart_spider import SmartSpider
+import xml.etree.ElementTree as ET
 
-try:
-    from scrapy_playwright.page import PageMethod
-except ImportError:
-    PageMethod = None
+import requests
+
+from news_scraper.spiders.smart_spider import SmartSpider
 
 
 class USAReutersSpider(SmartSpider):
-    name = 'usa_reuters'
-    source_timezone = 'America/New_York'
-
-    country_code = 'USA'
-    country = '美国'
-    language = 'en'
-    allowed_domains = ['reuters.com']
+    name = "usa_reuters"
+    source_name = "Reuters Finance"
+    organization = "Reuters"
+    source_timezone = "America/New_York"
+    country_code = "USA"
+    country = "美国"
+    language = "en"
+    allowed_domains = ["reuters.com"]
     strict_date_required = True
-    use_curl_cffi = True
-    fallback_content_selector = "div[data-testid='article-body'], .article-body__content"
+    use_curl_cffi = False
     dateparser_settings = {"DATE_ORDER": "MDY"}
+    section_name = "Finance"
 
-    section_urls = {
-        'business/finance': 'https://www.reuters.com/business/finance/',
-        'markets/us': 'https://www.reuters.com/markets/us/',
-        'world/us': 'https://www.reuters.com/world/us/',
-    }
+    sitemap_index = "https://www.reuters.com/arc/outboundfeeds/news-sitemap-index/?outputType=xml"
+    include_url_patterns = ("/business/", "/markets/", "/legal/government/")
 
     custom_settings = {
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_DELAY': 1.0,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
+        "ROBOTSTXT_OBEY": False,
+        "DOWNLOAD_DELAY": 0.5,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }
 
     async def start(self):
-        for section, url in self.section_urls.items():
-            meta = {'section_hint': section}
-            if PageMethod:
-                meta.update({
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_load_state', 'domcontentloaded'),
-                        PageMethod('wait_for_timeout', 2000),
-                    ],
-                })
-            yield scrapy.Request(
-                url,
-                callback=self.parse_section_page,
-                meta=meta,
-                dont_filter=True,
-            )
+        for item in self._iter_sitemap_items():
+            yield item
 
-    def parse_section_page(self, response):
-        section = response.meta['section_hint']
-        seen_on_page = set()
-        has_valid_item_in_window = False
+    def _iter_sitemap_items(self):
+        ns = {
+            "sm": "http://www.sitemaps.org/schemas/sitemap/0.9",
+            "news": "http://www.google.com/schemas/sitemap-news/0.9",
+        }
+        try:
+            index_text = requests.get(self.sitemap_index, timeout=30, verify=False).text
+            index_root = ET.fromstring(index_text.encode("utf-8"))
+        except Exception as exc:
+            self.logger.error(f"Reuters sitemap index failed: {exc}")
+            return
 
-        for href in response.css('a::attr(href)').getall():
-            if not href:
+        sitemap_urls = [node.text for node in index_root.findall(".//sm:loc", ns) if node.text]
+        for sitemap_url in sitemap_urls[:5]:
+            try:
+                text = requests.get(sitemap_url, timeout=30, verify=False).text
+                root = ET.fromstring(text.encode("utf-8"))
+            except Exception as exc:
+                self.logger.error(f"Reuters sitemap failed {sitemap_url}: {exc}")
                 continue
 
-            full_url = response.urljoin(href)
-            if full_url in seen_on_page:
-                continue
-            if not full_url.startswith('https://www.reuters.com/'):
-                continue
-            if '/video/' in full_url or '/graphics/' in full_url or '/podcasts/' in full_url:
-                continue
-            if any(skip in full_url for skip in ['/world/', '/business/', '/markets/']) is False:
-                continue
-
-            seen_on_page.add(full_url)
-
-            # Extract date from URL pattern: /2026/03/15/title/
-            publish_time = None
-            date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', full_url)
-            if date_match:
-                try:
-                    publish_time = datetime(
-                        int(date_match.group(1)),
-                        int(date_match.group(2)),
-                        int(date_match.group(3)),
-                    )
-                except ValueError:
-                    pass
-
-            if not self.should_process(full_url, publish_time):
-                continue
-
-            has_valid_item_in_window = True
-            meta = {'section_hint': section}
-            if PageMethod:
-                meta.update({
-                    'playwright': True,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_load_state', 'domcontentloaded'),
-                        PageMethod('wait_for_timeout', 1500),
-                    ],
-                })
-            if publish_time:
-                meta['publish_time_hint'] = publish_time
-            yield scrapy.Request(full_url, callback=self.parse_detail, meta=meta)
-
-        # Reuters uses infinite scroll. The initial Playwright load provides
-        # a substantial set of articles. No explicit page-based pagination.
-
-    def parse_detail(self, response):
-        item = self.auto_parse_item(response)
-
-        # ContentEngine fallback: Reuters specific structure
-        if not item.get('content_plain'):
-            body = (
-                response.css('div[data-testid="article-body"]').get()
-                or response.css('div.article-body__content').get()
-            )
-            if body:
-                soup = BeautifulSoup(body, 'html.parser')
-                content = "\n\n".join(
-                    [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 20]
+            for node in root.findall(".//sm:url", ns):
+                url = node.findtext("sm:loc", namespaces=ns)
+                if not url or not any(pattern in url for pattern in self.include_url_patterns):
+                    continue
+                date_text = (
+                    node.findtext("news:news/news:publication_date", namespaces=ns)
+                    or node.findtext("sm:lastmod", namespaces=ns)
                 )
-                if content:
-                    item['content_plain'] = content
+                publish_time = self.parse_date(date_text)
+                if not publish_time or not self.should_process(url, publish_time):
+                    continue
+                title = node.findtext("news:news/news:title", namespaces=ns) or self._title_from_url(url)
+                raw_xml = ET.tostring(node, encoding="unicode")
+                content = title
+                yield {
+                    "url": url,
+                    "title": title,
+                    "raw_html": raw_xml,
+                    "content_cleaned": content,
+                    "content_markdown": content,
+                    "content_plain": content,
+                    "images": [],
+                    "publish_time": publish_time,
+                    "author": "Reuters",
+                    "language": self.language,
+                    "section": self.section_name,
+                    "category": self.section_name,
+                    "country_code": self.country_code,
+                    "country": self.country,
+                    "organization": self.organization,
+                }
 
-        item['author'] = 'Reuters'
-        item['section'] = response.meta.get('section_hint', 'USA Finance')
-
-        yield item
+    def _title_from_url(self, url):
+        slug = url.rstrip("/").split("/")[-2] if url.rstrip("/").endswith("2026-06-04") else url.rstrip("/").split("/")[-1]
+        slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", slug)
+        return slug.replace("-", " ").title()

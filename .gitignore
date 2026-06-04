@@ -50,4 +50,5 @@ docker-compose.override.yml
 # Spider maintenance local artifacts
 *checklist*.md
 *report*.md
+usa_2026-06-04_ingest_success.md
 skills/
