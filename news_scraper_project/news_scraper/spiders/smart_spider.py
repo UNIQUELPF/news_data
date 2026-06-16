@@ -6,6 +6,11 @@ import dateparser
 from datetime import datetime, timedelta
 from news_scraper.utils import _get_db_connection
 from pipeline.content_engine import ContentEngine
+from news_scraper.article_filter import (
+    is_article_body_item,
+    is_probable_article_url,
+    is_probable_non_article_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,7 @@ class SmartSpider(scrapy.Spider):
     # Defaults to True to enforce the skill guideline: no date = no crawl, no pagination.
     # Set to False only for spiders where list-page date extraction is genuinely impossible.
     strict_date_required = True
+    require_article_body = True
 
     def __init__(self, full_scan=False, window_days=None, earliest_date=None, *args, **kwargs):
         super(SmartSpider, self).__init__(*args, **kwargs)
@@ -199,6 +205,9 @@ class SmartSpider(scrapy.Spider):
         - Incremental: Processes new URLs within the sliding window (cutoff_date).
         """
         # 1. Absolute floor: Never process anything older than our project start date
+        if self.require_article_body and is_probable_non_article_url(url):
+            self.logger.debug(f"Filtered out (non-article URL): {url}")
+            return False
         if publish_time and publish_time < self.earliest_date:
             self.logger.debug(f"Filtered out (too old): {url} (Date: {publish_time} < Floor: {self.earliest_date})")
             return False
@@ -223,6 +232,14 @@ class SmartSpider(scrapy.Spider):
             return False
             
         return True
+
+    def should_follow_article_url(self, url: str) -> bool:
+        """Cheap pre-request filter for generated spiders and shared bases."""
+        if self.require_article_body and is_probable_non_article_url(url):
+            return False
+        if getattr(self, "include_url_patterns", None):
+            return any(pattern in url for pattern in self.include_url_patterns)
+        return is_probable_article_url(url)
 
     def auto_parse_item(self, response, title_xpath=None, publish_time_xpath=None):
         """
@@ -334,6 +351,14 @@ class SmartSpider(scrapy.Spider):
         item['images'] = clean_images
 
         return item
+
+    def is_valid_article_item(self, item) -> bool:
+        if not self.require_article_body:
+            return True
+        valid = is_article_body_item(item, self)
+        if not valid:
+            self.logger.debug(f"Filtered out (not article body): {item.get('url')}")
+        return valid
 
     def extract_content(self, response):
         """

@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from itemadapter import ItemAdapter
 import psycopg2
 from pipeline.domestic_taxonomy import infer_domestic_location, split_organization_and_company
+from news_scraper.article_filter import is_article_body_item
 
 
 class SpiderMetadataPipeline:
@@ -115,6 +116,15 @@ class DateHealthGuardPipeline:
             self.connection.rollback()
 
 
+class ArticleBodyGuardPipeline:
+    """Drop list, navigation, policy, and other non-article pages before DB write."""
+
+    def process_item(self, item, spider):
+        if getattr(spider, "require_article_body", True) and not is_article_body_item(item, spider):
+            raise DropItem(f"Non-article body rejected: {item.get('url')}")
+        return item
+
+
 class PostgresPipeline:
     def __init__(self, crawler=None):
         self.crawler = crawler
@@ -169,6 +179,15 @@ class PostgresPipeline:
             # Last resort log using print or just ignore if we can't find a logger
             return item
 
+        if (
+            not self.connection
+            or self.connection.closed
+            or not self.cursor
+            or self.cursor.closed
+        ):
+            spider.logger.warning("Postgres pipeline connection already closed; skipping DB save")
+            return item
+
         try:
             normalized = self._normalize_item(item, spider)
             if not normalized["url"]:
@@ -185,7 +204,8 @@ class PostgresPipeline:
             spider.logger.info(f"Saved to V2 DB: {normalized['url']}")
         except Exception as e:
             spider.logger.error(f"Error saving to V2 DB: {e}")
-            self.connection.rollback()
+            if self.connection and not self.connection.closed:
+                self.connection.rollback()
         return item
 
     def _upsert_source(self, spider, normalized):

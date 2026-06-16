@@ -37,33 +37,35 @@ class CurlCffiMiddleware:
         return cls(crawler)
 
     def process_request(self, request, spider):
-        spider = getattr(self.crawler, "spider", None)
-
         # Skip requests marked for Playwright
         if request.meta.get('playwright'):
             return None
             
         if getattr(spider, 'use_curl_cffi', False):
-            from curl_cffi import requests as curl_requests
-            try:
-                spider.logger.debug(f"Intercepting {request.url} via curl_cffi")
-                
-                # Filter out Scrapy's default headers that conflict with impersonation
-                headers = {}
-                ignore_headers = {'user-agent', 'accept', 'accept-language', 'accept-encoding'}
-                for k, v in request.headers.items():
-                    k_str = k.decode('utf-8').lower()
-                    if k_str not in ignore_headers:
-                        headers[k.decode('utf-8')] = v[0].decode('utf-8')
-                        
-                verify = getattr(spider, "curl_cffi_verify", False)
-                response = curl_requests.get(
+            from twisted.internet.threads import deferToThread
+            
+            headers = {}
+            ignore_headers = {'user-agent', 'accept', 'accept-language', 'accept-encoding'}
+            for k, v in request.headers.items():
+                k_str = k.decode('utf-8').lower()
+                if k_str not in ignore_headers:
+                    headers[k.decode('utf-8')] = v[0].decode('utf-8')
+                    
+            verify = getattr(spider, "curl_cffi_verify", False)
+            impersonate = getattr(spider, "curl_cffi_impersonate", "chrome124")
+            
+            def _fetch():
+                from curl_cffi import requests as curl_requests
+                spider.logger.debug(f"Intercepting {request.url} via curl_cffi (in thread)")
+                return curl_requests.get(
                     request.url,
-                    impersonate='chrome120',
+                    impersonate=impersonate,
                     timeout=30,
                     headers=headers,
                     verify=verify,
                 )
+                
+            def _handle_result(response):
                 spider.logger.debug(f"CurlCffi: Successfully fetched {request.url} (Status: {response.status_code})")
                 return HtmlResponse(
                     url=request.url,
@@ -72,6 +74,14 @@ class CurlCffiMiddleware:
                     encoding='utf-8',
                     request=request
                 )
-            except Exception as e:
-                spider.logger.error(f"CurlCffi error on {request.url}: {e}")
+                
+            def _handle_error(failure):
+                spider.logger.error(f"CurlCffi error on {request.url}: {failure.value}")
+                return None
+
+            d = deferToThread(_fetch)
+            d.addCallback(_handle_result)
+            d.addErrback(_handle_error)
+            return d
+            
         return None

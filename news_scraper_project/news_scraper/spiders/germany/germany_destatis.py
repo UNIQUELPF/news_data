@@ -16,7 +16,7 @@ class GermanyDestatisSpider(GermanyBaseSpider):
 
     country = '德国'
     allowed_domains = ["destatis.de", "www.destatis.de"]
-    start_urls = ["https://www.destatis.de/EN/Press/press_node.html"]
+    start_urls = ["https://www.destatis.de/EN/Press/press_node_2.html"]
 
     use_curl_cffi = True
     strict_date_required = False
@@ -93,4 +93,3 @@ class GermanyDestatisSpider(GermanyBaseSpider):
             if text not in parts:
                 parts.append(text)
         return "\n\n".join(parts)
-

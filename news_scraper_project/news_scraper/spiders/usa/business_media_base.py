@@ -128,6 +128,8 @@ class USABusinessMediaSpider(SmartSpider):
 
         if not item.get("content_plain") or len(item["content_plain"]) < 120:
             return
+        if not self.is_valid_article_item(item):
+            return
 
         item["author"] = item.get("author") or self._extract_author(response) or self.organization or self.name
         item["section"] = response.meta.get("section_hint", self.section_name)
@@ -154,6 +156,8 @@ class USABusinessMediaSpider(SmartSpider):
         if any(pattern in url for pattern in self.exclude_url_patterns):
             return False
         if self.include_url_patterns and not any(pattern in url for pattern in self.include_url_patterns):
+            return False
+        if not self.should_follow_article_url(url):
             return False
         return True
 

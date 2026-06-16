@@ -1,6 +1,5 @@
 import io
 import json
-from datetime import datetime
 
 import dateparser
 import requests
@@ -35,7 +34,7 @@ class FranceBaseSpider(SmartSpider):
         }
 
     def _build_item(self, response, title, content, publish_time, author, language, section):
-        normalized_time = self.parse_to_utc(publish_time) if publish_time else datetime.utcnow()
+        normalized_time = self.parse_to_utc(publish_time) if publish_time else None
 
         # Extract images via ContentEngine with og:image fallback
         content_data = self.extract_content(response) or {}
@@ -59,7 +58,7 @@ class FranceBaseSpider(SmartSpider):
             content_cleaned = content
             content_markdown = content
 
-        return {
+        item = {
             "url": response.url,
             "title": title,
             "raw_html": self._response_text(response),
@@ -75,6 +74,7 @@ class FranceBaseSpider(SmartSpider):
             "country_code": self.country_code,
             "country": self.country,
         }
+        return item if self.is_valid_article_item(item) else None
 
     def _response_text(self, response):
         try:

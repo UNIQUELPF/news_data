@@ -32,6 +32,7 @@ POSTGRES_SETTINGS = {
 ITEM_PIPELINES = {
     "news_scraper.pipelines.SpiderMetadataPipeline": 200,
     "news_scraper.pipelines.DateHealthGuardPipeline": 250,
+    "news_scraper.pipelines.ArticleBodyGuardPipeline": 275,
     "news_scraper.pipelines.PostgresPipeline": 300,
 }
 
@@ -63,7 +64,7 @@ DOWNLOAD_HANDLERS = {
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
 # Incremental Crawling Settings
-DEFAULT_START_DATE = "2026-05-25"
+DEFAULT_START_DATE = "2026-01-01"
 INCREMENTAL_WINDOW_DAYS = 7
 
 # --- Scrapy-Redis Distributed Settings ---
@@ -79,4 +80,3 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/1")
 # Mute verbose scrapy-playwright request/response debug logging
 import logging
 logging.getLogger("scrapy-playwright").setLevel(logging.INFO)
-
